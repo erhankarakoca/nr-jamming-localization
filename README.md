@@ -32,23 +32,32 @@ uv sync          # creates .venv/ with the exact versions in uv.lock (downloads 
 uv run pytest    # checks that Sionna + PyTorch work
 ```
 
-## Running on Google Colab (GPU)
+## VS Code
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/erhankarakoca/nr-jamming-localization/blob/main/notebooks/colab_setup.ipynb)
+Open the project folder in VS Code and install the recommended extensions when asked (Python,
+Jupyter, Ruff, Google Colab). After `uv sync`, VS Code picks up `.venv` by itself. Tests appear
+in the Testing panel, and files are formatted with Ruff on save.
 
-Open [`notebooks/colab_setup.ipynb`](notebooks/colab_setup.ipynb) in Colab and run it at the start
-of each session. It clones or updates the repo, installs it into Colab's Python (keeping Colab's
-CUDA build of PyTorch, without uv), and stores generated data and results on Google Drive under
-`MyDrive/nr-jamming-localization/`. Sionna uses the GPU automatically when one is present.
+## Running on a Colab GPU
 
-One-time setup (details in the notebook):
+Use [`notebooks/colab_setup.ipynb`](notebooks/colab_setup.ipynb) at the start of each Colab
+session. It clones or updates the repo on the Colab machine and installs it into Colab's Python,
+keeping Colab's CUDA build of PyTorch (no uv there). Sionna uses the GPU automatically.
 
-1. The repo is private, so the first time you open it, Colab asks you to authorize GitHub access.
-   Allow private repositories.
-2. Create a fine-grained GitHub token limited to this repo and store it as the Colab secret `GITHUB_TOKEN`.
+- **From VS Code (Google Colab extension):** open the notebook, choose *Select Kernel → Colab →
+  New Colab Server* and a GPU, then run the cells. Colab Secrets and Google Drive don't work
+  through the extension yet ([googlecolab/colab-vscode#215](https://github.com/googlecolab/colab-vscode/issues/215)),
+  so the notebook asks for your GitHub token and keeps files on the Colab machine. Download
+  results before the session ends.
+- **From the browser:**
+  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/erhankarakoca/nr-jamming-localization/blob/main/notebooks/colab_setup.ipynb)
+  Set `BROWSER_COLAB = True` in the first cell to read the token from the Colab secret
+  `GITHUB_TOKEN` and save data and results to Google Drive. The first time, Colab asks to access
+  GitHub; allow private repositories.
 
-Recommended split: write code locally and push, and use Colab for heavy jobs (dataset
-generation, training).
+Either way you need a fine-grained GitHub token limited to this repo (steps in the notebook).
+Recommended split: write code locally and push, and use Colab for heavy jobs (dataset generation,
+training).
 
 ## Day-to-day workflow
 

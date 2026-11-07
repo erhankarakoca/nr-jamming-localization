@@ -22,5 +22,7 @@ results/*
 
 # Editors / OS
 .DS_Store
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
