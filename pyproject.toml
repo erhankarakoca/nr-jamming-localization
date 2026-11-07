@@ -1,0 +1,35 @@
+[project]
+name = "nr-jamming-localization"
+version = "0.1.0"
+description = "Receiver-informed detection and localization of resource-selective jamming in the 5G NR uplink (CMPE 581 project)"
+readme = "README.md"
+authors = [{ name = "Erhan Karakoca" }]
+# Lower bounds are kept loose on purpose so Colab's preinstalled (CUDA) torch, numpy and
+# matplotlib are reused instead of reinstalled. Exact local versions are pinned in uv.lock.
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10",
+    "numpy>=2.2.6",
+    "sionna-no-rt>=2.2,<3",
+    "torch>=2.9.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jamloc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+]
