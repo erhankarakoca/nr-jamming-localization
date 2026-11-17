@@ -284,9 +284,7 @@ def plot(rows, channel, receivers=MAIN_RECEIVERS, shade=True):
         )
     axes[0].set_ylabel(f"BLER (TDL-{channel}, SNR {rows[0]['snr_db']:g} dB)")
     handles = axes[0].get_legend_handles_labels()[0] + [zero_error_handle()]
-    fig.legend(
-        handles=handles, loc="outside lower center", ncols=min(len(handles), 4), frameon=False
-    )
+    fig.legend(handles=handles, loc="outside lower center", ncols=3, frameon=False)
     benign = {r["receiver"]: r["bler"] for r in rows if r["attack"] == "none"}
     fig.suptitle(
         f"UE on {ALLOC[1]} PRBs, jammer on {JAM_SIZE} of them; bands: 95% confidence.\n"
