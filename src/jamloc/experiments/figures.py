@@ -11,19 +11,29 @@ Output: ``results/figures/{name}.pdf`` and ``.png``, ``captions.json`` and ``ind
 """
 
 import argparse
+import csv
+import html
 import json
 
 import numpy as np
 import torch
+from matplotlib.colors import ListedColormap
 from matplotlib.patches import FancyBboxPatch, Patch, Rectangle
+from sionna.phy import config
 
+from jamloc.baselines import evm_scores, residual_scores
 from jamloc.config import SimConfig
-from jamloc.features import delay_subspace, dmrs_ls, residual_map
+from jamloc.dataset import load
+from jamloc.evaluate import FA
+from jamloc.features import FEATURE_NAMES, delay_subspace, dmrs_ls, residual_map
 from jamloc.jammer import ATTACKS, cell_mask
 from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
-from jamloc.paths import results_dir
+from jamloc.metrics import threshold_at_fa
+from jamloc.model import VARIANTS, select_inputs
+from jamloc.paths import data_dir, results_dir
 from jamloc.plotting import new_figure, paper_style, save
 from jamloc.receiver import data_positions
+from jamloc.train import checkpoint_path, load_model
 
 CFG = SimConfig()
 ALLOC = (6, 12)  # example allocation used by the explanatory figures: PRBs 6-17
@@ -363,16 +373,404 @@ def constellations():
     return fig, caption
 
 
+# --- Figures that need datasets or trained models ----------------------------------------------
+
+
+class MissingInput(Exception):
+    """A figure's inputs do not exist yet; the message says how to produce them."""
+
+
+def _load_split(split: str) -> dict:
+    if not (data_dir() / f"{split}.npz").is_file():
+        raise MissingInput(f"needs the {split} split: python -m jamloc.dataset --split {split}")
+    return load(split)
+
+
+def _require_models(variants, seed: int = 0):
+    for variant in variants:
+        if not checkpoint_path(variant, seed).is_file():
+            raise MissingInput("needs trained models: python -m jamloc.train --variant all")
+
+
+# --- 5. Which feature separates which attack -------------------------------------------------
+
+
+def feature_distributions(split: str = "test"):
+    d = _load_split(split)
+    f, labels = d["features"], d["labels"].astype(bool)
+    idx = {name: i for i, name in enumerate(FEATURE_NAMES)}
+    rows = [
+        ("power_db", "alloc_mask", "Power P [dB]"),
+        ("residual_db", "dmrs_mask", "DMRS residual R [dB]"),
+        ("evm_db", "data_mask", "EVM E [dB]"),
+    ]
+    moderate = (d["jsr_db"] >= -6) & (d["jsr_db"] <= 0)
+    jammed_prb = labels.any(axis=2, keepdims=True)  # [N, 24, 1]: the jammer hit this PRB
+    bins = np.linspace(-10, 40, 51)
+    fig, axes = new_figure(7.16, 4.6, nrows=3, ncols=3, sharex=True)
+    medians = {}
+    for col, attack in enumerate(("pilot", "data", "partial")):
+        slots = moderate & (d["attack"] == ATTACKS.index(attack))
+        for row, (feature, mask, label) in enumerate(rows):
+            ax = axes[row, col]
+            defined = f[slots, idx[mask]] > 0  # cells where this feature exists (scheduled)
+            values = f[slots, idx[feature]]
+            hit = np.broadcast_to(jammed_prb[slots], defined.shape)
+            clean_vals, jam_vals = values[defined & ~hit], values[defined & hit]
+            ax.hist(
+                clean_vals,
+                bins=bins,
+                density=True,
+                histtype="stepfilled",
+                alpha=0.35,
+                color=CLEAN_COLOR,
+                label="cells in PRBs the jammer did not touch",
+            )
+            ax.hist(
+                jam_vals,
+                bins=bins,
+                density=True,
+                histtype="step",
+                lw=1.2,
+                color=JAM_COLOR,
+                label="cells in the jammed PRBs",
+            )
+            medians[(attack, feature)] = (np.median(clean_vals), np.median(jam_vals))
+            if row == 0:
+                ax.set_title(f"{attack} jamming")
+            if col == 0:
+                ax.set_ylabel(label)
+            if row == 2:
+                ax.set_xlabel("feature value [dB]")
+            ax.set_yticks([])
+    handles, labels_ = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels_, loc="outside lower center", ncols=2, frameon=False)
+
+    def gap(attack, feature):
+        clean, jam = medians[(attack, feature)]
+        return jam - clean
+
+    caption = (
+        "Distributions of the three features over the scheduled cells of the test set (JSR -6 to "
+        "0 dB), split into cells of PRBs the jammer hit (orange) and cells of untouched PRBs "
+        "(blue). Rows: power, DMRS residual (DMRS symbol only), EVM (data symbols only); columns: "
+        "attack. Where the orange curve moves away from the blue one, that feature can see the "
+        "attack. The residual separates pilot jamming clearly (median shift "
+        f"{gap('pilot', 'residual_db'):.0f} dB) but does not move under data jamming "
+        f"({gap('data', 'residual_db'):+.0f} dB); EVM moves under data jamming "
+        f"({gap('data', 'evm_db'):.0f} dB) and also under pilot jamming "
+        f"({gap('pilot', 'evm_db'):.0f} dB), although no data cell was jammed there - the "
+        "wrong-symbol effect. Power alone overlaps heavily, because the UE's own fading changes "
+        "it as much as the jammer does. No single feature covers every attack, which is why "
+        "the detector fuses them."
+    )
+    return fig, caption
+
+
+# --- 6. What each detector outputs -----------------------------------------------------------
+
+
+# (attack, JSR) per row: weak pilot jamming shows what the residual adds, strong pilot jamming
+# shows the wrong-symbol effect of EVM, and the last two rows show data and partial-band jamming
+EXAMPLE_ROWS = (("pilot", -12.0), ("pilot", 3.0), ("data", -9.0), ("partial", -9.0))
+
+
+def _candidates(d: dict) -> list[np.ndarray]:
+    """Test slots for each example row: jammer block fully inside a wide allocation."""
+    alloc = d["features"][:, FEATURE_NAMES.index("alloc_mask")].max(axis=2) > 0
+    jammed = d["labels"].any(axis=2)
+    inside = (jammed & alloc).any(axis=1) & ~(jammed & ~alloc).any(axis=1)
+    out = []
+    for attack, jsr in EXAMPLE_ROWS:
+        rows = (d["attack"] == ATTACKS.index(attack)) & (d["jsr_db"] == jsr)
+        cand = np.flatnonzero(rows & inside & (d["alloc_size"] >= 10))
+        if cand.size == 0:  # tiny datasets (tests): relax the conditions
+            cand = np.flatnonzero(rows) if rows.any() else np.flatnonzero(d["attack"] > 0)
+        out.append(cand)
+    return out
+
+
+def _median_slot(cand: np.ndarray, values: np.ndarray) -> int:
+    return int(cand[np.argsort(values, kind="stable")[len(values) // 2]])
+
+
+def detector_outputs(split: str = "test", seed: int = 0):
+    from jamloc.experiments.recovery import val_threshold
+
+    _require_models(("fused", "no_residual", "power"), seed)
+    d, val = _load_split(split), _load_split("val")
+    unets = (("fused", "U-Net P+R+E"), ("no_residual", "U-Net P+E"), ("power", "U-Net power only"))
+    models = {v: load_model(v, seed) for v, _ in unets}
+    thresholds = {v: val_threshold(v, seed) for v, _ in unets}
+
+    def predict(variant, idx):
+        x = select_inputs(torch.from_numpy(d["features"][idx]).to(config.device), variant)
+        with torch.no_grad():
+            return models[variant](x).cpu().numpy() > thresholds[variant]
+
+    evm_thr = threshold_at_fa(evm_scores(val["features"])[val["labels"] == 0], FA)
+    res_thr = threshold_at_fa(residual_scores(val["features"])[val["labels"] == 0], FA)
+
+    def hit_rate(p, idx):
+        lab = d["labels"][idx].astype(bool)
+        return (p & lab).sum(axis=(1, 2)) / np.maximum(lab.sum(axis=(1, 2)), 1)
+
+    # Example slots. Rows 1, 3, 4: the median detection rate of the fused U-Net (a typical slot,
+    # not the best one). Row 2 illustrates the wrong-symbol effect, which only some slots show:
+    # the median among the slots where the EVM threshold flags any unjammed cell.
+    cand = _candidates(d)
+    stats = {}
+    picks = []
+    for row, idx in enumerate(cand):
+        fused_rate = hit_rate(predict("fused", idx), idx)
+        if row == 0:
+            stats["fused"], stats["pe"] = (
+                fused_rate.mean(),
+                hit_rate(predict("no_residual", idx), idx).mean(),
+            )
+        if row == 1:
+            lab = d["labels"][idx].astype(bool)
+            evm_fa = ((evm_scores(d["features"][idx]) > evm_thr) & ~lab).sum(axis=(1, 2))
+            stats["evm_fa"], stats["evm_share"] = evm_fa.mean(), (evm_fa > 0).mean()
+            if (evm_fa > 0).any():
+                picks.append(_median_slot(idx[evm_fa > 0], evm_fa[evm_fa > 0]))
+                continue
+        picks.append(_median_slot(idx, fused_rate))
+    stats["n"] = [len(c) for c in cand]
+
+    preds = {title: predict(v, picks) for v, title in unets}
+    preds["EVM threshold"] = evm_scores(d["features"][picks]) > evm_thr
+    preds["Residual threshold"] = residual_scores(d["features"][picks]) > res_thr
+    columns = ["true map", *preds]
+
+    # 0 outside the allocation, 1 inside and correctly not flagged, 2 hit, 3 miss, 4 false alarm
+    cmap = ListedColormap(["#FFFFFF", "#E3EEF8", "#009E73", "#E69F00", "#CC79A7"])
+    fig, axes = new_figure(
+        7.16, 5.4, nrows=len(picks), ncols=len(columns), sharex=True, sharey=True
+    )
+    counts = {}
+    for row, i in enumerate(picks):
+        truth = d["labels"][i].astype(bool)
+        inside = np.zeros_like(truth)
+        a0, n = int(d["alloc_start"][i]), int(d["alloc_size"][i])
+        inside[a0 : a0 + n] = True
+        for col, title in enumerate(columns):
+            p = truth if title == "true map" else preds[title][row]
+            img = np.select([p & truth, ~p & truth, p & ~truth, inside], [2, 3, 4, 1], 0)
+            counts[(row, title)] = (
+                int((p & truth).sum()),
+                int(truth.sum()),
+                int((p & ~truth).sum()),
+            )
+            ax = axes[row, col]
+            ax.imshow(
+                img,
+                cmap=cmap,
+                vmin=0,
+                vmax=4,
+                origin="lower",
+                aspect="auto",
+                interpolation="nearest",
+            )
+            ax.grid(False)
+            ax.set_xticks([0, 2, 13])
+            if row == 0:
+                ax.set_title(title, fontsize=7)
+            if col == 0:
+                attack, jsr = EXAMPLE_ROWS[row]
+                ax.set_ylabel(f"{attack}, {jsr:+.0f} dB\nPRB", fontsize=7)
+            if row == len(picks) - 1:
+                ax.set_xlabel("symbol")
+    legend = [
+        Patch(facecolor="#009E73", label="hit (jammed, flagged)"),
+        Patch(facecolor="#E69F00", label="miss (jammed, not flagged)"),
+        Patch(facecolor="#CC79A7", label="false alarm"),
+        Patch(facecolor="#E3EEF8", edgecolor="#999999", label="UE allocation"),
+    ]
+    fig.legend(handles=legend, loc="outside lower center", ncols=4, frameon=False)
+
+    caption = (
+        "What each detector reports on four test slots (jammer block inside the allocation), all "
+        "thresholded at 1% false alarm on the validation set. Green: jammed cells found; orange: "
+        "missed; pink: flagged although not jammed; light blue: the UE's allocation. Rows 1, 3 "
+        "and 4 show the slot with the median detection rate of the fused U-Net (a typical case, "
+        "not the best one). Weak pilot jamming (row 1): over all "
+        f"{stats['n'][0]} such test slots the fused U-Net finds {stats['fused']:.0%} of the jammed "
+        f"DMRS cells and the U-Net without the residual {stats['pe']:.0%}. Strong pilot jamming "
+        f"(row 2): the EVM threshold never finds the jammed DMRS cells, and in "
+        f"{stats['evm_share']:.0%} of the {stats['n'][1]} slots it flags data cells that were "
+        f"never jammed ({stats['evm_fa']:.1f} per slot on average) - the wrong-symbol effect; the "
+        "row shows the median slot among those. The residual threshold cannot see data jamming "
+        "at all."
+    )
+    return fig, caption
+
+
+# --- 7. Training curves ------------------------------------------------------------------------
+
+
+def training_curves():
+    histories = sorted((results_dir() / "models").glob("*_seed*_history.csv"))
+    if not histories:
+        raise MissingInput(
+            "needs training histories: train again (python -m jamloc.train "
+            "--variant all, or the full run); histories are saved since this "
+            "version"
+        )
+    fig, axes = new_figure(7.16, 2.4, ncols=len(VARIANTS), sharey=True)
+    seed_colors = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
+    best_epochs = []
+    titles = {
+        "fused": "U-Net P+R+E",
+        "no_residual": "U-Net P+E",
+        "power": "power only",
+        "evm": "EVM only",
+    }
+    for ax, variant in zip(axes, VARIANTS, strict=True):
+        for path in histories:
+            name, seed = path.stem.removesuffix("_history").rsplit("_seed", 1)
+            if name != variant:
+                continue
+            with open(path, encoding="utf-8", newline="") as fh:
+                h = list(csv.DictReader(fh))
+            epoch = [int(r["epoch"]) for r in h]
+            val_loss = [float(r["val_loss"]) for r in h]
+            color = seed_colors[int(seed) % len(seed_colors)]
+            ax.plot(epoch, [float(r["train_loss"]) for r in h], ls="--", color=color, lw=0.9)
+            ax.plot(epoch, val_loss, ls="-", color=color, lw=1.2, label=f"seed {seed}")
+            best_epochs.append(epoch[int(np.argmin(val_loss))])
+        ax.set(title=titles[variant], xlabel="epoch")
+    axes[0].set_ylabel("loss (weighted BCE)")
+    axes[-1].legend(loc="upper right")
+    caption = (
+        "Training (dashed) and validation (solid) loss per epoch for each detector, one colour "
+        "per training seed. The validation loss flattens early (lowest at epoch "
+        f"{int(np.median(best_epochs))} in the median run), and the weights of that best epoch "
+        "are the ones kept, so the later epochs, where the training loss keeps falling, cannot "
+        "overfit the reported models. The seeds lie close together, which is why the results "
+        "vary little between them; EVM-only stays highest because it has the least information."
+    )
+    return fig, caption
+
+
 FIGURES = {
     "attack_patterns": attack_patterns,
     "system_diagram": system_diagram,
     "residual_explained": residual_explained,
     "constellations": constellations,
+    "feature_distributions": feature_distributions,
+    "detector_outputs": detector_outputs,
+    "training_curves": training_curves,
 }
+
+# Result figures written by the other scripts, shown in the gallery when they exist
+RESULT_FIGURES = [
+    (
+        "../ber_bler/ber_bler_A.png",
+        "BER/BLER sweep, TDL-A (experiments.ber_bler)",
+        (
+            "BLER of the unprotected link when the jammer covers the whole allocation, against JSR per "
+            "jammed resource element (left) and against the jammer's total energy in the slot (right). "
+            "Per unit of energy, pilot jamming is the most damaging attack."
+        ),
+    ),
+    (
+        "../ber_bler/ber_bler_C.png",
+        "BER/BLER sweep, TDL-C (experiments.ber_bler)",
+        "The same for TDL-C.",
+    ),
+    (
+        "../feature_maps.png",
+        "Feature maps of one slot per attack (experiments.feature_maps)",
+        (
+            "Label, power, DMRS residual and EVM maps of one slot per attack (grey: feature not "
+            "defined). The jammer block partly leaves the allocation, where only power can see it."
+        ),
+    ),
+    (
+        "../eval/test_pd_vs_jsr_scheduled.png",
+        "Detection, test set (evaluate)",
+        (
+            "Probability of detecting a jammed cell inside the allocation at 1% per-cell false alarm, "
+            "against JSR, mean and +-1 standard deviation over training seeds."
+        ),
+    ),
+    (
+        "../eval/test_pd_vs_jsr_all.png",
+        "Detection, all jammed cells (evaluate)",
+        "The same, including jammed cells outside the allocation (easier: no UE signal there).",
+    ),
+    (
+        "../eval/sched_pd_vs_jsr_scheduled.png",
+        "Detection, scheduling-aware jammer (evaluate)",
+        "The jammer hits exactly the scheduled PRBs, an attacker no detector saw in training.",
+    ),
+    (
+        "../eval/test_snr5-15_pd_vs_jsr_scheduled.png",
+        "Detection at SNR 5-15 dB (evaluate)",
+        "Test slots with low SNR only.",
+    ),
+    (
+        "../eval/test_snr15-25_pd_vs_jsr_scheduled.png",
+        "Detection at SNR 15-25 dB (evaluate)",
+        "Test slots with high SNR only.",
+    ),
+    (
+        "../recovery/recovery_A.png",
+        "Map-aware recovery, TDL-A (experiments.recovery)",
+        (
+            "BLER of five receivers decoding the same slots: no protection, the LMMSE estimate without a "
+            "map, and the map-aware receiver with the maps of two detectors and with the true map."
+        ),
+    ),
+    (
+        "../recovery/recovery_C.png",
+        "Map-aware recovery, TDL-C (experiments.recovery)",
+        "The same for TDL-C.",
+    ),
+]
+
+
+def write_gallery(captions: dict, skipped: dict) -> None:
+    """``results/figures/index.html``: every figure with its caption, readable offline."""
+    out = results_dir() / "figures"
+    parts = ["<h2>Explanatory figures</h2>"]
+    for name in FIGURES:
+        if name in skipped:
+            parts.append(
+                f'<div class="missing"><b>{name}</b>: Not produced yet - '
+                f"{html.escape(skipped[name])}</div>"
+            )
+        elif (out / f"{name}.png").is_file():
+            parts.append(
+                f'<figure><img src="{name}.png" alt="{name}"><figcaption><b>{name}</b>'
+                f": {html.escape(captions.get(name, ''))}</figcaption></figure>"
+            )
+    parts.append("<h2>Results</h2>")
+    for rel, title, caption in RESULT_FIGURES:
+        if (out / rel).resolve().is_file():
+            parts.append(
+                f'<figure><img src="{rel}" alt="{html.escape(title)}"><figcaption><b>'
+                f"{html.escape(title)}</b>: {html.escape(caption)}</figcaption></figure>"
+            )
+    page = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Figure gallery</title><style>"
+        "body{font-family:system-ui,sans-serif;max-width:1100px;margin:auto;padding:16px;"
+        "background:#fff;color:#222;line-height:1.45}"
+        "figure{margin:0 0 32px}img{max-width:100%;border:1px solid #ddd}"
+        "figcaption{font-size:14px;margin-top:6px}"
+        ".missing{background:#fff4e5;border:1px solid #f0c27b;padding:8px;margin-bottom:12px}"
+        "</style></head><body><h1>Jamming localization: figures</h1>"
+        "<p>Generated by <code>python -m jamloc.experiments.figures</code>; PDFs for the paper "
+        "are next to each PNG.</p>" + "".join(parts) + "</body></html>"
+    )
+    (out / "index.html").write_text(page, encoding="utf-8")
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="Explanatory figures with captions.")
+    p = argparse.ArgumentParser(description="Explanatory figures with captions, and a gallery.")
     p.add_argument("--only", nargs="+", choices=list(FIGURES), help="only these figures")
     args = p.parse_args(argv)
 
@@ -383,13 +781,21 @@ def main(argv=None):
     if captions_path.is_file():
         captions = json.loads(captions_path.read_text(encoding="utf-8"))
 
+    skipped = {}
     for name in args.only or FIGURES:
-        with paper_style():
-            fig, caption = FIGURES[name]()
+        try:
+            with paper_style():
+                fig, caption = FIGURES[name]()
+        except MissingInput as missing:
+            skipped[name] = str(missing)
+            print(f"Skipped {name}: {missing}")
+            continue
         save(fig, out / name)
         captions[name] = caption
         print(f"Wrote {out / name}.pdf/.png")
     captions_path.write_text(json.dumps(captions, indent=2), encoding="utf-8")
+    write_gallery(captions, skipped)
+    print(f"Gallery: {out / 'index.html'}")
 
 
 if __name__ == "__main__":
