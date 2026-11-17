@@ -111,6 +111,11 @@ class MapAwareReceiver(Block):
         cfg = self.cfg
         cells = cells.to(device=y.device, dtype=torch.bool)
         num_sc = y.shape[-1]
+        if tuple(cells.shape[1:]) != (num_sc // 12, cfg.num_symbols):
+            raise ValueError(
+                f"cells must cover the allocation, [B, {num_sc // 12}, {cfg.num_symbols}]; got "
+                f"{tuple(cells.shape)} (cut a carrier map to the scheduled PRBs first)"
+            )
 
         # 1. LS estimates at the DMRS pilots; a pilot is clean if its PRB's DMRS cell is not flagged
         h_ls, pilot_sc, pilot_power = dmrs_ls(y, self.tx)

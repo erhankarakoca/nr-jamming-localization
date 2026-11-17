@@ -126,3 +126,13 @@ def test_no_clean_pilot_falls_back():
     standard = PUSCHReceiverChain(out.tx)(out.y_alloc, out.no)
     assert torch.isfinite(protected["llr"]).all()
     assert torch.equal(protected["b_hat"], standard["b_hat"])
+
+
+def test_carrier_sized_map_is_rejected():
+    import pytest
+
+    out = link(_scenario(DATA, 0.0, 15.0, n=4))
+    with pytest.raises(ValueError, match="allocation"):
+        MapAwareReceiver(out.tx)(
+            out.y_alloc, out.no, out.labels
+        )  # [B, 24, 14] instead of [B, 12, 14]
