@@ -20,8 +20,8 @@ import numpy as np
 import torch
 from sionna.phy import config
 
-from jamloc.baselines import evm_scores, residual_scores
-from jamloc.dataset import CHANNELS, load
+from jamloc.baselines import evm_scores, power_scores, residual_cfar_scores, residual_scores
+from jamloc.dataset import CHANNELS, SPLITS, load
 from jamloc.features import FEATURE_NAMES
 from jamloc.jammer import ATTACKS
 from jamloc.metrics import detection_rate, f1, threshold_at_fa
@@ -47,6 +47,18 @@ DETECTOR_STYLE = {
         "color": "#009E73",
         "marker": "x",
         "linestyle": "--",
+    },
+    "power_threshold": {
+        "label": "Power threshold (Li et al.)",
+        "color": "#E69F00",
+        "marker": "*",
+        "linestyle": ":",
+    },
+    "residual_cfar": {
+        "label": "Residual CFAR (analytic)",
+        "color": "#000000",
+        "marker": "+",
+        "linestyle": "-.",
     },
 }
 
@@ -77,6 +89,8 @@ def score_split(d: dict, seed: int = 0) -> dict[str, np.ndarray]:
         scores[variant] = torch.cat(logits).numpy()
     scores["evm_threshold"] = evm_scores(d["features"])
     scores["residual_threshold"] = residual_scores(d["features"])
+    scores["residual_cfar"] = residual_cfar_scores(d)
+    scores["power_threshold"] = power_scores(d["features"])
     return scores
 
 
@@ -186,7 +200,8 @@ def _write_csv(rows, path):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Evaluate all detectors on a split.")
-    p.add_argument("--split", choices=("test", "sched"), default="test")
+    splits = [s for s in SPLITS if s not in ("train", "val")]
+    p.add_argument("--split", choices=splits, default="test")
     p.add_argument(
         "--snr-db",
         type=float,
@@ -201,7 +216,8 @@ def main(argv=None):
         raise SystemExit("No trained models in results/models: run python -m jamloc.train first.")
 
     val, test = load("val"), load(args.split)
-    name, what = args.split, "scheduling-aware jammer" if args.split == "sched" else "test set"
+    titles = {"test": "test set", "sched": "scheduling-aware jammer"}
+    name, what = args.split, titles.get(args.split) or SPLITS[args.split]["title"]
     if args.snr_db:
         lo, hi = args.snr_db
         keep = (test["snr_db"] >= lo) & (test["snr_db"] < hi)
@@ -226,7 +242,8 @@ def main(argv=None):
     _write_csv(pd_mean, out / f"{name}_pd_vs_jsr.csv")
     _write_csv(f1_mean, out / f"{name}_f1.csv")
     for cells in ("all", "scheduled"):
-        title = f"{what}, {cells} jammed cells, TDL-A and TDL-C, {len(seeds)} seed(s)"
+        channels = " and ".join(f"TDL-{CHANNELS[c]}" for c in np.unique(test["channel"]))
+        title = f"{what}, {cells} jammed cells, {channels}, {len(seeds)} seed(s)"
         with paper_style():
             fig = plot_pd(pd_mean, cells, title)
         save(fig, out / f"{name}_pd_vs_jsr_{cells}")

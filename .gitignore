@@ -26,3 +26,6 @@ results/*
 !.vscode/settings.json
 !.vscode/extensions.json
 .idea/
+
+# Local copies of papers (publisher copyright, not redistributed)
+docs/lit/

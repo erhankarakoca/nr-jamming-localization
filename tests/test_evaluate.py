@@ -50,7 +50,13 @@ def test_main_runs_end_to_end(tmp_path, monkeypatch):
     out = tmp_path / "results" / "eval"
     with open(out / "test_pd_vs_jsr.csv", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
-    assert {r["detector"] for r in rows} == {*VARIANTS, "evm_threshold", "residual_threshold"}
+    assert {r["detector"] for r in rows} == {
+        *VARIANTS,
+        "evm_threshold",
+        "residual_threshold",
+        "residual_cfar",
+        "power_threshold",
+    }
     assert {"pd_mean", "pd_std", "n_seeds"} <= set(rows[0])
     assert {r["n_seeds"] for r in rows} == {"2"}
     with open(out / "test_f1.csv", encoding="utf-8", newline="") as f:
