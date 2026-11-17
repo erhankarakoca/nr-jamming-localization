@@ -27,9 +27,11 @@ def _tensors(split: str, variant: str, device: str):
 DEFAULT_WIDTH = 12  # channels of the first U-Net level (66 553 parameters for the fused variant)
 
 
-def checkpoint_path(variant: str, seed: int = 0, width: int = DEFAULT_WIDTH):
-    """``fused_seed0.pt`` for the default width, ``fused_w4_seed0.pt`` for a narrower U-Net."""
+def checkpoint_path(variant: str, seed: int = 0, width: int = DEFAULT_WIDTH, data: str = ""):
+    """``fused_seed0.pt`` for the default width, ``fused_w4_seed0.pt`` for a narrower U-Net,
+    ``fused_mix_seed0.pt`` for one trained on ``train_mix`` (``data="mix"``)."""
     tag = variant if width == DEFAULT_WIDTH else f"{variant}_w{width}"
+    tag = f"{tag}_{data}" if data else tag
     return results_dir() / "models" / f"{tag}_seed{seed}.pt"
 
 
@@ -40,12 +42,17 @@ def train(
     lr: float = 1e-3,
     seed: int = 0,
     width: int = DEFAULT_WIDTH,
+    data: str = "",
 ):
-    """Train a variant and save its best weights. Returns the checkpoint path."""
+    """Train a variant and save its best weights. Returns the checkpoint path.
+
+    ``data="mix"`` trains on ``train_mix`` / ``val_mix`` instead of ``train`` / ``val``.
+    """
     torch.manual_seed(seed)
     device = config.device
-    x_tr, y_tr = _tensors("train", variant, device)
-    x_va, y_va = _tensors("val", variant, device)
+    suffix = f"_{data}" if data else ""
+    x_tr, y_tr = _tensors(f"train{suffix}", variant, device)
+    x_va, y_va = _tensors(f"val{suffix}", variant, device)
 
     model = TinyUNet(x_tr.shape[1], base=width).to(device)
     # Jammed cells are rare, so weight them up in the loss
@@ -54,7 +61,7 @@ def train(
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
-    path = checkpoint_path(variant, seed, width)
+    path = checkpoint_path(variant, seed, width, data)
     path.parent.mkdir(parents=True, exist_ok=True)
     best = float("inf")
     gen = torch.Generator().manual_seed(seed)
@@ -107,9 +114,9 @@ def train(
     return path
 
 
-def load_model(variant: str, seed: int = 0, width: int = DEFAULT_WIDTH) -> TinyUNet:
+def load_model(variant: str, seed: int = 0, width: int = DEFAULT_WIDTH, data: str = "") -> TinyUNet:
     """Trained model in eval mode, on ``sionna.phy.config.device``."""
-    ckpt = torch.load(checkpoint_path(variant, seed, width), map_location=config.device)
+    ckpt = torch.load(checkpoint_path(variant, seed, width, data), map_location=config.device)
     model = TinyUNet(ckpt["in_channels"], base=ckpt.get("width", DEFAULT_WIDTH)).to(config.device)
     model.load_state_dict(ckpt["state_dict"])
     return model.eval()

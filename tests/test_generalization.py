@@ -56,3 +56,28 @@ def test_size_sweep_and_generalization_small(tmp_path, monkeypatch):
     assert [int(r["width"]) for r in rows] == [4, 12]
     assert int(rows[0]["params"]) < int(rows[1]["params"]) == 66_553
     assert (out / "size_sweep.png").is_file() and (out / "size_sweep_latency.csv").is_file()
+
+
+def test_robust_training_small(tmp_path, monkeypatch):
+    from jamloc.dataset import generate, load
+    from jamloc.experiments import robust_training
+    from jamloc.model import VARIANTS
+    from jamloc.train import train
+
+    monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
+    sizes = {"train": 64, "val": 32, "train_mix": 96, "val_mix": 32}
+    sizes.update(test=60, longdelay=60, fast=60)
+    for split, n in sizes.items():
+        generate(split, num_slots=n, batch_size=16)
+    for variant in VARIANTS:
+        train(variant, epochs=1, batch_size=32)
+
+    robust_training.main(["--seeds", "0", "--epochs", "1"])
+    out = tmp_path / "results" / "robust_training"
+    with open(out / "robust_training.csv", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 3 * 2 * len(VARIANTS)  # conditions x trainings x detectors
+    assert (out / "robust_training.png").is_file()
+    assert (tmp_path / "results" / "models" / "fused_mix_seed0.pt").is_file()
+    assert len(load("train_mix")["labels"]) == 96

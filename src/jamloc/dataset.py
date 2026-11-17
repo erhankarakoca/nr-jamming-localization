@@ -12,6 +12,8 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   ``longdelay`` - TDL-C with 1000 ns delay spread, so channel delays reach 8.7 us, far beyond the
   ``tau_max`` = 3 us the DMRS residual assumes; ``fast`` - UE and jammer moving at up to 30 m/s
   instead of 3 m/s; ``qpskjam`` - the jammer sends random QPSK symbols instead of Gaussian noise.
+* ``train_mix`` / ``val_mix`` - like ``train`` / ``val``, but the batches cycle through the nominal
+  channels, long delay spreads and high speeds (``MIXED_CONDITIONS``).
 
 Each split is one ``.npz`` file in ``data_dir()``: ``features`` ``[N, 6, 24, 14]`` (stored as
 float16), ``labels`` ``[N, 24, 14]`` and one value per slot for every key in ``META_KEYS``.
@@ -75,6 +77,16 @@ GENERALIZATION = {
 for _name, _spec in GENERALIZATION.items():
     SPLITS[_name] = {"per_point": 200, "benign_per_channel": 1_000, "sched": False, **_spec}
 
+# Training on mixed conditions: batches cycle through the nominal setup, long delays (TDL-A 300 ns,
+# TDL-C 1000 ns) and speeds up to 30 m/s. Seeds differ from every other split.
+MIXED_CONDITIONS = (
+    {},
+    {"delay_spread": {"A": 300e-9, "C": 1000e-9}},
+    {"max_speed": 30.0},
+)
+SPLITS["train_mix"] = {"seed": 10_000_000, "num_slots": 40_000, "mix": MIXED_CONDITIONS}
+SPLITS["val_mix"] = {"seed": 11_000_000, "num_slots": 5_000, "mix": MIXED_CONDITIONS}
+
 
 def _random_jobs(num_slots: int, batch_size: int) -> list[dict]:
     jobs = []
@@ -126,8 +138,10 @@ def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
     else:
         jobs = _random_jobs(num_slots or spec["num_slots"], batch_size)
 
-    cfg = dataclasses.replace(SimConfig(), **spec.get("cfg", {}))
-    link = JammedPUSCHLink(cfg)
+    # One link per channel condition; batch i uses condition i // 2 (both TDL models per condition)
+    conditions = spec.get("mix", (spec.get("cfg", {}),))
+    links = [JammedPUSCHLink(dataclasses.replace(SimConfig(), **c)) for c in conditions]
+    cfg = links[0].cfg
     features, labels, meta = [], [], {k: [] for k in META_KEYS}
     start = time.perf_counter()
     for i, job in enumerate(jobs):
@@ -141,8 +155,9 @@ def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
             jsr_db=job["jsr_db"],
             scheduling_aware=job["scheduling_aware"],
         )
+        link = links[(i // 2) % len(links)]
         batch = link(sc)
-        features.append(extract(batch, cfg).cpu().numpy().astype(np.float16))
+        features.append(extract(batch, link.cfg).cpu().numpy().astype(np.float16))
         labels.append(batch.labels.cpu().numpy().astype(np.uint8))
 
         n = sc.batch_size
