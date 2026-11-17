@@ -34,7 +34,7 @@ from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
 from jamloc.metrics import threshold_at_fa
 from jamloc.model import select_inputs
 from jamloc.paths import results_dir
-from jamloc.plotting import new_figure, paper_style, save
+from jamloc.plotting import new_figure, paper_style, plot_bler, save, zero_error_handle
 from jamloc.recovery import MapAwareReceiver
 from jamloc.train import load_model
 
@@ -106,26 +106,35 @@ def _scenario(rng, n, channel, attack, jsr_db, snr_db, whole_allocation=False) -
 
 
 def simulate_point(link, detectors, scenario_fn, receivers, max_mc_iter, target_block_errors):
-    """Bit and block errors of each receiver, all decoding the same simulated batches."""
+    """Bit and block errors of each receiver, all decoding the same simulated batches.
+
+    A receiver stops once it has ``target_block_errors`` block errors (its estimate is precise
+    enough); the others keep decoding further batches. So receivers that rarely fail get many
+    slots without making the frequent failures expensive.
+    """
     cfg = link.cfg
     alloc = slice(ALLOC[0], ALLOC[0] + ALLOC[1])
     counts = {rx: np.zeros(4) for rx in receivers}  # bit errors, bits, block errors, blocks
+    active = list(receivers)
     map_aware = None
     for _ in range(max_mc_iter):
-        out = link(scenario_fn(), decode=True)  # also decodes with the standard receiver
+        if not active:
+            break
+        out = link(scenario_fn(), decode="standard" in active)
         map_aware = map_aware or MapAwareReceiver(out.tx, cfg)
-        maps = {"lmmse_no_map": torch.zeros_like(out.labels[:, alloc])}
-        maps["true_map"] = out.labels[:, alloc]
+        maps = {
+            "lmmse_no_map": torch.zeros_like(out.labels[:, alloc]),
+            "true_map": out.labels[:, alloc],
+        }
         for rx, (model, variant, thr) in detectors.items():
-            if rx in receivers:
+            if rx in active:
                 maps[rx] = detector_cells(out, cfg, model, variant, thr)[:, alloc]
 
-        for rx in receivers:
-            b_hat = (
-                out.rx["b_hat"]
-                if rx == "standard"
-                else map_aware(out.y_alloc, out.no, maps[rx])["b_hat"]
-            )
+        for rx in list(active):
+            if rx == "standard":
+                b_hat = out.rx["b_hat"]
+            else:
+                b_hat = map_aware(out.y_alloc, out.no, maps[rx])["b_hat"]
             errors = out.b != b_hat
             counts[rx] += [
                 errors.sum().item(),
@@ -133,8 +142,8 @@ def simulate_point(link, detectors, scenario_fn, receivers, max_mc_iter, target_
                 errors.any(-1).sum().item(),
                 errors[..., 0].numel(),
             ]
-        if all(c[2] >= target_block_errors for c in counts.values()):
-            break
+            if counts[rx][2] >= target_block_errors:
+                active.remove(rx)
     return counts
 
 
@@ -173,6 +182,7 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
                         "snr_db": float(snr_db),
                         "ber": bit_err / bits,
                         "bler": block_err / blocks,
+                        "block_errors": int(block_err),
                         "blocks": int(blocks),
                     }
                 )
@@ -184,15 +194,49 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
     return rows
 
 
-def plot(rows, channel):
-    fig, axes = new_figure(7.16, 2.8, ncols=3, sharey=True)
+MAIN_RECEIVERS = ("standard", "map_p_r_e", "true_map")
+ABLATION_RECEIVERS = ("standard", "lmmse_no_map", "map_p_e", "map_p_r_e")
+
+
+def _protection_helps_from(rows, attack):
+    """Smallest JSR from which the P+R+E map gives a lower BLER than no protection at every
+    higher JSR (point estimates), or None."""
+
+    def bler(rx):
+        return {
+            r["jsr_db"]: r["bler"] for r in rows if r["receiver"] == rx and r["attack"] == attack
+        }
+
+    std, mapped = bler("standard"), bler("map_p_r_e")
+    start = None
+    for j in sorted(std, reverse=True):
+        if j in mapped and mapped[j] < std[j]:
+            start = j
+        else:
+            break
+    return start
+
+
+def plot(rows, channel, receivers=MAIN_RECEIVERS, shade=True):
+    fig, axes = new_figure(7.16, 2.9, ncols=3, sharey=True)
     floor = 1.0 / max(r["blocks"] for r in rows)
     for ax, attack in zip(axes, ("pilot", "data", "partial"), strict=True):
-        for rx in RECEIVERS:
+        start = _protection_helps_from(rows, attack) if shade else None
+        if start is not None:
+            hi = max(r["jsr_db"] for r in rows if r["attack"] == attack)
+            ax.axvspan(start - 1.5, hi + 1.5, color="#009E73", alpha=0.08, lw=0)
+            ax.text(start - 1.2, 0.5, "map helps", fontsize=6, color="#00704F", va="top")
+        for rx in receivers:
             sel = [r for r in rows if r["receiver"] == rx and r["attack"] == attack]
-            # BLER = 0 cannot be drawn on a log axis: those points are left as gaps
-            bler = [r["bler"] if r["bler"] > 0 else np.nan for r in sel]
-            ax.plot([r["jsr_db"] for r in sel], bler, **STYLE[rx])
+            style = {k: v for k, v in STYLE[rx].items() if k != "label"}
+            plot_bler(
+                ax,
+                [r["jsr_db"] for r in sel],
+                [r["block_errors"] for r in sel],
+                [r["blocks"] for r in sel],
+                style,
+                STYLE[rx]["label"],
+            )
         ax.set(
             title=f"{attack} jamming",
             xlabel="JSR per jammed RE [dB]",
@@ -200,16 +244,13 @@ def plot(rows, channel):
             ylim=(floor / 2, 1.5),
         )
     axes[0].set_ylabel(f"BLER (TDL-{channel}, SNR {rows[0]['snr_db']:g} dB)")
-    # One legend for all panels, below them, so it never covers a curve
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="outside lower center", ncols=len(RECEIVERS), frameon=False)
+    handles = axes[0].get_legend_handles_labels()[0] + [zero_error_handle()]
+    fig.legend(handles=handles, loc="outside lower center", ncols=len(handles), frameon=False)
     benign = {r["receiver"]: r["bler"] for r in rows if r["attack"] == "none"}
     fig.suptitle(
-        f"UE on {ALLOC[1]} PRBs, jammer on {JAM_SIZE} of them; gaps = no block error in "
-        f"{round(1 / floor)} blocks.\nWithout a jammer: BLER "
-        f"{benign.get('standard', float('nan')):.3f} unprotected, "
-        f"{benign.get('map_p_r_e', float('nan')):.3f} with the P+R+E map, "
-        f"{benign.get('true_map', float('nan')):.3f} with the true map"
+        f"UE on {ALLOC[1]} PRBs, jammer on {JAM_SIZE} of them; bands: 95% confidence. "
+        f"Without a jammer: BLER {benign.get('standard', float('nan')):.3f} unprotected, "
+        f"{benign.get('map_p_r_e', float('nan')):.3f} with the P+R+E map"
     )
     return fig
 
@@ -220,8 +261,8 @@ def main(argv=None):
     p.add_argument("--snr-db", type=float, default=15.0)
     p.add_argument("--jsr-db", type=float, nargs="+", default=[float(j) for j in range(-15, 10, 3)])
     p.add_argument("--batch-size", type=int, default=64)
-    p.add_argument("--max-mc-iter", type=int, default=20)
-    p.add_argument("--target-block-errors", type=int, default=200)
+    p.add_argument("--max-mc-iter", type=int, default=100)
+    p.add_argument("--target-block-errors", type=int, default=100)
     p.add_argument("--seed", type=int, default=0, help="training seed of the detector models")
     args = p.parse_args(argv)
 
@@ -242,9 +283,13 @@ def main(argv=None):
         writer.writeheader()
         writer.writerows(rows)
     with paper_style():
-        fig = plot(rows, args.channel)
-    save(fig, stem)
-    print(f"Wrote {stem}.csv/.pdf/.png")
+        main_fig = plot(rows, args.channel)  # the message: no protection vs map vs true map
+        ablation = plot(
+            rows, args.channel, ABLATION_RECEIVERS, shade=False
+        )  # where gains come from
+    save(main_fig, stem)
+    save(ablation, stem.with_name(f"{stem.name}_ablation"))
+    print(f"Wrote {stem}.csv and the main and ablation figures (.pdf/.png)")
 
 
 if __name__ == "__main__":

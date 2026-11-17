@@ -12,14 +12,20 @@ import csv
 import math
 
 import numpy as np
-import torch
-from sionna.phy.utils import sim_ber
 
 from jamloc.config import SimConfig
 from jamloc.jammer import ATTACKS
 from jamloc.link import JammedPUSCHLink, draw_scenario, seed_everything
 from jamloc.paths import results_dir
-from jamloc.plotting import ATTACK_STYLE, COLUMN_WIDTH, new_figure, paper_style, save
+from jamloc.plotting import (
+    ATTACK_STYLE,
+    COLUMN_WIDTH,
+    new_figure,
+    paper_style,
+    plot_bler,
+    save,
+    zero_error_handle,
+)
 
 # OFDM symbols the jammer occupies per PRB; the UE sends data on 13 of the 14 symbols
 JAMMED_SYMBOLS = {"pilot": 1, "data": 13, "partial": 14}
@@ -31,62 +37,72 @@ def energy_db(attack: str, jsr_db: float) -> float:
     return jsr_db + 10 * math.log10(JAMMED_SYMBOLS[attack] / UE_DATA_SYMBOLS)
 
 
+def count_errors(mc_fun, max_mc_iter: int, target_block_errors: int) -> dict:
+    """Simulate batches until ``target_block_errors`` block errors or ``max_mc_iter`` batches.
+
+    ``mc_fun()`` returns ``(b, b_hat)``; a block is one transport block (last axis = its bits).
+    The counts are kept so that confidence intervals can be drawn later.
+    """
+    bit_errors = bits = block_errors = blocks = 0
+    for _ in range(max_mc_iter):
+        b, b_hat = mc_fun()
+        errors = b != b_hat
+        bit_errors += errors.sum().item()
+        bits += errors.numel()
+        block_errors += errors.any(-1).sum().item()
+        blocks += errors[..., 0].numel()
+        if block_errors >= target_block_errors:
+            break
+    return {"bit_errors": bit_errors, "bits": bits, "block_errors": block_errors, "blocks": blocks}
+
+
 def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_errors, seed):
     cfg = SimConfig()
     link = JammedPUSCHLink(cfg)
     rng = seed_everything(seed)
 
-    def run(attack: str, sweep_db):
-        # sim_ber sweeps its "ebno_db" argument; here that argument is the JSR
-        def mc_fun(batch_size, ebno_db):
+    def run(attack: str, jsr_db: float) -> dict:
+        def mc_fun():
             sc = draw_scenario(
                 rng,
                 batch_size,
                 cfg,
                 channel,
                 attacks=(ATTACKS.index(attack),),
-                jsr_db=float(ebno_db),
+                jsr_db=float(jsr_db),
                 snr_db=snr_db,
                 scheduling_aware=True,
             )
             out = link(sc, decode=True)
             return out.b, out.rx["b_hat"]
 
-        ber, bler = sim_ber(
-            mc_fun,
-            torch.tensor(sweep_db, dtype=torch.float32),
-            batch_size,
-            max_mc_iter,
-            num_target_block_errors=target_block_errors,
-            early_stop=False,
-            verbose=False,
-        )
-        return ber.cpu().numpy(), bler.cpu().numpy()
+        c = count_errors(mc_fun, max_mc_iter, target_block_errors)
+        return {**c, "ber": c["bit_errors"] / c["bits"], "bler": c["block_errors"] / c["blocks"]}
 
-    rows = []
-    ber, bler = run("none", [0.0])  # benign reference at the same SNR
-    rows.append(
+    rows = [
         {
             "attack": "none",
             "snr_db": float(snr_db),
             "jsr_db": math.nan,
             "energy_db": math.nan,
-            "ber": float(ber[0]),
-            "bler": float(bler[0]),
+            **run("none", 0.0),
         }
-    )
+    ]  # benign reference at the same SNR
     for attack in ("pilot", "data", "partial"):
-        ber, bler = run(attack, jsr_dbs)
-        for j, b1, b2 in zip(jsr_dbs, ber, bler):
+        for j in jsr_dbs:
             rows.append(
                 {
                     "attack": attack,
                     "snr_db": float(snr_db),
                     "jsr_db": float(j),
                     "energy_db": energy_db(attack, j),
-                    "ber": float(b1),
-                    "bler": float(b2),
+                    **run(attack, j),
                 }
+            )
+            print(
+                f"[{channel}] {attack:8s} JSR {j:+5.1f} dB: BLER {rows[-1]['bler']:.4f} "
+                f"({rows[-1]['block_errors']}/{rows[-1]['blocks']})",
+                flush=True,
             )
     return rows
 
@@ -104,20 +120,12 @@ def read_rows(path, default_snr_db: float = 15.0) -> list[dict]:
 
 def plot(rows, channel):
     snr_db = rows[0]["snr_db"]
-    fig, (ax_jsr, ax_energy) = new_figure(COLUMN_WIDTH, 2.2, ncols=2, sharey=True)
+    fig, (ax_jsr, ax_energy) = new_figure(COLUMN_WIDTH, 2.6, ncols=2, sharey=True)
     for attack in ("pilot", "data", "partial"):
         sel = [r for r in rows if r["attack"] == attack]
-        # BLER = 0 cannot be drawn on a log axis; those points are left as gaps
-        bler = np.array([r["bler"] if r["bler"] > 0 else np.nan for r in sel])
-        style = ATTACK_STYLE[attack]
-        ax_jsr.plot([r["jsr_db"] for r in sel], bler, label=attack, **style)
-        ax_energy.plot([r["energy_db"] for r in sel], bler, **style)
-
-    benign = next(r for r in rows if r["attack"] == "none")["bler"]
-    if benign > 0:
-        for ax in (ax_jsr, ax_energy):
-            ax.axhline(benign, color="black", linestyle=":", linewidth=0.8, label="no jammer")
-
+        errors, blocks = [r["block_errors"] for r in sel], [r["blocks"] for r in sel]
+        plot_bler(ax_jsr, [r["jsr_db"] for r in sel], errors, blocks, ATTACK_STYLE[attack], attack)
+        plot_bler(ax_energy, [r["energy_db"] for r in sel], errors, blocks, ATTACK_STYLE[attack])
     ax_jsr.set(
         yscale="log",
         xlabel="JSR per jammed RE [dB]",
@@ -125,7 +133,10 @@ def plot(rows, channel):
         title=f"(a) TDL-{channel}, SNR {snr_db:g} dB",
     )
     ax_energy.set(xlabel="Slot energy ratio J/S [dB]", title="(b) Same, vs. energy")
-    ax_jsr.legend(loc="lower right")
+    # Legend below the panels, so it never covers a curve
+    handles = ax_jsr.get_legend_handles_labels()[0]
+    handles.append(zero_error_handle())
+    fig.legend(handles=handles, loc="outside lower center", ncols=2, frameon=False)
     return fig
 
 
@@ -137,8 +148,8 @@ def main(argv=None):
         "--jsr-db", type=float, nargs="+", default=[float(j) for j in np.arange(-20.0, 10.1, 2.5)]
     )
     p.add_argument("--batch-size", type=int, default=64)
-    p.add_argument("--max-mc-iter", type=int, default=20)
-    p.add_argument("--target-block-errors", type=int, default=200)
+    p.add_argument("--max-mc-iter", type=int, default=200)
+    p.add_argument("--target-block-errors", type=int, default=100)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     args = p.parse_args(argv)

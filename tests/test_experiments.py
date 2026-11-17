@@ -16,7 +16,8 @@ def test_ber_bler_script_runs(tmp_path, monkeypatch):
     attacks = {r["attack"] for r in rows}
     assert attacks == {"none", "pilot", "data", "partial"}
     assert len(rows) == 1 + 3 * 2  # benign reference + 3 attacks x 2 JSR points
-    assert {"jsr_db", "energy_db", "ber", "bler"} <= set(rows[0])
+    assert {"jsr_db", "energy_db", "ber", "bler", "block_errors", "blocks"} <= set(rows[0])
+    assert all(int(r["blocks"]) % 8 == 0 and int(r["blocks"]) > 0 for r in rows)
 
     # Redraw from the saved CSV without simulating again
     (out / "ber_bler_A.png").unlink()
@@ -114,3 +115,5 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
     limit = [r for r in rows if r["attack"] == "pilot_whole_allocation"]
     assert {r["receiver"] for r in limit} == {"standard", "true_map"}
     assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
+    assert (out / "recovery_A_ablation.png").is_file()
+    assert all(int(r["block_errors"]) <= int(r["blocks"]) for r in rows)

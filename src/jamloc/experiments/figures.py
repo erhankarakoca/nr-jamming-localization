@@ -741,11 +741,11 @@ RESULT_FIGURES = [
     (
         "../ber_bler/ber_bler_A.png",
         "BER/BLER sweep, TDL-A",
-        (
-            "BLER of the unprotected link when the jammer covers the whole allocation, against JSR per "
-            "jammed resource element (left) and against the jammer's total energy in the slot (right). "
-            "Per unit of energy, pilot jamming is the most damaging attack."
-        ),
+        ("BLER of the unprotected link when the jammer covers the whole allocation, against JSR per "
+        "jammed resource element (left) and against the jammer's total energy in the slot (right). "
+        "Shaded bands are 95% confidence intervals; a hollow triangle marks a point without any "
+        "block error, drawn at its 95% upper bound. Per unit of energy, pilot jamming is the most "
+        "damaging attack."),
         "python -m jamloc.experiments.ber_bler --channel A",
     ),
     (
@@ -757,19 +757,15 @@ RESULT_FIGURES = [
     (
         "../feature_maps.png",
         "Feature maps of one slot per attack",
-        (
-            "Label, power, DMRS residual and EVM maps of one slot per attack (grey: feature not "
-            "defined). The jammer block partly leaves the allocation, where only power can see it."
-        ),
+        ("Label, power, DMRS residual and EVM maps of one slot per attack (grey: feature not "
+        "defined). The jammer block partly leaves the allocation, where only power can see it."),
         "python -m jamloc.experiments.feature_maps",
     ),
     (
         "../eval/test_pd_vs_jsr_scheduled.png",
         "Detection, test set",
-        (
-            "Probability of detecting a jammed cell inside the allocation at 1% per-cell false alarm, "
-            "against JSR, mean and +-1 standard deviation over training seeds."
-        ),
+        ("Probability of detecting a jammed cell inside the allocation at 1% per-cell false alarm, "
+        "against JSR, mean and +-1 standard deviation over training seeds."),
         "python -m jamloc.evaluate --split test",
     ),
     (
@@ -799,16 +795,29 @@ RESULT_FIGURES = [
     (
         "../recovery/recovery_A.png",
         "Map-aware recovery, TDL-A",
-        (
-            "BLER of five receivers decoding the same slots: no protection, the LMMSE estimate without a "
-            "map, and the map-aware receiver with the maps of two detectors and with the true map. The "
-            "title gives the BLER without any jammer, i.e. what false alarms cost on clean slots."
-        ),
+        ("BLER without protection, with the map of the fused U-Net (P+R+E) and with the true map, all "
+        "decoding the same slots. Green background: JSRs where the detector's map beats no "
+        "protection; at weaker jamming the unprotected link already decodes and the map's false "
+        "alarms cost a little. Bands: 95% confidence; hollow triangles: no block error (95% upper "
+        "bound). The title gives the BLER without any jammer."),
+        "python -m jamloc.experiments.recovery --channel A",
+    ),
+    (
+        "../recovery/recovery_A_ablation.png",
+        "Recovery ablation, TDL-A",
+        ("Where the gain comes from: the LMMSE channel estimate alone (no map), the map of the U-Net "
+        "without the residual (P+E), and the fused map (P+R+E), against no protection."),
         "python -m jamloc.experiments.recovery --channel A",
     ),
     (
         "../recovery/recovery_C.png",
         "Map-aware recovery, TDL-C",
+        "The same for TDL-C.",
+        "python -m jamloc.experiments.recovery --channel C",
+    ),
+    (
+        "../recovery/recovery_C_ablation.png",
+        "Recovery ablation, TDL-C",
         "The same for TDL-C.",
         "python -m jamloc.experiments.recovery --channel C",
     ),
