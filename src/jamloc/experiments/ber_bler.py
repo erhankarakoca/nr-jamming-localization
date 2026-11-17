@@ -19,7 +19,7 @@ from jamloc.config import SimConfig
 from jamloc.jammer import ATTACKS
 from jamloc.link import JammedPUSCHLink, draw_scenario, seed_everything
 from jamloc.paths import results_dir
-from jamloc.plotting import ATTACK_STYLE, COLUMN_WIDTH, new_figure, save
+from jamloc.plotting import ATTACK_STYLE, COLUMN_WIDTH, new_figure, paper_style, save
 
 # OFDM symbols the jammer occupies per PRB; the UE sends data on 13 of the 14 symbols
 JAMMED_SYMBOLS = {"pilot": 1, "data": 13, "partial": 14}
@@ -39,25 +39,53 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
     def run(attack: str, sweep_db):
         # sim_ber sweeps its "ebno_db" argument; here that argument is the JSR
         def mc_fun(batch_size, ebno_db):
-            sc = draw_scenario(rng, batch_size, cfg, channel, attacks=(ATTACKS.index(attack),),
-                               jsr_db=float(ebno_db), snr_db=snr_db, scheduling_aware=True)
+            sc = draw_scenario(
+                rng,
+                batch_size,
+                cfg,
+                channel,
+                attacks=(ATTACKS.index(attack),),
+                jsr_db=float(ebno_db),
+                snr_db=snr_db,
+                scheduling_aware=True,
+            )
             out = link(sc, decode=True)
             return out.b, out.rx["b_hat"]
 
-        ber, bler = sim_ber(mc_fun, torch.tensor(sweep_db, dtype=torch.float32), batch_size,
-                            max_mc_iter, num_target_block_errors=target_block_errors,
-                            early_stop=False, verbose=False)
+        ber, bler = sim_ber(
+            mc_fun,
+            torch.tensor(sweep_db, dtype=torch.float32),
+            batch_size,
+            max_mc_iter,
+            num_target_block_errors=target_block_errors,
+            early_stop=False,
+            verbose=False,
+        )
         return ber.cpu().numpy(), bler.cpu().numpy()
 
     rows = []
     ber, bler = run("none", [0.0])  # benign reference at the same SNR
-    rows.append(dict(attack="none", jsr_db=math.nan, energy_db=math.nan,
-                     ber=float(ber[0]), bler=float(bler[0])))
+    rows.append(
+        {
+            "attack": "none",
+            "jsr_db": math.nan,
+            "energy_db": math.nan,
+            "ber": float(ber[0]),
+            "bler": float(bler[0]),
+        }
+    )
     for attack in ("pilot", "data", "partial"):
         ber, bler = run(attack, jsr_dbs)
         for j, b1, b2 in zip(jsr_dbs, ber, bler):
-            rows.append(dict(attack=attack, jsr_db=float(j), energy_db=energy_db(attack, j),
-                             ber=float(b1), bler=float(b2)))
+            rows.append(
+                {
+                    "attack": attack,
+                    "jsr_db": float(j),
+                    "energy_db": energy_db(attack, j),
+                    "ber": float(b1),
+                    "bler": float(b2),
+                }
+            )
     return rows
 
 
@@ -76,8 +104,12 @@ def plot(rows, channel, snr_db):
         for ax in (ax_jsr, ax_energy):
             ax.axhline(benign, color="black", linestyle=":", linewidth=0.8, label="no jammer")
 
-    ax_jsr.set(yscale="log", xlabel="JSR per jammed RE [dB]", ylabel="BLER",
-               title=f"(a) TDL-{channel}, SNR {snr_db:g} dB")
+    ax_jsr.set(
+        yscale="log",
+        xlabel="JSR per jammed RE [dB]",
+        ylabel="BLER",
+        title=f"(a) TDL-{channel}, SNR {snr_db:g} dB",
+    )
     ax_energy.set(xlabel="Jammer / UE slot energy [dB]", title="(b) Same, vs. energy")
     ax_jsr.legend(loc="lower right")
     return fig
@@ -87,16 +119,24 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--channel", choices=("A", "C"), default="A")
     p.add_argument("--snr-db", type=float, default=15.0)
-    p.add_argument("--jsr-db", type=float, nargs="+",
-                   default=[float(j) for j in np.arange(-20.0, 10.1, 2.5)])
+    p.add_argument(
+        "--jsr-db", type=float, nargs="+", default=[float(j) for j in np.arange(-20.0, 10.1, 2.5)]
+    )
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--max-mc-iter", type=int, default=20)
     p.add_argument("--target-block-errors", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args(argv)
 
-    rows = simulate(args.channel, args.snr_db, args.jsr_db, args.batch_size, args.max_mc_iter,
-                    args.target_block_errors, args.seed)
+    rows = simulate(
+        args.channel,
+        args.snr_db,
+        args.jsr_db,
+        args.batch_size,
+        args.max_mc_iter,
+        args.target_block_errors,
+        args.seed,
+    )
 
     out_dir = results_dir() / "ber_bler"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -105,7 +145,9 @@ def main(argv=None):
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
-    save(plot(rows, args.channel, args.snr_db), stem)
+    with paper_style():
+        fig = plot(rows, args.channel, args.snr_db)
+    save(fig, stem)
     print(f"Wrote {stem}.csv/.pdf/.png")
 
 

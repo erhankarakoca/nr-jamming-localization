@@ -13,10 +13,10 @@ COLUMN_WIDTH = 3.5  # IEEE two-column layout, single column [inch]
 
 # Okabe-Ito colors; every attack also has its own marker and line style
 ATTACK_STYLE = {
-    "none": dict(color="#000000", marker="x", linestyle=":"),
-    "pilot": dict(color="#0072B2", marker="o", linestyle="-"),
-    "data": dict(color="#D55E00", marker="s", linestyle="--"),
-    "partial": dict(color="#009E73", marker="^", linestyle="-."),
+    "none": {"color": "#000000", "marker": "x", "linestyle": ":"},
+    "pilot": {"color": "#0072B2", "marker": "o", "linestyle": "-"},
+    "data": {"color": "#D55E00", "marker": "s", "linestyle": "--"},
+    "partial": {"color": "#009E73", "marker": "^", "linestyle": "-."},
 }
 
 RC = {
@@ -35,16 +35,19 @@ RC = {
 }
 
 
+def paper_style():
+    """Context manager: everything drawn inside it uses the paper style."""
+    return mpl.rc_context(RC)
+
+
 def new_figure(width: float = COLUMN_WIDTH, height: float = 2.4, **subplot_kw):
-    """Figure and axes with the paper style applied."""
-    with mpl.rc_context(RC):
-        fig = Figure(figsize=(width, height), layout="constrained")
-        axes = fig.subplots(**subplot_kw)
-    return fig, axes
+    """Figure and axes; call inside ``paper_style()`` so labels get the paper fonts."""
+    fig = Figure(figsize=(width, height), layout="constrained")
+    return fig, fig.subplots(**subplot_kw)
 
 
 def save(fig: Figure, path_without_suffix: Path) -> None:
     """Save as PDF (for the paper) and PNG (for slides and quick viewing)."""
-    with mpl.rc_context(RC):
+    with paper_style():
         for suffix in (".pdf", ".png"):
             fig.savefig(path_without_suffix.with_suffix(suffix))

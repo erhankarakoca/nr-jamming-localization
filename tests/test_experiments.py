@@ -5,8 +5,9 @@ from jamloc.experiments import ber_bler
 
 def test_ber_bler_script_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
-    ber_bler.main(["--channel", "A", "--batch-size", "8", "--max-mc-iter", "1",
-                   "--jsr-db", "-10", "5"])
+    ber_bler.main(
+        ["--channel", "A", "--batch-size", "8", "--max-mc-iter", "1", "--jsr-db", "-10", "5"]
+    )
     out = tmp_path / "ber_bler"
     assert (out / "ber_bler_A.png").is_file()
     assert (out / "ber_bler_A.pdf").is_file()
@@ -16,3 +17,12 @@ def test_ber_bler_script_runs(tmp_path, monkeypatch):
     assert attacks == {"none", "pilot", "data", "partial"}
     assert len(rows) == 1 + 3 * 2  # benign reference + 3 attacks x 2 JSR points
     assert {"jsr_db", "energy_db", "ber", "bler"} <= set(rows[0])
+
+
+def test_feature_maps_script_runs(tmp_path, monkeypatch):
+    from jamloc.experiments import feature_maps
+
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
+    feature_maps.main(["--snr-db", "15", "--jsr-db", "0"])
+    assert (tmp_path / "feature_maps.png").is_file()
+    assert (tmp_path / "feature_maps.pdf").is_file()
