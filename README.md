@@ -64,7 +64,7 @@ training).
 ```bash
 git pull                  # get work from the other machine
 uv sync                   # pick up any dependency changes
-uv run python <script>    # or: source .venv/bin/activate
+uv run python <script>    # or activate: source .venv/bin/activate (macOS/Linux), .venv\Scripts\activate (Windows)
 uv run jupyter lab        # notebooks
 git add -A && git commit -m "..." && git push
 ```
