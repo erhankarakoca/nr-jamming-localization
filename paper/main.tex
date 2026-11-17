@@ -31,8 +31,8 @@ without jamming depends on neither the channel nor the SNR, which yields an anal
 constant-false-alarm threshold and closed-form detection probabilities, and that EVM alone
 reports pilot jamming at the wrong symbols because the damage appears in unjammed data. A
 66k-parameter U-Net fusing the three features reaches a cell-level F1 of 0.95 at a 1\%
-per-cell false-alarm rate in a Sionna PUSCH simulation, and a 7.7k-parameter version runs in
-0.43\,ms per slot on one CPU core. Used by the receiver to weight pilots and log-likelihood
+per-cell false-alarm rate in a Sionna PUSCH simulation, and a 7.7k-parameter version (F1 0.94)
+runs in 0.43\,ms per slot on one CPU core as a frozen graph. Used by the receiver to weight pilots and log-likelihood
 ratios by the estimated jamming power, the map restores the link under strong jamming without
 the penalty that hard erasure pays at weak jamming.
 \end{abstract}
@@ -166,9 +166,9 @@ exponential with means $\sigma_p^2 \mu_i$.
 The threshold $\eta_b(\alpha)$ with $\Pr\{R_b > \eta_b\} = \alpha$ therefore follows from the
 allocation alone, and the test $R_b > \eta_b(\alpha)$ is a constant-false-alarm-rate (CFAR)
 test with respect to SNR and channel. In practice the condition $\Pperp\mathbf{h} = \mathbf{0}$
-holds approximately: a single path near $\tau_{\max}$ leaves about $1.4\cdot 10^{-4}$ of its
-energy in the residual of a band-edge PRB, which is negligible against the noise up to about
-25\,dB SNR; beyond that, $\tau_{\max}$ or the retained energy fraction must grow. The tail of~\eqref{eq:null} is that of a chain of
+holds approximately: a single path at $\tau_{\max}$ leaves about $1.4\cdot 10^{-4}$ of its
+energy in the residual of a band-edge PRB (at 2.6\,$\mu$s, the last tap of TDL-C, $4\cdot
+10^{-6}$), which is negligible against the noise up to about 25\,dB SNR; beyond that, $\tau_{\max}$ or the retained energy fraction must grow. The tail of~\eqref{eq:null} is that of a chain of
 exponential stages with rates $1/\lambda_{b,i}$, computed exactly as
 $\Pr\{R_b > t\} = \mathbf{e}_1^T \exp(\mathbf{Q}_b t) \mathbf{1}$, with $\mathbf{Q}_b$ the
 bidiagonal generator ($-1/\lambda_{b,i}$ on the diagonal, $1/\lambda_{b,i}$ above it); unlike
@@ -218,8 +218,7 @@ interpolated by an LMMSE filter with the same delay model as the residual,
 \end{equation}
 where $\mathbf{c}_k$ is the correlation of subcarrier $k$ with the pilots and
 $\mathbf{D} = \sigma_p^2 \diag(\delta_p)$, with $\delta_p = \max(R_{b(p)}, 1)$ if the DMRS cell
-of the pilot's PRB is flagged and $\delta_p = 1$ otherwise; $\mathbb{E}[R_b] \approx 1 + \rho$
-under jamming. For the data, the jamming power on PRB $b$ is estimated from the excess
+of the pilot's PRB is flagged and $\delta_p = 1$ otherwise; for a jammed PRB, $\mathbb{E}[R_b]$ is roughly $1 + \rho|g|^2$. For the data, the jamming power on PRB $b$ is estimated from the excess
 received energy of its flagged data resource elements $\mathcal{F}_b$,
 \begin{equation}
   \hat{S}_b = \max\Big(0, \frac{1}{|\mathcal{F}_b|} \sum_{(k,l) \in \mathcal{F}_b}
@@ -416,8 +415,8 @@ probabilities, confirmed by the link simulation. Fused with power and EVM in a U
 thousand parameters, it localizes pilot, data and partial-band jamming at 1\% per-cell false
 alarm, including weak pilot jamming that EVM-based maps place on the wrong symbols, within one
 slot of CPU time. Used to decide where the receiver estimates the jamming power, rather than what
-it erases, the map protects the link against strong jamming at no cost under weak jamming or
-false alarms.
+it erases, the map protects the link against strong jamming at no measurable cost under weak jamming
+or false alarms.
 
 The study is limited to one receive antenna, a Gaussian jammer aligned with the slot grid,
 perfect synchronization and known noise power. The residual generalizes naturally to multiple
