@@ -1,15 +1,20 @@
 """Per-cell jamming features from quantities the gNB receiver already has.
 
 A cell is one PRB x one OFDM symbol, so every feature is a 24 x 14 map per slot. All three are
-normalized by the noise so that a slot without jamming gives values around 1 (0 dB):
+divided by the noise level:
 
 * **Power P** - received energy in the cell / noise variance. Defined everywhere on the carrier.
+  About 1 on empty cells and about 1 + SNR on scheduled cells without jamming.
 * **DMRS residual R** - the LS channel estimates at the pilots, minus their projection onto the
   set of channels that are physically possible (delays up to ``tau_max``). The user's own signal
   lies in that set, so what remains is interference plus noise. Defined on the DMRS symbol of the
-  scheduled PRBs.
+  scheduled PRBs. About 1 without jamming at any SNR (slightly lower on the two edge PRBs).
 * **EVM E** - distance from each equalized symbol to the nearest QPSK point, divided by the noise
-  variance the LMMSE equalizer expects. Defined on the data symbols of the scheduled PRBs.
+  variance the LMMSE equalizer expects. Defined on the data symbols of the scheduled PRBs. About 1
+  without jamming at moderate SNR, but it grows at high SNR (mean ~2 at 25 dB and ~4 at 30 dB on
+  TDL-C): the LS estimator's error variance leaves out interpolation error and channel aging, so
+  the equalizer underestimates the true error. Thresholds and the U-Net are calibrated on data
+  that contains this effect.
 """
 
 from functools import cache
