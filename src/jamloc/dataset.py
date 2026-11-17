@@ -8,6 +8,10 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   TDL-A and TDL-C alternating per batch, jammer anywhere on the carrier.
 * ``test`` - grid over channel x attack x JSR (-15 ... 9 dB in 3 dB steps), plus benign slots.
 * ``sched`` - same grid, but the jammer hits exactly the scheduled PRBs (never seen in training).
+* Generalization (same grid, conditions never seen in training, see ``GENERALIZATION``):
+  ``longdelay`` - TDL-C with 1000 ns delay spread, so channel delays reach 8.7 us, far beyond the
+  ``tau_max`` = 3 us the DMRS residual assumes; ``fast`` - UE and jammer moving at up to 30 m/s
+  instead of 3 m/s; ``qpskjam`` - the jammer sends random QPSK symbols instead of Gaussian noise.
 
 Each split is one ``.npz`` file in ``data_dir()``: ``features`` ``[N, 6, 24, 14]`` (stored as
 float16), ``labels`` ``[N, 24, 14]`` and one value per slot for every key in ``META_KEYS``.
@@ -16,6 +20,7 @@ float16), ``labels`` ``[N, 24, 14]`` and one value per slot for every key in ``M
 """
 
 import argparse
+import dataclasses
 import math
 import time
 
@@ -46,6 +51,29 @@ SPLITS = {
     "test": {"seed": 3_000_000, "per_point": 500, "benign_per_channel": 2_000, "sched": False},
     "sched": {"seed": 4_000_000, "per_point": 300, "benign_per_channel": 0, "sched": True},
 }
+CORE_SPLITS = tuple(SPLITS)
+
+# Test conditions the detectors were not trained on: changes to SimConfig and the channel models
+GENERALIZATION = {
+    "longdelay": {
+        "seed": 5_000_000,
+        "channels": ("C",),
+        "cfg": {"delay_spread": {"A": 100e-9, "C": 1000e-9}},
+        "title": "TDL-C with 1000 ns delay spread (unseen)",
+    },
+    "fast": {
+        "seed": 6_000_000,
+        "cfg": {"max_speed": 30.0},
+        "title": "speeds up to 30 m/s (unseen)",
+    },
+    "qpskjam": {
+        "seed": 7_000_000,
+        "cfg": {"jammer_waveform": "qpsk"},
+        "title": "QPSK jamming waveform (unseen)",
+    },
+}
+for _name, _spec in GENERALIZATION.items():
+    SPLITS[_name] = {"per_point": 200, "benign_per_channel": 1_000, "sched": False, **_spec}
 
 
 def _random_jobs(num_slots: int, batch_size: int) -> list[dict]:
@@ -66,8 +94,9 @@ def _random_jobs(num_slots: int, batch_size: int) -> list[dict]:
 
 def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
     per_point, benign = spec["per_point"], spec["benign_per_channel"]
+    channels = spec.get("channels", CHANNELS)
     if num_slots is not None:  # smaller version of the same grid
-        scale = num_slots / (len(CHANNELS) * 3 * len(TEST_JSR_DB) * per_point)
+        scale = num_slots / (len(channels) * 3 * len(TEST_JSR_DB) * per_point)
         per_point = max(1, int(per_point * scale))
         benign = max(1, round(benign * scale)) if benign else 0
 
@@ -75,7 +104,7 @@ def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
         return [dict(n=min(batch_size, total - s), **kw) for s in range(0, total, batch_size)]
 
     jobs = []
-    for channel in CHANNELS:
+    for channel in channels:
         for attack in (1, 2, 3):
             for jsr in TEST_JSR_DB:
                 jobs += batches(
@@ -97,7 +126,7 @@ def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
     else:
         jobs = _random_jobs(num_slots or spec["num_slots"], batch_size)
 
-    cfg = SimConfig()
+    cfg = dataclasses.replace(SimConfig(), **spec.get("cfg", {}))
     link = JammedPUSCHLink(cfg)
     features, labels, meta = [], [], {k: [] for k in META_KEYS}
     start = time.perf_counter()

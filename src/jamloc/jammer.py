@@ -1,7 +1,8 @@
 """Resource-selective Gaussian jammer.
 
 The jammer knows the slot timing and the DMRS position but not the allocation. It puts complex
-Gaussian noise on a block of PRBs, on the OFDM symbols chosen by the attack pattern:
+Gaussian noise on a block of PRBs, on the OFDM symbols chosen by the attack pattern (a QPSK
+waveform can be chosen in ``SimConfig`` to test generalization):
 
 * ``none``    - no jamming (benign slot)
 * ``pilot``   - only the DMRS symbol
@@ -66,9 +67,14 @@ class Jammer(Block):
         re_mask = cells.repeat_interleave(12, dim=1)  # [B, 288, 14]
         re_mask = re_mask.transpose(1, 2)[:, None, None]  # [B, 1, 1, 14, 288]
 
-        # Unit-variance complex Gaussian noise, scaled to the jammer energy per RE
+        # Unit-variance complex Gaussian noise (or random QPSK symbols, also of unit energy),
+        # scaled to the jammer energy per RE
         z = complex_normal(
             re_mask.shape, precision=self.precision, device=self.device, generator=self.torch_rng
         )
+        if self.cfg.jammer_waveform == "qpsk":
+            z = (torch.sgn(z.real) + 1j * torch.sgn(z.imag)) / 2**0.5
+        elif self.cfg.jammer_waveform != "gaussian":
+            raise ValueError(f"unknown jammer waveform {self.cfg.jammer_waveform!r}")
         amplitude = torch.sqrt(10 ** (jsr_db.to(self.dtype) / 10))
         return z * amplitude[:, None, None, None, None] * re_mask

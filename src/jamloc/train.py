@@ -24,25 +24,37 @@ def _tensors(split: str, variant: str, device: str):
     return x, y
 
 
-def checkpoint_path(variant: str, seed: int = 0):
-    return results_dir() / "models" / f"{variant}_seed{seed}.pt"
+DEFAULT_WIDTH = 12  # channels of the first U-Net level (66 553 parameters for the fused variant)
 
 
-def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-3, seed: int = 0):
+def checkpoint_path(variant: str, seed: int = 0, width: int = DEFAULT_WIDTH):
+    """``fused_seed0.pt`` for the default width, ``fused_w4_seed0.pt`` for a narrower U-Net."""
+    tag = variant if width == DEFAULT_WIDTH else f"{variant}_w{width}"
+    return results_dir() / "models" / f"{tag}_seed{seed}.pt"
+
+
+def train(
+    variant: str,
+    epochs: int = 30,
+    batch_size: int = 128,
+    lr: float = 1e-3,
+    seed: int = 0,
+    width: int = DEFAULT_WIDTH,
+):
     """Train a variant and save its best weights. Returns the checkpoint path."""
     torch.manual_seed(seed)
     device = config.device
     x_tr, y_tr = _tensors("train", variant, device)
     x_va, y_va = _tensors("val", variant, device)
 
-    model = TinyUNet(x_tr.shape[1]).to(device)
+    model = TinyUNet(x_tr.shape[1], base=width).to(device)
     # Jammed cells are rare, so weight them up in the loss
     pos_weight = (y_tr == 0).sum() / (y_tr == 1).sum().clamp_min(1)
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
-    path = checkpoint_path(variant, seed)
+    path = checkpoint_path(variant, seed, width)
     path.parent.mkdir(parents=True, exist_ok=True)
     best = float("inf")
     gen = torch.Generator().manual_seed(seed)
@@ -73,6 +85,7 @@ def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-
                     "variant": variant,
                     "seed": seed,
                     "in_channels": x_tr.shape[1],
+                    "width": width,
                     "epoch": epoch,
                     "val_loss": val_loss,
                     "state_dict": model.state_dict(),
@@ -81,7 +94,8 @@ def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-
             )
         history.append({"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss})
         print(
-            f"[{variant}, seed {seed}] epoch {epoch + 1}/{epochs}  train loss {train_loss:.4f}  "
+            f"[{variant}, width {width}, seed {seed}] epoch {epoch + 1}/{epochs}  "
+            f"train loss {train_loss:.4f}  "
             f"val loss {val_loss:.4f}  ({time.perf_counter() - start:.1f} s)",
             flush=True,
         )
@@ -93,10 +107,10 @@ def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-
     return path
 
 
-def load_model(variant: str, seed: int = 0) -> TinyUNet:
+def load_model(variant: str, seed: int = 0, width: int = DEFAULT_WIDTH) -> TinyUNet:
     """Trained model in eval mode, on ``sionna.phy.config.device``."""
-    ckpt = torch.load(checkpoint_path(variant, seed), map_location=config.device)
-    model = TinyUNet(ckpt["in_channels"]).to(config.device)
+    ckpt = torch.load(checkpoint_path(variant, seed, width), map_location=config.device)
+    model = TinyUNet(ckpt["in_channels"], base=ckpt.get("width", DEFAULT_WIDTH)).to(config.device)
     model.load_state_dict(ckpt["state_dict"])
     return model.eval()
 
@@ -108,10 +122,12 @@ def main(argv=None):
     p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--seeds", type=int, nargs="+", default=[0])
+    p.add_argument("--width", type=int, default=DEFAULT_WIDTH, help="channels of the first level")
     args = p.parse_args(argv)
     for variant in VARIANTS if args.variant == "all" else [args.variant]:
         for seed in args.seeds:
-            print("Saved", train(variant, args.epochs, args.batch_size, args.lr, seed))
+            path = train(variant, args.epochs, args.batch_size, args.lr, seed, args.width)
+            print("Saved", path)
 
 
 if __name__ == "__main__":

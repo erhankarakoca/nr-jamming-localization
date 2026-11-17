@@ -20,7 +20,7 @@ import time
 import zipfile
 
 from jamloc import evaluate
-from jamloc.dataset import SPLITS, generate
+from jamloc.dataset import CORE_SPLITS, generate
 from jamloc.experiments import figures, recovery
 from jamloc.model import VARIANTS
 from jamloc.paths import data_dir, results_dir
@@ -44,7 +44,7 @@ def main(argv=None):
     start = time.perf_counter()
 
     # 1. Datasets
-    for split in SPLITS:
+    for split in CORE_SPLITS:
         if args.reuse_data and (data_dir() / f"{split}.npz").is_file():
             print(f"[data] keeping existing {split}.npz")
             continue

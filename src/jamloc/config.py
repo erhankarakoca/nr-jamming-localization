@@ -23,6 +23,10 @@ class SimConfig:
     # Largest channel delay assumed by the DMRS residual feature
     tau_max: float = 3e-6  # [s]
 
+    # Jamming waveform per resource element: "gaussian" (the threat model) or "qpsk" (random
+    # constant-envelope symbols, only used to test generalization)
+    jammer_waveform: str = "gaussian"
+
     @property
     def num_subcarriers(self) -> int:
         return 12 * self.num_prb
