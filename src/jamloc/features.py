@@ -121,14 +121,15 @@ def evm_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
     ) / np.sqrt(2)
     error = (x_hat - decision).abs() ** 2
 
-    # Sum error and expected noise over the resource elements of each cell
+    # Put error and expected noise back on the resource grid, then sum the 12 subcarriers of each
+    # cell (every RE is written once, so this is deterministic on GPU as well)
     sym, sc = data_positions(batch.tx)
     num_prb = batch.scenario.alloc_size
-    cell = ((sc // 12) * cfg.num_symbols + sym).to(x_hat.device)
     sums = []
     for v in (error, no_eff):
-        s = v.new_zeros(v.shape[0], num_prb * cfg.num_symbols)
-        sums.append(s.index_add_(1, cell, v).reshape(-1, num_prb, cfg.num_symbols))
+        grid = v.new_zeros(v.shape[0], cfg.num_symbols, 12 * num_prb)
+        grid[:, sym, sc] = v
+        sums.append(grid.reshape(-1, cfg.num_symbols, num_prb, 12).sum(-1).transpose(1, 2))
     err_sum, no_sum = sums
     e = torch.where(no_sum > 0, err_sum / no_sum.clamp_min(1e-12), 0.0)
     return _to_carrier(e, batch, cfg)

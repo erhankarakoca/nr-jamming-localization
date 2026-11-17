@@ -108,3 +108,24 @@ def test_benign_residual_is_flat_across_the_allocation():
     sc = draw_scenario(rng, 256, cfg, "A", attacks=(NONE,), snr_db=20.0, alloc=(6, 12))
     r = residual_map(link(sc), cfg)[:, 6:18, cfg.dmrs_symbol].mean(0)
     assert torch.all((r > 0.9) & (r < 1.12)), r
+
+
+def test_evm_map_matches_per_cell_average():
+    from jamloc.receiver import data_positions
+
+    out = _batch(9, "A", DATA, snr_db=15.0, batch=4, alloc=(3, 6))
+    e = evm_map(out, cfg)
+    x_hat, no_eff = out.rx["x_hat"], out.rx["no_eff"]
+    decision = (
+        torch.where(x_hat.real >= 0, 1.0, -1.0) + 1j * torch.where(x_hat.imag >= 0, 1.0, -1.0)
+    ) / 2**0.5
+    error = (x_hat - decision).abs() ** 2
+    sym, sc = data_positions(out.tx)
+    for prb in range(6):
+        for s in range(14):
+            cell = (sc // 12 == prb) & (sym == s)
+            if s == cfg.dmrs_symbol:
+                assert torch.all(e[:, 3 + prb, s] == 0)
+                continue
+            ref = error[:, cell].sum(1) / no_eff[:, cell].sum(1)
+            assert torch.allclose(e[:, 3 + prb, s], ref, rtol=1e-5)
