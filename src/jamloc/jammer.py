@@ -67,7 +67,8 @@ class Jammer(Block):
         re_mask = re_mask.transpose(1, 2)[:, None, None]  # [B, 1, 1, 14, 288]
 
         # Unit-variance complex Gaussian noise, scaled to the jammer energy per RE
-        z = complex_normal(re_mask.shape, precision=self.precision, device=self.device,
-                           generator=self.torch_rng)
+        z = complex_normal(
+            re_mask.shape, precision=self.precision, device=self.device, generator=self.torch_rng
+        )
         amplitude = torch.sqrt(10 ** (jsr_db.to(self.dtype) / 10))
         return z * amplitude[:, None, None, None, None] * re_mask

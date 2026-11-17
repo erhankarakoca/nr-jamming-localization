@@ -50,8 +50,9 @@ class PUSCHReceiverChain(Block):
         )
         self.equalizer = LMMSEEqualizer(rg, sm)
         self.demapper = Demapper("maxlog", "qam", tx._num_bits_per_symbol)
-        self.layer_demapper = LayerDemapper(tx._layer_mapper,
-                                            num_bits_per_symbol=tx._num_bits_per_symbol)
+        self.layer_demapper = LayerDemapper(
+            tx._layer_mapper, num_bits_per_symbol=tx._num_bits_per_symbol
+        )
         self.decoder = TBDecoder(tx._tb_encoder)
 
     def call(self, y: torch.Tensor, no: torch.Tensor, decode: bool = True) -> dict:

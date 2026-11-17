@@ -28,8 +28,9 @@ def test_benign_tdl_high_snr_decodes():
     config.seed = 1
     tx = pool.transmitter(8)
     rx = PUSCHReceiverChain(tx)
-    tdl = TDL("A", cfg.delay_spread["A"], cfg.carrier_frequency, min_speed=0.0,
-              max_speed=cfg.max_speed)
+    tdl = TDL(
+        "A", cfg.delay_spread["A"], cfg.carrier_frequency, min_speed=0.0, max_speed=cfg.max_speed
+    )
     channel = OFDMChannel(tdl, tx.resource_grid, normalize_channel=True)
     no = torch.full((16,), 10 ** (-30 / 10), device=config.device)
 

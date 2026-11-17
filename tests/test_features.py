@@ -21,8 +21,9 @@ NONE, PILOT, DATA = (ATTACKS.index(a) for a in ("none", "pilot", "data"))
 
 def _batch(seed, channel, attack, snr_db, jsr_db=0.0, batch=64, **kw):
     rng = seed_everything(seed)
-    sc = draw_scenario(rng, batch, cfg, channel, attacks=(attack,), jsr_db=jsr_db,
-                       snr_db=snr_db, **kw)
+    sc = draw_scenario(
+        rng, batch, cfg, channel, attacks=(attack,), jsr_db=jsr_db, snr_db=snr_db, **kw
+    )
     return link(sc)
 
 
@@ -78,4 +79,4 @@ def test_features_finite_and_masked(alloc):
     assert torch.all(r[dmrs == 0] == 0) and torch.all(e[data == 0] == 0)
     start, size = alloc
     alloc_rows = f[:, names.index("alloc_mask")].amax(dim=2)  # [B, 24]
-    assert alloc_rows[:, start:start + size].all() and alloc_rows.sum(1).eq(size).all()
+    assert alloc_rows[:, start : start + size].all() and alloc_rows.sum(1).eq(size).all()

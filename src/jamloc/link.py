@@ -117,8 +117,8 @@ class JammedPUSCHLink:
     """The whole link. A plain class (not a Sionna ``Block``) because it takes a ``Scenario``,
     which Sionna's automatic input-to-tensor conversion does not accept."""
 
-    def __init__(self, cfg: SimConfig = SimConfig()):
-        self.cfg = cfg
+    def __init__(self, cfg: SimConfig | None = None):
+        self.cfg = cfg or SimConfig()
         self.device = config.device
         self.ue = UEPool(cfg)
         self._receivers = {}
@@ -128,8 +128,13 @@ class JammedPUSCHLink:
         self.ue_channel, self.jammer_channel = {}, {}
         for model in ("A", "C"):
             for channels in (self.ue_channel, self.jammer_channel):
-                tdl = TDL(model, cfg.delay_spread[model], cfg.carrier_frequency,
-                          min_speed=0.0, max_speed=cfg.max_speed)
+                tdl = TDL(
+                    model,
+                    cfg.delay_spread[model],
+                    cfg.carrier_frequency,
+                    min_speed=0.0,
+                    max_speed=cfg.max_speed,
+                )
                 channels[model] = OFDMChannel(tdl, rg, normalize_channel=True)
 
         self.jammer = Jammer(cfg)
@@ -150,8 +155,12 @@ class JammedPUSCHLink:
         y_ue = self.ue_channel[sc.channel](x)
 
         # Jammer: Gaussian noise on the attacked cells, through its own channel
-        labels = cell_mask(sc.attack.to(self.device), sc.jam_start.to(self.device),
-                           sc.jam_size.to(self.device), cfg)
+        labels = cell_mask(
+            sc.attack.to(self.device),
+            sc.jam_start.to(self.device),
+            sc.jam_size.to(self.device),
+            cfg,
+        )
         z = self.jammer(labels, sc.jsr_db)
         y_jam = self.jammer_channel[sc.channel](z)
 
@@ -163,9 +172,16 @@ class JammedPUSCHLink:
         y_alloc = take_allocation(y, sc.alloc_start, sc.alloc_size)
         rx = self.receiver(sc.alloc_size)(y_alloc, no, decode=decode)
 
-        return SlotBatch(y=y[:, 0, 0], no=no, labels=labels, scenario=sc, y_alloc=y_alloc,
-                         rx=rx, b=b, tx=tx)
+        return SlotBatch(
+            y=y[:, 0, 0], no=no, labels=labels, scenario=sc, y_alloc=y_alloc, rx=rx, b=b, tx=tx
+        )
 
 
-__all__ = ["ATTACKS", "JammedPUSCHLink", "Scenario", "SlotBatch", "draw_scenario",
-           "seed_everything"]
+__all__ = [
+    "ATTACKS",
+    "JammedPUSCHLink",
+    "Scenario",
+    "SlotBatch",
+    "draw_scenario",
+    "seed_everything",
+]

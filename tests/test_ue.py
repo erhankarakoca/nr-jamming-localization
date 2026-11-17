@@ -29,5 +29,5 @@ def test_place_and_take_roundtrip(start, num_prb):
 def test_transmitter_cached():
     pool = UEPool(cfg)
     assert pool.transmitter(8) is pool.transmitter(8)
-    x, b = pool.transmitter(8)(2)
+    x, _b = pool.transmitter(8)(2)
     assert x.shape == (2, 1, 1, 14, 96)

@@ -39,8 +39,9 @@ def test_benign_high_snr_decodes():
 
 def test_partial_jamming_breaks_link():
     rng = seed_everything(2)
-    sc = draw_scenario(rng, 32, cfg, "A", attacks=(PARTIAL,), jsr_db=10.0, snr_db=25.0,
-                       scheduling_aware=True)
+    sc = draw_scenario(
+        rng, 32, cfg, "A", attacks=(PARTIAL,), jsr_db=10.0, snr_db=25.0, scheduling_aware=True
+    )
     assert _bler(link(sc, decode=True)) > 0.5
 
 

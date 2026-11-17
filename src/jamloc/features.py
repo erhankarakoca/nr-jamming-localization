@@ -12,7 +12,7 @@ normalized by the noise so that a slot without jamming gives values around 1 (0 
   variance the LMMSE equalizer expects. Defined on the data symbols of the scheduled PRBs.
 """
 
-from functools import lru_cache
+from functools import cache
 
 import numpy as np
 import torch
@@ -62,7 +62,7 @@ def dmrs_ls(y_alloc: torch.Tensor, tx: PUSCHTransmitter):
     return h_ls, sc, pilot_power
 
 
-@lru_cache(maxsize=None)
+@cache
 def _subspace(pilot_sc: tuple, scs: float, tau_max: float, energy: float) -> np.ndarray:
     # Frequency correlation of a channel whose delays are spread uniformly over [0, tau_max]
     df = (np.subtract.outer(pilot_sc, pilot_sc)) * scs
@@ -73,8 +73,9 @@ def _subspace(pilot_sc: tuple, scs: float, tau_max: float, energy: float) -> np.
     return eigvec[:, :num]
 
 
-def delay_subspace(pilot_sc: torch.Tensor, scs: float, tau_max: float,
-                   energy: float = 1 - 1e-6) -> torch.Tensor:
+def delay_subspace(
+    pilot_sc: torch.Tensor, scs: float, tau_max: float, energy: float = 1 - 1e-6
+) -> torch.Tensor:
     """Orthonormal basis ``[N_p, L]`` of all channel responses with delays up to ``tau_max``."""
     basis = _subspace(tuple(pilot_sc.tolist()), scs, tau_max, energy)
     return torch.as_tensor(basis.copy(), dtype=torch.complex64, device=pilot_sc.device)
@@ -107,8 +108,9 @@ def evm_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
     x_hat, no_eff = batch.rx["x_hat"], batch.rx["no_eff"]
 
     # Nearest QPSK point (Sionna's QPSK constellation is (+-1 +-1j)/sqrt(2))
-    decision = (torch.where(x_hat.real >= 0, 1.0, -1.0)
-                + 1j * torch.where(x_hat.imag >= 0, 1.0, -1.0)) / np.sqrt(2)
+    decision = (
+        torch.where(x_hat.real >= 0, 1.0, -1.0) + 1j * torch.where(x_hat.imag >= 0, 1.0, -1.0)
+    ) / np.sqrt(2)
     error = (x_hat - decision).abs() ** 2
 
     # Sum error and expected noise over the resource elements of each cell
@@ -131,7 +133,9 @@ def masks(batch: SlotBatch, cfg: SimConfig):
     """``alloc_mask``, ``dmrs_mask``, ``data_mask``, each ``[B, 24, 14]`` float (1 = defined)."""
     b = batch.scenario.batch_size
     alloc = torch.zeros(b, cfg.num_prb, cfg.num_symbols, device=batch.y.device)
-    alloc[:, batch.scenario.alloc_start : batch.scenario.alloc_start + batch.scenario.alloc_size] = 1
+    alloc[
+        :, batch.scenario.alloc_start : batch.scenario.alloc_start + batch.scenario.alloc_size
+    ] = 1
     dmrs = torch.zeros_like(alloc)
     dmrs[:, :, cfg.dmrs_symbol] = alloc[:, :, cfg.dmrs_symbol]
     return alloc, dmrs, alloc - dmrs
