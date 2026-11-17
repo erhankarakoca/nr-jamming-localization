@@ -38,3 +38,17 @@ def f1(pred: np.ndarray, label: np.ndarray) -> float:
     fp = np.sum(pred & ~label)
     fn = np.sum(~pred & label)
     return float(2 * tp / (2 * tp + fp + fn)) if (tp + fp + fn) else 1.0
+
+
+def wilson_interval(errors, trials, z: float = 1.96):
+    """95% confidence interval of an error rate ``errors / trials`` (Wilson score interval).
+
+    Unlike the naive "rate +- 2 sigma" it stays inside [0, 1] and still gives a useful upper bound
+    when no error was observed (about 3.8 / trials).
+    """
+    k, n = np.asarray(errors, float), np.asarray(trials, float)
+    p = k / n
+    denom = 1 + z**2 / n
+    center = (p + z**2 / (2 * n)) / denom
+    half = z * np.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / denom
+    return np.clip(center - half, 0, 1), np.clip(center + half, 0, 1)

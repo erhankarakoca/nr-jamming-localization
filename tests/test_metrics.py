@@ -47,3 +47,12 @@ def test_threshold_counts_only_cells_the_detector_scores():
 
 def test_threshold_when_detector_scores_no_negative_cell():
     assert threshold_at_fa(np.full(10, -np.inf)) == -np.inf
+
+
+def test_wilson_interval():
+    from jamloc.metrics import wilson_interval
+
+    lo, hi = wilson_interval(np.array([0, 50, 100]), np.array([100, 100, 100]))
+    assert lo[0] == 0 and abs(hi[0] - 0.0370) < 1e-3  # no error in 100: below ~3.7%
+    assert lo[1] < 0.5 < hi[1] and abs((0.5 - lo[1]) - (hi[1] - 0.5)) < 1e-9
+    assert abs(hi[2] - 1) < 1e-12 and 0.95 < lo[2] < 1

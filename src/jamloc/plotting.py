@@ -51,3 +51,36 @@ def save(fig: Figure, path_without_suffix: Path) -> None:
     with paper_style():
         for suffix in (".pdf", ".png"):
             fig.savefig(path_without_suffix.with_suffix(suffix))
+
+
+def plot_bler(ax, x, errors, blocks, style: dict, label: str | None = None) -> None:
+    """BLER curve with its 95% confidence band; points without any block error are shown as a
+    hollow downward triangle at their 95% upper bound instead of disappearing from the log axis.
+    """
+    import numpy as np
+
+    from jamloc.metrics import wilson_interval
+
+    x, errors, blocks = (np.asarray(v, float) for v in (x, errors, blocks))
+    lo, hi = wilson_interval(errors, blocks)
+    seen = errors > 0
+    color = style.get("color", "black")
+    ax.plot(x[seen], errors[seen] / blocks[seen], label=label, **style)
+    ax.fill_between(x[seen], np.maximum(lo[seen], 1e-6), hi[seen], color=color, alpha=0.15, lw=0)
+    ax.plot(x[~seen], hi[~seen], ls="none", marker="v", mfc="none", mec=color, ms=4)
+
+
+def zero_error_handle():
+    """Legend entry explaining the hollow triangles drawn by ``plot_bler``."""
+    from matplotlib.lines import Line2D
+
+    return Line2D(
+        [],
+        [],
+        ls="none",
+        marker="v",
+        mfc="none",
+        mec="black",
+        ms=4,
+        label="no block error: 95% upper bound",
+    )
