@@ -245,10 +245,12 @@ def plot(rows, channel, receivers=MAIN_RECEIVERS, shade=True):
         )
     axes[0].set_ylabel(f"BLER (TDL-{channel}, SNR {rows[0]['snr_db']:g} dB)")
     handles = axes[0].get_legend_handles_labels()[0] + [zero_error_handle()]
-    fig.legend(handles=handles, loc="outside lower center", ncols=len(handles), frameon=False)
+    fig.legend(
+        handles=handles, loc="outside lower center", ncols=min(len(handles), 4), frameon=False
+    )
     benign = {r["receiver"]: r["bler"] for r in rows if r["attack"] == "none"}
     fig.suptitle(
-        f"UE on {ALLOC[1]} PRBs, jammer on {JAM_SIZE} of them; bands: 95% confidence. "
+        f"UE on {ALLOC[1]} PRBs, jammer on {JAM_SIZE} of them; bands: 95% confidence.\n"
         f"Without a jammer: BLER {benign.get('standard', float('nan')):.3f} unprotected, "
         f"{benign.get('map_p_r_e', float('nan')):.3f} with the P+R+E map"
     )
@@ -264,24 +266,32 @@ def main(argv=None):
     p.add_argument("--max-mc-iter", type=int, default=100)
     p.add_argument("--target-block-errors", type=int, default=100)
     p.add_argument("--seed", type=int, default=0, help="training seed of the detector models")
+    p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     args = p.parse_args(argv)
 
-    rows = simulate(
-        args.channel,
-        args.snr_db,
-        args.jsr_db,
-        args.batch_size,
-        args.max_mc_iter,
-        args.target_block_errors,
-        args.seed,
-    )
     out = results_dir() / "recovery"
     out.mkdir(parents=True, exist_ok=True)
     stem = out / f"recovery_{args.channel}"
-    with open(stem.with_suffix(".csv"), "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    if args.plot_only:
+        with open(stem.with_suffix(".csv"), encoding="utf-8", newline="") as f:
+            text = ("receiver", "attack")
+            rows = [
+                {k: (v if k in text else float(v)) for k, v in r.items()} for r in csv.DictReader(f)
+            ]
+    else:
+        rows = simulate(
+            args.channel,
+            args.snr_db,
+            args.jsr_db,
+            args.batch_size,
+            args.max_mc_iter,
+            args.target_block_errors,
+            args.seed,
+        )
+        with open(stem.with_suffix(".csv"), "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
     with paper_style():
         main_fig = plot(rows, args.channel)  # the message: no protection vs map vs true map
         ablation = plot(

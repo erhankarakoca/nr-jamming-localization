@@ -116,4 +116,9 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
     assert {r["receiver"] for r in limit} == {"standard", "true_map"}
     assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
     assert (out / "recovery_A_ablation.png").is_file()
+
+    # Redraw from the saved CSV without simulating again
+    (out / "recovery_A.png").unlink()
+    recovery.main(["--channel", "A", "--plot-only"])
+    assert (out / "recovery_A.png").is_file()
     assert all(int(r["block_errors"]) <= int(r["blocks"]) for r in rows)
