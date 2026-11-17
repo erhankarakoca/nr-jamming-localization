@@ -100,3 +100,11 @@ def test_features_finite_and_masked(alloc):
     start, size = alloc
     alloc_rows = f[:, names.index("alloc_mask")].amax(dim=2)  # [B, 24]
     assert alloc_rows[:, start : start + size].all() and alloc_rows.sum(1).eq(size).all()
+
+
+def test_benign_residual_is_flat_across_the_allocation():
+    # Edge PRBs keep less noise after the projection; the normalization must account for it
+    rng = seed_everything(8)
+    sc = draw_scenario(rng, 256, cfg, "A", attacks=(NONE,), snr_db=20.0, alloc=(6, 12))
+    r = residual_map(link(sc), cfg)[:, 6:18, cfg.dmrs_symbol].mean(0)
+    assert torch.all((r > 0.9) & (r < 1.12)), r

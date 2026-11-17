@@ -8,7 +8,7 @@ divided by the noise level:
 * **DMRS residual R** - the LS channel estimates at the pilots, minus their projection onto the
   set of channels that are physically possible (delays up to ``tau_max``). The user's own signal
   lies in that set, so what remains is interference plus noise. Defined on the DMRS symbol of the
-  scheduled PRBs. About 1 without jamming at any SNR (slightly lower on the two edge PRBs).
+  scheduled PRBs. About 1 without jamming, at any SNR and on every PRB.
 * **EVM E** - distance from each equalized symbol to the nearest QPSK point, divided by the noise
   variance the LMMSE equalizer expects. Defined on the data symbols of the scheduled PRBs. About 1
   without jamming at moderate SNR, but it grows at high SNR (mean ~2 at 25 dB and ~4 at 30 dB on
@@ -90,15 +90,18 @@ def residual_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
     """DMRS residual per PRB, on the DMRS symbol of the scheduled PRBs; 0 elsewhere."""
     h_ls, pilot_sc, pilot_power = dmrs_ls(batch.y_alloc, batch.tx)
     u = delay_subspace(pilot_sc, cfg.scs, cfg.tau_max)
-    n_p, n_basis = u.shape
 
     # Remove the part of the pilot estimates that a real channel can explain
     residual = h_ls - (h_ls @ u.conj()) @ u.T
 
-    # Mean residual power per PRB, divided by what noise alone would leave
-    per_prb = (residual.abs() ** 2).reshape(h_ls.shape[0], -1, 6).mean(-1)  # 6 pilots per PRB
-    noise_only = batch.no[:, None] / pilot_power * (n_p - n_basis) / n_p
-    r = per_prb / noise_only
+    # Noise alone would leave N0/|x_p|^2 * (1 - ||u_k||^2) on pilot k: less near the band edges,
+    # where the subspace vectors are concentrated
+    kept = 1 - (u.abs() ** 2).sum(dim=1)  # [N_p]
+    noise_only = batch.no[:, None] / pilot_power * kept  # [B, N_p]
+
+    # Residual power per PRB (6 pilots) divided by what noise alone would leave there
+    b = h_ls.shape[0]
+    r = (residual.abs() ** 2).reshape(b, -1, 6).sum(-1) / noise_only.reshape(b, -1, 6).sum(-1)
 
     cells = r.new_zeros(r.shape[0], r.shape[1], cfg.num_symbols)
     cells[:, :, cfg.dmrs_symbol] = r
