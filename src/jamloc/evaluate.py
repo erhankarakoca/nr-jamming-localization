@@ -74,6 +74,7 @@ def evaluate_scores(scores: dict, val: dict, test: dict, fa: float = FA):
     for name, (s_val, s_test) in scores.items():
         thr = threshold_at_fa(s_val[val["labels"] == 0], fa)
         pred = s_test > thr
+        scored = s_test > -np.inf
 
         for attack in (1, 2, 3):
             for channel, ch_sel in channel_sel.items():
@@ -103,7 +104,9 @@ def evaluate_scores(scores: dict, val: dict, test: dict, fa: float = FA):
                     "detector": name,
                     "attack": group,
                     "f1": f1(pred[sel], labels[sel]),
+                    # false alarms over all non-jammed cells, and over those the detector scores
                     "fa": float((pred[sel] & neg).sum() / neg.sum()),
+                    "fa_scored": float((pred[sel] & neg).sum() / max((neg & scored[sel]).sum(), 1)),
                 }
             )
     return pd_rows, f1_rows
@@ -159,7 +162,10 @@ def main(argv=None):
 
     for r in f1_rows:
         if r["attack"] == "all":
-            print(f"{r['detector']:20s} F1 {r['f1']:.3f}  measured FA {r['fa']:.4f}")
+            print(
+                f"{r['detector']:20s} F1 {r['f1']:.3f}  FA (all cells) {r['fa']:.4f}  "
+                f"FA (scored cells) {r['fa_scored']:.4f}"
+            )
 
 
 if __name__ == "__main__":

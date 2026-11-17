@@ -5,16 +5,24 @@ non-jammed validation cells so that a fraction ``fa`` of them is flagged (per-ce
 rate); the detection probability is the fraction of jammed cells above that threshold.
 
 Detectors defined on only part of the grid (e.g. the residual, only on DMRS cells) give ``-inf``
-elsewhere: those cells are never flagged but still count in the false-alarm denominator, so all
-detectors are compared at the same number of false flags per slot.
+elsewhere. Those cells are never flagged and are left out of the false-alarm rate, so every
+detector flags 1% of the non-jammed cells *it looks at*. (Counting them would let a detector that
+scores few cells spend the whole 1% budget there, e.g. ~26% false alarm on DMRS cells.)
 """
 
 import numpy as np
 
 
 def threshold_at_fa(neg_scores: np.ndarray, fa: float = 0.01) -> float:
-    """Threshold such that a fraction ``fa`` of the negative (non-jammed) scores lie above it."""
-    return float(np.quantile(np.ravel(neg_scores), 1 - fa, method="higher"))
+    """Threshold such that a fraction ``fa`` of the scored negative (non-jammed) cells lie above it.
+
+    Cells the detector cannot score (``-inf``) are ignored.
+    """
+    neg = np.ravel(neg_scores)
+    neg = neg[neg > -np.inf]
+    if neg.size == 0:
+        return float("-inf")
+    return float(np.quantile(neg, 1 - fa, method="higher"))
 
 
 def detection_rate(pos_scores: np.ndarray, thr: float) -> float:

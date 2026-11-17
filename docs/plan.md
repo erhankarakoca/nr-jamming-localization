@@ -67,6 +67,8 @@ These fill gaps in the proposal. Each can be changed later without touching the 
      `(N0/|x_p|²)·(N_p − L)/N_p`. Defined on DMRS-symbol cells of allocated PRBs.
    - EVM `E`: mean `|x̂ − Q(x̂)|²` over a cell's data REs, divided by the mean LMMSE effective
      noise variance there (`Q` = nearest QPSK point). Defined on data cells of allocated PRBs.
+     Without jamming it rises above 1 at high SNR (the LS error variance leaves out interpolation
+     error and channel aging); documented rather than corrected.
    - Masks: `alloc_mask` (scheduled PRB, all symbols), `dmrs_mask` (where R is defined),
      `data_mask` (where E is defined). R and E are stored in dB, clamped to [−10, 40], and set
      to 0 outside their masks.
@@ -75,8 +77,9 @@ These fill gaps in the proposal. Each can be changed later without touching the 
    `fused` (P, R, E), `power` (P), `evm` (E), `no_residual` (P, E: ablation showing what R adds).
    Threshold baselines: EVM threshold (Örnek & Kartal, flags data cells) and residual threshold
    (flags DMRS cells).
-9. **Metrics.** Thresholds are set on the validation set so that 1% of non-jammed cells are
-   flagged. Pd = fraction of jammed cells flagged, per attack type and JSR, on the test set,
+9. **Metrics.** Thresholds are set on the validation set so that 1% of the non-jammed cells a
+   detector scores are flagged (threshold baselines only score DMRS or data cells; counting the
+   cells they cannot score would let them spend the whole 1% on a few cells). Pd = fraction of jammed cells flagged, per attack type and JSR, on the test set,
    reported for all jammed cells and for scheduled jammed cells only (cells outside the
    allocation carry no UE signal and are easy). Cell-level F1 at the same threshold.
 10. **Dataset.** Train 40 000 slots, validation 5 000 (attack drawn uniformly from the four

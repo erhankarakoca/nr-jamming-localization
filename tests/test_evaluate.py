@@ -20,7 +20,7 @@ def test_oracle_detector(tmp_path, monkeypatch):
     assert all(r["pd"] == 1.0 for r in pd_rows if not np.isnan(r["pd"]))
     assert {r["cells"] for r in pd_rows} == {"all", "scheduled"}
     assert all(r["f1"] == 1.0 for r in f1_rows)
-    assert all(r["fa"] == 0.0 for r in f1_rows)
+    assert all(r["fa"] == 0.0 and r["fa_scored"] == 0.0 for r in f1_rows)
 
 
 def test_main_runs_end_to_end(tmp_path, monkeypatch):

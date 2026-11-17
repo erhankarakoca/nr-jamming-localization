@@ -35,10 +35,15 @@ def test_masked_cells_never_flagged():
     assert detection_rate(r[np.isneginf(r)], thr=-1e30) == 0.0
 
 
-def test_threshold_when_detector_covers_few_cells():
-    # 0.5% of the negative cells are defined: the threshold must be -inf, not nan
-    neg = np.full(1000, -np.inf)
-    neg[:5] = np.arange(5.0)
+def test_threshold_counts_only_cells_the_detector_scores():
+    # A detector that scores 5% of the cells: 1% false alarm is set over those cells only
+    rng = np.random.default_rng(1)
+    neg = np.full(100_000, -np.inf)
+    neg[:5_000] = rng.uniform(size=5_000)
     thr = threshold_at_fa(neg, fa=0.01)
-    assert thr == -np.inf
-    assert detection_rate(np.array([0.1, -np.inf]), thr) == 0.5
+    assert abs(thr - 0.99) < 0.01
+    assert detection_rate(np.array([0.995, 0.5, -np.inf]), thr) == 1 / 3
+
+
+def test_threshold_when_detector_scores_no_negative_cell():
+    assert threshold_at_fa(np.full(10, -np.inf)) == -np.inf
