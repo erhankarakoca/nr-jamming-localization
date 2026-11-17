@@ -19,19 +19,20 @@ the three seeds**. Sections 1, 2 and 5 were run on a MacBook Pro M1 Pro CPU.
 
 ## 1. What each attack does to the link
 
-`results/ber_bler/ber_bler_{A,C}.pdf`. SNR 15 dB, the jammer covers the whole allocation.
+`results/ber_bler/ber_bler_{A,C}.pdf` (Colab GPU, up to 12 800 slots or 100 block errors per point;
+bands are 95% confidence intervals, hollow triangles mark points without any block error at their
+95% upper bound). SNR 15 dB, the jammer covers the whole allocation.
 
 | Attack | 50% BLER, TDL-A: JSR / slot energy ratio | 50% BLER, TDL-C: JSR / slot energy ratio |
 | --- | --- | --- |
-| Pilot | +4.1 dB / **−7.0 dB** | +3.7 dB / **−7.4 dB** |
-| Data | −2.7 dB / −2.7 dB | −3.2 dB / −3.2 dB |
-| Partial-band | −3.7 dB / −3.4 dB | −4.0 dB / −3.6 dB |
+| Pilot | +3.6 dB / **−7.5 dB** | +3.5 dB / **−7.7 dB** |
+| Data | −2.9 dB / −2.9 dB | −2.7 dB / −2.7 dB |
+| Partial-band | −3.9 dB / −3.5 dB | −4.1 dB / −3.8 dB |
 
 Per resource element, pilot jamming needs a higher JSR, but it only occupies 1 of 14 symbols. Per
-unit of jammer energy it is the most efficient attack: it reaches 50% BLER with about 4 dB less
-energy than data or partial-band jamming, in line with Clancy's pilot-jamming result. Without a
-jammer the BLER is 0 at this SNR. Points below BLER ≈ 2·10⁻³ rest on one or two block errors
-(1 280 slots per point).
+unit of jammer energy it is the most efficient attack: it reaches 50% BLER with 4–5 dB less energy
+than data or partial-band jamming, in line with Clancy's pilot-jamming result. Without a jammer
+the BLER is 0 at this SNR.
 
 ## 2. What the features see
 
@@ -134,41 +135,43 @@ thread pool only adds overhead.
 
 ## 6. What the map is good for: map-aware recovery
 
-`results/recovery/recovery_{A,C}.pdf`. UE on 12 PRBs, jammer on a 4-PRB block inside the
-allocation, SNR 15 dB; every batch decoded by all five receivers (1 280 slots per point). The
-map-aware receiver drops pilots in flagged PRBs, LMMSE-interpolates the channel from the clean
-ones (same channel model as the residual) and erases the soft bits of flagged data cells.
+`results/recovery/recovery_{A,C}.pdf` (main comparison, with the JSR range where the map helps
+shaded) and `recovery_{A,C}_ablation.pdf` (where the gain comes from). UE on 12 PRBs, jammer on a
+4-PRB block inside the allocation, SNR 15 dB; every batch decoded by all receivers, each receiver
+simulated until 100 block errors or 6 400 slots; 95% confidence bands. The map-aware receiver
+drops pilots in flagged PRBs, LMMSE-interpolates the channel from the clean ones (same channel
+model as the residual) and erases the soft bits of flagged data cells.
 
 BLER, TDL-C (TDL-A is similar, slightly easier):
 
 | Case | JSR | No protection | LMMSE, no map | Map P+E | **Map P+R+E** | True map |
 | --- | --- | --- | --- | --- | --- | --- |
-| No jammer | – | 0.000 | 0.000 | 0.001 | 0.002 | 0.000 |
-| Pilot | −9 dB | 0.000 | 0.000 | 0.109 | 0.060 | 0.000 |
-| Pilot | 0 dB | 0.010 | 0.003 | 0.036 | 0.011 | 0.000 |
-| Pilot | +9 dB | 0.313 | 0.154 | 0.003 | **0.004** | 0.001 |
-| Data | −9 dB | 0.000 | 0.000 | 0.037 | 0.050 | 0.000 |
-| Data | 0 dB | 0.174 | 0.179 | 0.011 | **0.008** | 0.002 |
-| Data | +9 dB | 0.800 | 0.811 | 0.003 | **0.004** | 0.003 |
-| Partial | 0 dB | 0.288 | 0.230 | 0.009 | **0.005** | 0.002 |
-| Partial | +9 dB | 0.888 | 0.867 | 0.006 | **0.005** | 0.005 |
-| Whole-allocation pilot | 0 dB | 0.105 | – | – | – | 0.105 |
+| No jammer | – | 0.000 | 0.000 | 0.002 | 0.003 | 0.000 |
+| Pilot | −9 dB | 0.000 | 0.000 | 0.079 | 0.059 | 0.000 |
+| Pilot | 0 dB | 0.009 | 0.002 | 0.037 | 0.010 | 0.000 |
+| Pilot | +9 dB | 0.320 | 0.175 | 0.003 | **0.003** | 0.000 |
+| Data | −9 dB | 0.001 | 0.001 | 0.033 | 0.046 | 0.002 |
+| Data | 0 dB | 0.164 | 0.175 | 0.007 | **0.007** | 0.002 |
+| Data | +9 dB | 0.836 | 0.836 | 0.002 | **0.002** | 0.002 |
+| Partial | 0 dB | 0.271 | 0.234 | 0.011 | **0.008** | 0.004 |
+| Partial | +9 dB | 0.906 | 0.836 | 0.003 | **0.003** | 0.002 |
+| Whole-allocation pilot | 0 dB | 0.088 | – | – | – | 0.088 |
 
 **Reading.**
 - **Strong jamming:** the map turns a broken link into a working one. Data jamming at +9 dB: BLER
-  0.80 → 0.004; pilot jamming: 0.31 → 0.004. The detectors' maps come close to the true map.
-- **The LMMSE estimate alone** helps against pilot jamming (0.31 → 0.15), because it averages over
+  0.84 → 0.002; pilot jamming: 0.32 → 0.003. The detectors' maps come close to the true map.
+- **The LMMSE estimate alone** helps against pilot jamming (0.32 → 0.18), because it averages over
   many pilots; it does nothing against data jamming. The map is what removes the rest.
 - **The residual matters for recovery too:** against pilot jamming the P+R+E map beats the P+E
-  map at every JSR below +9 dB (e.g. 0.060 vs 0.109 at −9 dB), because it localizes the jammed
-  DMRS cells better.
+  map from −9 dB upward (e.g. 0.010 vs 0.037 at 0 dB), because it localizes the jammed DMRS
+  cells better.
 - **Weak jamming has a price.** Below about −6 dB (data, partial) or 0 dB (pilot) the unprotected
   link already decodes, and the detector's false alarms then erase clean data or drop clean
-  pilots: BLER up to 0.06 where no protection gives 0. Without any jammer the cost is small
-  (0.002). In practice the protection should only be switched on when the detector reports a
+  pilots: BLER up to about 0.06 where no protection gives 0. Without any jammer the cost is small
+  (0.003). In practice the protection should only be switched on when the detector reports a
   substantial jammed area; that gating is not part of this study.
 - **Limit case:** when every pilot of the allocation is jammed, nothing can be repaired, and the
-  map-aware receiver behaves exactly like the unprotected one (0.105 vs 0.105), as designed.
+  map-aware receiver behaves exactly like the unprotected one (0.088 vs 0.088), as designed.
 
 ## 7. Figures for the presentation and the paper
 
