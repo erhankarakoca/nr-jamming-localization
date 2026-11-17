@@ -80,14 +80,14 @@ allocation, TDL-A and TDL-C together:
 | | U-Net, EVM only | 0.14 ± 0.02 | 0.38 ± 0.03 | 0.66 ± 0.02 | 0.79 ± 0.02 |
 | | Residual threshold | 0.10 | 0.33 | 0.60 | 0.86 |
 | | Residual, exact p-value | 0.10 | 0.33 | 0.61 | 0.87 |
-| | Power threshold (Li et al.) | 0.01 | 0.01 | 0.03 | 0.13 |
+| | Power threshold (Li et al.) | 0.01 | 0.01 | 0.04 | 0.28 |
 | | EVM threshold | 0 | 0 | 0 | 0 |
 | Data | **U-Net, P+R+E** | **0.78 ± 0.01** | **0.96 ± 0.00** | 0.99 ± 0.00 | 1.00 ± 0.00 |
 | | U-Net, P+E | 0.74 ± 0.01 | 0.96 ± 0.00 | 0.99 ± 0.00 | 1.00 ± 0.00 |
 | | U-Net, power only | 0.55 ± 0.04 | 0.84 ± 0.02 | 0.95 ± 0.01 | 0.99 ± 0.00 |
 | | U-Net, EVM only | 0.47 ± 0.02 | 0.75 ± 0.02 | 0.92 ± 0.01 | 0.99 ± 0.00 |
 | | EVM threshold | 0 | 0.04 | 0.21 | 0.43 |
-| | Power threshold (Li et al.) | 0.01 | 0.01 | 0.03 | 0.12 |
+| | Power threshold (Li et al.) | 0.02 | 0.01 | 0.02 | 0.13 |
 | | Residual threshold | 0 | 0 | 0 | 0 |
 
 Cell-level F1 at the same thresholds:
@@ -101,7 +101,7 @@ Cell-level F1 at the same thresholds:
 | EVM threshold | 0 | 0.324 | 0.319 | 0.303 |
 | Residual threshold | 0.584 | 0 | 0.057 | 0.058 |
 | Residual, exact p-value | 0.588 | 0 | 0.058 | 0.059 |
-| Power threshold (Li et al.) | 0.105 | 0.118 | 0.112 | 0.120 |
+| Power threshold (Li et al.) | 0.209 | 0.128 | 0.106 | 0.120 |
 
 By SNR (overall F1, `test_snr5-15_*` and `test_snr15-25_*`): P+R+E 0.916 / 0.987, P+E
 0.914 / 0.979, power only 0.867 / 0.959, EVM only 0.707 / 0.834 for SNR 5–15 dB / 15–25 dB.
