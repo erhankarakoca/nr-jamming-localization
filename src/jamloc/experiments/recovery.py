@@ -11,7 +11,8 @@ allocation. Every simulated batch is decoded by five receivers, on exactly the s
 * ``true_map``      - the true jamming map (upper bound)
 
 Detector maps are thresholded at the score that flags 1% of the non-jammed validation cells.
-A limit case is added: pilot jamming of the whole allocation, where no clean pilot is left
+Two extra cases: slots without a jammer (what protection costs when false alarms erase clean
+data), and pilot jamming of the whole allocation, where no clean pilot is left
 (``standard`` and ``true_map`` only; by design they should match).
 
     python -m jamloc.experiments.recovery --channel A
@@ -146,12 +147,15 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
         detectors[rx] = (model, variant, val_threshold(variant, seed))
     rng = seed_everything(1000 + seed)
 
-    cases = [(attack, False, RECEIVERS) for attack in ("pilot", "data", "partial")]
+    # Clean slots first: what each receiver costs when there is no jammer (false alarms of a
+    # detector map erase clean data and drop clean pilots)
+    cases = [("none", False, RECEIVERS)]
+    cases += [(attack, False, RECEIVERS) for attack in ("pilot", "data", "partial")]
     cases.append(("pilot", True, ("standard", "true_map")))  # limit case: no clean pilot left
     rows = []
     for attack, whole, receivers in cases:
         name = "pilot_whole_allocation" if whole else attack
-        for jsr in jsr_dbs:
+        for jsr in jsr_dbs[:1] if attack == "none" else jsr_dbs:  # JSR is irrelevant then
 
             def scenario_fn(attack=attack, jsr=jsr, whole=whole):
                 return _scenario(rng, batch_size, channel, attack, jsr, snr_db, whole)
@@ -165,7 +169,7 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
                     {
                         "receiver": rx,
                         "attack": name,
-                        "jsr_db": float(jsr),
+                        "jsr_db": float("nan") if attack == "none" else float(jsr),
                         "snr_db": float(snr_db),
                         "ber": bit_err / bits,
                         "bler": block_err / blocks,
@@ -199,9 +203,13 @@ def plot(rows, channel):
     # One legend for all panels, below them, so it never covers a curve
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="outside lower center", ncols=len(RECEIVERS), frameon=False)
+    benign = {r["receiver"]: r["bler"] for r in rows if r["attack"] == "none"}
     fig.suptitle(
-        f"UE on {ALLOC[1]} PRBs, jammer on {JAM_SIZE} of them; gaps = no block error "
-        f"in {int(1 / floor)} blocks"
+        f"UE on {ALLOC[1]} PRBs, jammer on {JAM_SIZE} of them; gaps = no block error in "
+        f"{round(1 / floor)} blocks.\nWithout a jammer: BLER "
+        f"{benign.get('standard', float('nan')):.3f} unprotected, "
+        f"{benign.get('map_p_r_e', float('nan')):.3f} with the P+R+E map, "
+        f"{benign.get('true_map', float('nan')):.3f} with the true map"
     )
     return fig
 

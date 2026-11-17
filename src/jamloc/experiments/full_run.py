@@ -69,7 +69,7 @@ def main(argv=None):
     # 4. What the map is good for: recovery with the detectors' maps
     small = ["--batch-size", "8", "--max-mc-iter", "1", "--jsr-db", "0"] if args.small else []
     for channel in ("A", "C"):
-        recovery.main(["--channel", channel, *small])
+        recovery.main(["--channel", channel, "--seed", str(args.seeds[0]), *small])
     print(f"[recovery] done after {_elapsed(start)}")
 
     # 5. Explanatory figures and the gallery page

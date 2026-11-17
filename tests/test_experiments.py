@@ -65,15 +65,15 @@ def test_full_run_small(tmp_path, monkeypatch):
 
     monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
-    full_run.main(["--small", "--seeds", "0", "1"])
+    full_run.main(["--small", "--seeds", "1", "2"])
     archive = tmp_path / "results" / "full_run.zip"
     names = zipfile.ZipFile(archive).namelist()
     assert {"eval/test_f1.csv", "eval/sched_f1.csv", "eval/test_pd_vs_jsr_scheduled.pdf"} <= set(
         names
     )
-    assert {"models/fused_seed0.pt", "models/fused_seed1.pt"} <= set(names)
+    assert {"models/fused_seed1.pt", "models/fused_seed2.pt"} <= set(names)
     assert {
-        "models/fused_seed0_history.csv",
+        "models/fused_seed1_history.csv",
         "recovery/recovery_A.csv",
         "recovery/recovery_C.csv",
         "figures/index.html",
@@ -109,6 +109,8 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
         for a in ("pilot", "data", "partial")
         for j in ("-3.0", "3.0")
     }
+    benign = {r["receiver"] for r in rows if r["attack"] == "none"}
+    assert benign == set(recovery.RECEIVERS)
     limit = [r for r in rows if r["attack"] == "pilot_whole_allocation"]
     assert {r["receiver"] for r in limit} == {"standard", "true_map"}
     assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
