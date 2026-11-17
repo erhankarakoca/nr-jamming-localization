@@ -47,3 +47,12 @@ def test_latency_script_runs(tmp_path, monkeypatch):
         assert abs(float(r["total_ms"]) - float(r["feature_ms"]) - float(r["model_ms"])) < 1e-6
         assert 10_000 <= int(r["params"]) <= 100_000
         assert int(r["threads"]) == 1  # one CPU core by default
+
+
+def test_ber_bler_title_uses_snr_from_csv(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
+    args = ["--channel", "A", "--snr-db", "12", "--batch-size", "8", "--max-mc-iter", "1"]
+    ber_bler.main([*args, "--jsr-db", "0"])
+    rows = ber_bler.read_rows(tmp_path / "ber_bler" / "ber_bler_A.csv")
+    assert all(r["snr_db"] == 12.0 for r in rows)
+    assert "SNR 12 dB" in ber_bler.plot(rows, "A").axes[0].get_title()

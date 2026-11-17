@@ -68,6 +68,7 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
     rows.append(
         {
             "attack": "none",
+            "snr_db": float(snr_db),
             "jsr_db": math.nan,
             "energy_db": math.nan,
             "ber": float(ber[0]),
@@ -80,6 +81,7 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
             rows.append(
                 {
                     "attack": attack,
+                    "snr_db": float(snr_db),
                     "jsr_db": float(j),
                     "energy_db": energy_db(attack, j),
                     "ber": float(b1),
@@ -89,7 +91,19 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
     return rows
 
 
-def plot(rows, channel, snr_db):
+def read_rows(path, default_snr_db: float = 15.0) -> list[dict]:
+    """Rows of a saved sweep. Older CSVs have no ``snr_db`` column; they get ``default_snr_db``."""
+    with open(path, encoding="utf-8", newline="") as f:
+        rows = [
+            {k: (v if k == "attack" else float(v)) for k, v in r.items()} for r in csv.DictReader(f)
+        ]
+    for r in rows:
+        r.setdefault("snr_db", default_snr_db)
+    return rows
+
+
+def plot(rows, channel):
+    snr_db = rows[0]["snr_db"]
     fig, (ax_jsr, ax_energy) = new_figure(COLUMN_WIDTH, 2.2, ncols=2, sharey=True)
     for attack in ("pilot", "data", "partial"):
         sel = [r for r in rows if r["attack"] == attack]
@@ -134,11 +148,7 @@ def main(argv=None):
     stem = out_dir / f"ber_bler_{args.channel}"
 
     if args.plot_only:
-        with open(stem.with_suffix(".csv"), encoding="utf-8", newline="") as f:
-            rows = [
-                {k: (v if k == "attack" else float(v)) for k, v in r.items()}
-                for r in csv.DictReader(f)
-            ]
+        rows = read_rows(stem.with_suffix(".csv"), args.snr_db)
     else:
         rows = simulate(
             args.channel,
@@ -154,7 +164,7 @@ def main(argv=None):
             writer.writeheader()
             writer.writerows(rows)
     with paper_style():
-        fig = plot(rows, args.channel, args.snr_db)
+        fig = plot(rows, args.channel)
     save(fig, stem)
     print(f"Wrote {stem}.csv/.pdf/.png")
 
