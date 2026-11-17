@@ -4,6 +4,9 @@ Feature extraction starts from what the receiver already has (received grid, equ
 and their noise variances) and includes the power, DMRS residual and EVM maps and the masks. The
 delay subspace is computed once per allocation size and cached, as a gNB would precompute it.
 Timing does not depend on the trained weights, so untrained networks of the same size are used.
+By default PyTorch runs on one thread: for a 24 x 14 input, multithreading only adds overhead
+(the U-Net takes ~0.5 ms on one M1 Pro core and ~1.3 ms with 8 threads), and a gNB would give the
+detector one core per slot.
 
     python -m jamloc.experiments.latency --reps 200
 """
@@ -65,14 +68,17 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--reps", type=int, default=200)
     p.add_argument("--alloc-prb", type=int, default=24)
+    p.add_argument("--threads", type=int, default=1, help="PyTorch CPU threads")
     args = p.parse_args(argv)
 
-    previous_device = config.device
+    previous_device, previous_threads = config.device, torch.get_num_threads()
     config.device = "cpu"  # this benchmark is about CPU latency
+    torch.set_num_threads(args.threads)
     try:
         rows = benchmark(args.reps, args.alloc_prb)
     finally:
         config.device = previous_device
+        torch.set_num_threads(previous_threads)
 
     with open(results_dir() / "latency.csv", "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))

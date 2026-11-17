@@ -46,3 +46,4 @@ def test_latency_script_runs(tmp_path, monkeypatch):
         assert float(r["feature_ms"]) > 0 and float(r["model_ms"]) > 0
         assert abs(float(r["total_ms"]) - float(r["feature_ms"]) - float(r["model_ms"])) < 1e-6
         assert 10_000 <= int(r["params"]) <= 100_000
+        assert int(r["threads"]) == 1  # one CPU core by default
