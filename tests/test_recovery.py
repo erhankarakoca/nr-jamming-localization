@@ -136,3 +136,55 @@ def test_carrier_sized_map_is_rejected():
         MapAwareReceiver(out.tx)(
             out.y_alloc, out.no, out.labels
         )  # [B, 24, 14] instead of [B, 12, 14]
+
+
+def test_soft_mode_ignores_false_alarms():
+    # Every cell flagged on clean slots: hard erasure would lose everything, the soft receiver
+    # measures no jamming power and decodes as usual
+    out = link(_scenario(NONE, 0.0, 15.0, n=32))
+    everything = torch.ones_like(_cells(out))
+    rx = MapAwareReceiver(out.tx)
+    assert _bler(rx(out.y_alloc, out.no, everything, mode="soft")) == 0.0
+    assert _bler(rx(out.y_alloc, out.no, everything, mode="hard")) == 1.0
+
+
+def test_soft_mode_estimates_the_jamming_power():
+    from jamloc.features import residual_per_prb
+
+    out = link(_scenario(DATA, 6.0, 15.0, n=64))
+    cells = _cells(out)
+    h_ls, pilot_sc, pilot_power = dmrs_ls(out.y_alloc, out.tx)
+    r = residual_per_prb(h_ls, pilot_sc, out.no, pilot_power, cfg)
+    every_pilot = torch.ones_like(h_ls, dtype=torch.bool)
+    num_sc = out.y_alloc.shape[-1]
+    h_sc, err_sc = lmmse_interpolation(
+        h_ls, pilot_sc, every_pilot, out.no / pilot_power, num_sc, cfg.scs, cfg.tau_max
+    )
+    rx = MapAwareReceiver(out.tx)
+    var = rx._jamming_variance(out.y_alloc, out.no, h_sc, err_sc, cells, r, None, "soft")
+    sym, sc = data_positions(out.tx)
+    flagged = cells[:, sc // 12, sym]
+    # Jammer energy per RE is 10^0.6 ~ 4, seen through a unit-power fading channel
+    assert 2.5 < var[flagged].mean().item() < 6.0
+    assert torch.all(var[~flagged] == 0)
+
+
+def test_soft_and_dmrs_modes_beat_unprotected():
+    for attack, modes in ((PILOT, ("soft", "dmrs")), (DATA, ("soft",))):
+        out = link(_scenario(attack, 6.0, 15.0), decode=True)
+        for mode in modes:
+            protected = MapAwareReceiver(out.tx)(out.y_alloc, out.no, _cells(out), mode=mode)
+            assert _bler(protected) < _bler(out.rx), (ATTACKS[attack], mode)
+
+
+def test_dmrs_mode_decodes_clean_slots_and_needs_no_map():
+    out = link(_scenario(NONE, 0.0, 15.0, n=32))
+    assert _bler(MapAwareReceiver(out.tx)(out.y_alloc, out.no, None, mode="dmrs")) == 0.0
+
+
+def test_unknown_mode_is_rejected():
+    import pytest
+
+    out = link(_scenario(NONE, 0.0, 15.0, n=2))
+    with pytest.raises(ValueError, match="mode"):
+        MapAwareReceiver(out.tx)(out.y_alloc, out.no, _cells(out), mode="gentle")

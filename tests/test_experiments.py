@@ -113,7 +113,7 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
     benign = {r["receiver"] for r in rows if r["attack"] == "none"}
     assert benign == set(recovery.RECEIVERS)
     limit = [r for r in rows if r["attack"] == "pilot_whole_allocation"]
-    assert {r["receiver"] for r in limit} == {"standard", "true_map"}
+    assert {r["receiver"] for r in limit} == {"standard", "true_hard", "true_soft"}
     assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
     assert (out / "recovery_A_ablation.png").is_file()
 

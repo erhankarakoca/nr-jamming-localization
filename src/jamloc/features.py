@@ -86,9 +86,10 @@ def delay_subspace(
     return torch.as_tensor(basis.copy(), dtype=torch.complex64, device=pilot_sc.device)
 
 
-def residual_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
-    """DMRS residual per PRB, on the DMRS symbol of the scheduled PRBs; 0 elsewhere."""
-    h_ls, pilot_sc, pilot_power = dmrs_ls(batch.y_alloc, batch.tx)
+def residual_per_prb(
+    h_ls: torch.Tensor, pilot_sc: torch.Tensor, no: torch.Tensor, pilot_power: float, cfg: SimConfig
+) -> torch.Tensor:
+    """DMRS residual ``[B, n]`` of each PRB of the allocation, from the LS pilot estimates."""
     u = delay_subspace(pilot_sc, cfg.scs, cfg.tau_max)
 
     # Remove the part of the pilot estimates that a real channel can explain
@@ -97,12 +98,17 @@ def residual_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
     # Noise alone would leave N0/|x_p|^2 * (1 - ||u_k||^2) on pilot k: less near the band edges,
     # where the subspace vectors are concentrated
     kept = 1 - (u.abs() ** 2).sum(dim=1)  # [N_p]
-    noise_only = batch.no[:, None] / pilot_power * kept  # [B, N_p]
+    noise_only = no[:, None] / pilot_power * kept  # [B, N_p]
 
     # Residual power per PRB (6 pilots) divided by what noise alone would leave there
     b = h_ls.shape[0]
-    r = (residual.abs() ** 2).reshape(b, -1, 6).sum(-1) / noise_only.reshape(b, -1, 6).sum(-1)
+    return (residual.abs() ** 2).reshape(b, -1, 6).sum(-1) / noise_only.reshape(b, -1, 6).sum(-1)
 
+
+def residual_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
+    """DMRS residual per PRB, on the DMRS symbol of the scheduled PRBs; 0 elsewhere."""
+    h_ls, pilot_sc, pilot_power = dmrs_ls(batch.y_alloc, batch.tx)
+    r = residual_per_prb(h_ls, pilot_sc, batch.no, pilot_power, cfg)
     cells = r.new_zeros(r.shape[0], r.shape[1], cfg.num_symbols)
     cells[:, :, cfg.dmrs_symbol] = r
     return _to_carrier(cells, batch, cfg)

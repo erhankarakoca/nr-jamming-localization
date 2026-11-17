@@ -560,7 +560,7 @@ def detector_outputs(split: str = "test", seed: int | None = None):
     d, val = _load_split(split), _load_split("val")
     unets = (("fused", "U-Net P+R+E"), ("no_residual", "U-Net P+E"), ("power", "U-Net power only"))
     models = {v: load_model(v, seed) for v, _ in unets}
-    thresholds = {v: val_threshold(v, seed) for v, _ in unets}
+    thresholds = {v: val_threshold(v, models[v]) for v, _ in unets}
 
     def predict(variant, idx):
         x = select_inputs(torch.from_numpy(d["features"][idx]).to(config.device), variant)
@@ -739,7 +739,8 @@ def constellations_with_map(seed: int | None = None, jsr_db: float = 6.0):
         seed = (available_seeds() or [0])[0]
     _require_models(("fused",), seed)
     _load_split("val")  # needed for the detector's threshold
-    model, thr = load_model("fused", seed), val_threshold("fused", seed)
+    model = load_model("fused", seed)
+    thr = val_threshold("fused", model)
     example = _example_seed("A")
     alloc = slice(ALLOC[0], ALLOC[0] + ALLOC[1])
 
@@ -748,8 +749,8 @@ def constellations_with_map(seed: int | None = None, jsr_db: float = 6.0):
     for col, attack in enumerate(("pilot", "data")):
         batch = _example_batch(attack, jsr_db, 20.0, "A", seed=example, decode=True)
         # The map the fused U-Net predicts for this slot, cut to the scheduled PRBs
-        cells = detector_cells(batch, CFG, model, "fused", thr)[:, alloc]
-        protected = MapAwareReceiver(batch.tx, CFG)(batch.y_alloc, batch.no, cells)
+        cells = detector_cells(batch, CFG, "fused", model, thr)[:, alloc]
+        protected = MapAwareReceiver(batch.tx, CFG)(batch.y_alloc, batch.no, cells, mode="hard")
         sym, sc = (t.cpu().numpy() for t in data_positions(batch.tx))
         prb = ALLOC[0] + sc // 12
         in_block = (prb >= JAM[0]) & (prb < JAM[0] + JAM[1])

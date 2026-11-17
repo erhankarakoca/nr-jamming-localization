@@ -1,19 +1,23 @@
 """What the jamming map is good for: BLER with and without map-aware recovery.
 
 The UE is scheduled on PRBs 6-17 (12 PRBs) and the jammer hits a block of 4 PRBs inside that
-allocation. Every simulated batch is decoded by five receivers, on exactly the same slots:
+allocation. Every simulated batch is decoded by every receiver, on exactly the same slots
+(``jamloc.recovery`` explains the *hard* and *soft* modes):
 
-* ``standard``      - Sionna's PUSCH receiver, no map (the unprotected link)
-* ``lmmse_no_map``  - map-aware receiver with an empty map: shows what the LMMSE channel estimate
-                      alone gives, so the gain of the map itself can be told apart
-* ``map_p_e``       - map from the U-Net without the DMRS residual (power + EVM)
-* ``map_p_r_e``     - map from the full U-Net (power + residual + EVM)
-* ``true_map``      - the true jamming map (upper bound)
+* ``standard``    - Sionna's PUSCH receiver, no map (the unprotected link)
+* ``dmrs_ie``     - no map: interference detected and measured on the DMRS only (analytic CFAR
+                    test on the residual), assumed to last the whole slot
+* ``power_hard``  - map from a per-cell power test, pilots dropped and data erased (the classic
+                    receiver of Li et al., MILCOM 2012)
+* ``p_e_soft``    - map from the U-Net without the DMRS residual (power + EVM), soft
+* ``p_r_e_hard``  - map from the full U-Net (power + residual + EVM), hard
+* ``p_r_e_soft``  - map from the full U-Net, soft (the proposed receiver)
+* ``true_hard`` / ``true_soft`` - the true jamming map (where the jammer is; its strength is still
+                    estimated in the soft mode)
 
 Detector maps are thresholded at the score that flags 1% of the non-jammed validation cells.
-Two extra cases: slots without a jammer (what protection costs when false alarms erase clean
-data), and pilot jamming of the whole allocation, where no clean pilot is left
-(``standard`` and ``true_map`` only; by design they should match).
+Two extra cases: slots without a jammer (what protection costs when false alarms hit clean
+cells), and pilot jamming of the whole allocation, where no clean pilot is left.
 
     python -m jamloc.experiments.recovery --channel A
 """
@@ -40,51 +44,73 @@ from jamloc.train import load_model
 
 ALLOC = (6, 12)  # UE on PRBs 6-17
 JAM_SIZE = 4  # jammed PRBs, placed inside the allocation
-RECEIVERS = ("standard", "lmmse_no_map", "map_p_e", "map_p_r_e", "true_map")
-MAP_VARIANTS = {"map_p_e": "no_residual", "map_p_r_e": "fused"}
+# receiver: (where its map comes from, mode of the map-aware receiver)
+RECEIVERS = {
+    "standard": (None, None),
+    "dmrs_ie": (None, "dmrs"),
+    "power_hard": ("power_threshold", "hard"),
+    "p_e_soft": ("no_residual", "soft"),
+    "p_r_e_hard": ("fused", "hard"),
+    "p_r_e_soft": ("fused", "soft"),
+    "true_hard": ("true", "hard"),
+    "true_soft": ("true", "soft"),
+}
+DETECTORS = ("power_threshold", "no_residual", "fused")
 STYLE = {
     "standard": {"label": "No protection", "color": "#000000", "marker": "x", "linestyle": ":"},
-    "lmmse_no_map": {
-        "label": "LMMSE estimate, no map",
+    "dmrs_ie": {
+        "label": "DMRS-only interference est. (no map)",
         "color": "#999999",
         "marker": "+",
         "linestyle": "--",
     },
-    "map_p_e": {
-        "label": "Map from U-Net P+E",
-        "color": "#56B4E9",
-        "marker": "v",
-        "linestyle": "--",
+    "power_hard": {
+        "label": "Power-test map, hard (Li et al.)",
+        "color": "#E69F00",
+        "marker": "s",
+        "linestyle": "-.",
     },
-    "map_p_r_e": {
-        "label": "Map from U-Net P+R+E",
-        "color": "#0072B2",
-        "marker": "o",
-        "linestyle": "-",
-    },
-    "true_map": {"label": "True map", "color": "#009E73", "marker": "^", "linestyle": "-."},
+    "p_e_soft": {"label": "Map P+E, soft", "color": "#56B4E9", "marker": "v", "linestyle": "--"},
+    "p_r_e_hard": {"label": "Map P+R+E, hard", "color": "#CC79A7", "marker": "D", "linestyle": ":"},
+    "p_r_e_soft": {"label": "Map P+R+E, soft", "color": "#0072B2", "marker": "o", "linestyle": "-"},
+    "true_hard": {"label": "True map, hard", "color": "#D55E00", "marker": "<", "linestyle": ":"},
+    "true_soft": {"label": "True map, soft", "color": "#009E73", "marker": "^", "linestyle": "-."},
 }
 
 
-def val_threshold(variant: str, seed: int = 0) -> float:
-    """Logit threshold that flags 1% of the non-jammed validation cells."""
+def _power_scores(features: torch.Tensor) -> torch.Tensor:
+    """Per-cell power test: linear received power on scheduled cells, -inf elsewhere."""
+    from jamloc.features import FEATURE_NAMES
+
+    power = 10 ** (features[:, FEATURE_NAMES.index("power_db")] / 10)
+    alloc = features[:, FEATURE_NAMES.index("alloc_mask")] > 0
+    return torch.where(alloc, power, torch.full_like(power, -torch.inf))
+
+
+def _scores(detector: str, model, features: torch.Tensor) -> torch.Tensor:
+    if detector == "power_threshold":
+        return _power_scores(features)
+    return model(select_inputs(features, detector))
+
+
+def val_threshold(detector: str, model=None) -> float:
+    """Score threshold that flags 1% of the non-jammed validation cells."""
     d = load("val")
-    model = load_model(variant, seed)
     features = torch.from_numpy(d["features"])
     with torch.no_grad():
-        logits = torch.cat(
+        scores = torch.cat(
             [
-                model(select_inputs(features[i].to(config.device), variant)).cpu()
+                _scores(detector, model, features[i].to(config.device)).cpu()
                 for i in torch.arange(len(features)).split(2048)
             ]
         )
-    return threshold_at_fa(logits.numpy()[d["labels"] == 0], FA)
+    return threshold_at_fa(scores.numpy()[d["labels"] == 0], FA)
 
 
-def detector_cells(batch, cfg, model, variant: str, thr: float) -> torch.Tensor:
-    """Jamming map ``[B, 24, 14]`` predicted by a trained U-Net."""
+def detector_cells(batch, cfg, detector: str, model, thr: float) -> torch.Tensor:
+    """Jamming map ``[B, 24, 14]`` of a detector."""
     with torch.no_grad():
-        return model(select_inputs(extract(batch, cfg), variant)) > thr
+        return _scores(detector, model, extract(batch, cfg)) > thr
 
 
 def _scenario(rng, n, channel, attack, jsr_db, snr_db, whole_allocation=False) -> Scenario:
@@ -122,19 +148,19 @@ def simulate_point(link, detectors, scenario_fn, receivers, max_mc_iter, target_
             break
         out = link(scenario_fn(), decode="standard" in active)
         map_aware = map_aware or MapAwareReceiver(out.tx, cfg)
-        maps = {
-            "lmmse_no_map": torch.zeros_like(out.labels[:, alloc]),
-            "true_map": out.labels[:, alloc],
-        }
-        for rx, (model, variant, thr) in detectors.items():
-            if rx in active:
-                maps[rx] = detector_cells(out, cfg, model, variant, thr)[:, alloc]
+        maps = {"true": out.labels[:, alloc]}
+        needed = {RECEIVERS[rx][0] for rx in active}
+        for det, (model, thr) in detectors.items():
+            if det in needed:
+                maps[det] = detector_cells(out, cfg, det, model, thr)[:, alloc]
 
         for rx in list(active):
+            source, mode = RECEIVERS[rx]
             if rx == "standard":
                 b_hat = out.rx["b_hat"]
             else:
-                b_hat = map_aware(out.y_alloc, out.no, maps[rx])["b_hat"]
+                cells = maps[source] if source else None
+                b_hat = map_aware(out.y_alloc, out.no, cells, mode=mode)["b_hat"]
             errors = out.b != b_hat
             counts[rx] += [
                 errors.sum().item(),
@@ -151,16 +177,17 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
     cfg = SimConfig()
     link = JammedPUSCHLink(cfg)
     detectors = {}
-    for rx, variant in MAP_VARIANTS.items():
-        model = load_model(variant, seed)
-        detectors[rx] = (model, variant, val_threshold(variant, seed))
+    for det in DETECTORS:
+        model = None if det == "power_threshold" else load_model(det, seed)
+        detectors[det] = (model, val_threshold(det, model))
     rng = seed_everything(1000 + seed)
 
     # Clean slots first: what each receiver costs when there is no jammer (false alarms of a
     # detector map erase clean data and drop clean pilots)
-    cases = [("none", False, RECEIVERS)]
-    cases += [(attack, False, RECEIVERS) for attack in ("pilot", "data", "partial")]
-    cases.append(("pilot", True, ("standard", "true_map")))  # limit case: no clean pilot left
+    cases = [("none", False, tuple(RECEIVERS))]
+    cases += [(attack, False, tuple(RECEIVERS)) for attack in ("pilot", "data", "partial")]
+    # limit case: no clean pilot left
+    cases.append(("pilot", True, ("standard", "true_hard", "true_soft")))
     rows = []
     for attack, whole, receivers in cases:
         name = "pilot_whole_allocation" if whole else attack
@@ -194,20 +221,20 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
     return rows
 
 
-MAIN_RECEIVERS = ("standard", "map_p_r_e", "true_map")
-ABLATION_RECEIVERS = ("standard", "lmmse_no_map", "map_p_e", "map_p_r_e")
+MAIN_RECEIVERS = ("standard", "dmrs_ie", "power_hard", "p_r_e_soft", "true_soft")
+ABLATION_RECEIVERS = ("standard", "p_r_e_hard", "p_r_e_soft", "p_e_soft", "true_hard", "true_soft")
 
 
 def _protection_helps_from(rows, attack):
-    """Smallest JSR from which the P+R+E map gives a lower BLER than no protection at every
-    higher JSR (point estimates), or None."""
+    """Smallest JSR from which the soft P+R+E receiver gives a lower BLER than no protection at
+    every higher JSR (point estimates), or None."""
 
     def bler(rx):
         return {
             r["jsr_db"]: r["bler"] for r in rows if r["receiver"] == rx and r["attack"] == attack
         }
 
-    std, mapped = bler("standard"), bler("map_p_r_e")
+    std, mapped = bler("standard"), bler("p_r_e_soft")
     start = None
     for j in sorted(std, reverse=True):
         if j in mapped and mapped[j] < std[j]:
@@ -252,7 +279,7 @@ def plot(rows, channel, receivers=MAIN_RECEIVERS, shade=True):
     fig.suptitle(
         f"UE on {ALLOC[1]} PRBs, jammer on {JAM_SIZE} of them; bands: 95% confidence.\n"
         f"Without a jammer: BLER {benign.get('standard', float('nan')):.3f} unprotected, "
-        f"{benign.get('map_p_r_e', float('nan')):.3f} with the P+R+E map"
+        f"{benign.get('p_r_e_soft', float('nan')):.3f} with the soft P+R+E map"
     )
     return fig
 
