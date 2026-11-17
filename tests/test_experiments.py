@@ -18,6 +18,11 @@ def test_ber_bler_script_runs(tmp_path, monkeypatch):
     assert len(rows) == 1 + 3 * 2  # benign reference + 3 attacks x 2 JSR points
     assert {"jsr_db", "energy_db", "ber", "bler"} <= set(rows[0])
 
+    # Redraw from the saved CSV without simulating again
+    (out / "ber_bler_A.png").unlink()
+    ber_bler.main(["--channel", "A", "--plot-only"])
+    assert (out / "ber_bler_A.png").is_file()
+
 
 def test_feature_maps_script_runs(tmp_path, monkeypatch):
     from jamloc.experiments import feature_maps

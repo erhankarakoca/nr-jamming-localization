@@ -110,7 +110,7 @@ def plot(rows, channel, snr_db):
         ylabel="BLER",
         title=f"(a) TDL-{channel}, SNR {snr_db:g} dB",
     )
-    ax_energy.set(xlabel="Jammer / UE slot energy [dB]", title="(b) Same, vs. energy")
+    ax_energy.set(xlabel="Slot energy ratio J/S [dB]", title="(b) Same, vs. energy")
     ax_jsr.legend(loc="lower right")
     return fig
 
@@ -126,25 +126,33 @@ def main(argv=None):
     p.add_argument("--max-mc-iter", type=int, default=20)
     p.add_argument("--target-block-errors", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     args = p.parse_args(argv)
-
-    rows = simulate(
-        args.channel,
-        args.snr_db,
-        args.jsr_db,
-        args.batch_size,
-        args.max_mc_iter,
-        args.target_block_errors,
-        args.seed,
-    )
 
     out_dir = results_dir() / "ber_bler"
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = out_dir / f"ber_bler_{args.channel}"
-    with open(stem.with_suffix(".csv"), "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+
+    if args.plot_only:
+        with open(stem.with_suffix(".csv"), encoding="utf-8", newline="") as f:
+            rows = [
+                {k: (v if k == "attack" else float(v)) for k, v in r.items()}
+                for r in csv.DictReader(f)
+            ]
+    else:
+        rows = simulate(
+            args.channel,
+            args.snr_db,
+            args.jsr_db,
+            args.batch_size,
+            args.max_mc_iter,
+            args.target_block_errors,
+            args.seed,
+        )
+        with open(stem.with_suffix(".csv"), "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
     with paper_style():
         fig = plot(rows, args.channel, args.snr_db)
     save(fig, stem)
