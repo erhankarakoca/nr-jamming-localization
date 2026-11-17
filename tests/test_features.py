@@ -12,7 +12,7 @@ from jamloc.features import (
     residual_map,
 )
 from jamloc.jammer import ATTACKS
-from jamloc.link import JammedPUSCHLink, draw_scenario, seed_everything
+from jamloc.link import JammedPUSCHLink, Scenario, draw_scenario, seed_everything
 
 cfg = SimConfig()
 link = JammedPUSCHLink(cfg)
@@ -55,16 +55,36 @@ def test_benign_evm_is_noise_level():
     assert 0.5 < e[data.bool()].mean().item() < 1.5
 
 
-def test_pilot_attack_raises_residual_only_on_jammed_prbs():
+def test_pilot_attack_raises_residual():
     pilot = _batch(3, "A", PILOT, snr_db=20.0, scheduling_aware=True)
-    _, dmrs, data = masks(pilot, cfg)
+    _, dmrs, _ = masks(pilot, cfg)
     assert residual_map(pilot, cfg)[dmrs.bool()].mean().item() > 5.0
 
+
+def test_data_attack_leaves_residual_at_noise_level():
     data_attack = _batch(4, "A", DATA, snr_db=20.0, scheduling_aware=True)
-    r = residual_map(data_attack, cfg)[dmrs.bool()]
-    assert 0.7 < r.mean().item() < 1.4
-    _, _, data = masks(data_attack, cfg)
+    _, dmrs, data = masks(data_attack, cfg)
+    assert 0.8 < residual_map(data_attack, cfg)[dmrs.bool()].mean().item() < 1.25
     assert evm_map(data_attack, cfg)[data.bool()].mean().item() > 3.0
+
+
+def test_residual_stays_low_away_from_jammed_prbs():
+    # Full-band allocation, pilot jamming on PRBs 0-5 only
+    seed_everything(6)
+    n = 32
+    sc = Scenario(
+        channel="A",
+        alloc_start=0,
+        alloc_size=24,
+        attack=torch.full((n,), PILOT),
+        jam_start=torch.zeros(n, dtype=torch.long),
+        jam_size=torch.full((n,), 6),
+        jsr_db=torch.zeros(n),
+        snr_db=torch.full((n,), 20.0),
+    )
+    r = residual_map(link(sc), cfg)[:, :, cfg.dmrs_symbol]  # [B, 24]
+    assert r[:, :6].mean().item() > 5.0
+    assert r[:, 8:].mean().item() < 1.5  # two or more PRBs away from the jammed block
 
 
 @pytest.mark.parametrize("alloc", [(0, 6), (18, 6)])
