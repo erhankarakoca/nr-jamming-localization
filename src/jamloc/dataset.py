@@ -1,7 +1,8 @@
 """Labelled datasets of feature maps, generated from the link with fixed seeds.
 
-Splits (batch ``i`` of a split uses seed ``base + i``, so the splits never share channel
-realizations, allocations or jammer draws):
+Splits (batch ``i`` of a split uses seed ``base + i``; the seed ranges of the splits are disjoint,
+so channel realizations and jammer draws are independent between splits. Allocations are drawn
+independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
 
 * ``train`` / ``val`` - random attack (incl. benign), JSR in [-15, 10] dB, SNR in [5, 25] dB,
   TDL-A and TDL-C alternating per batch, jammer anywhere on the carrier.
