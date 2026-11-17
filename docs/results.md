@@ -178,50 +178,71 @@ slower (about 1.3 ms) than on one.
 
 ## 6. What the map is good for: map-aware recovery
 
-`results/recovery/recovery_{A,C}.pdf` (main comparison, with the JSR range where the map helps
-shaded) and `recovery_{A,C}_ablation.pdf` (where the gain comes from). UE on 12 PRBs, jammer on a
-4-PRB block inside the allocation, SNR 15 dB; every batch decoded by all receivers, each receiver
-simulated until 100 block errors or 6 400 slots; 95% confidence bands. The map-aware receiver
-drops pilots in flagged PRBs, LMMSE-interpolates the channel from the clean ones (same channel
-model as the residual) and erases the soft bits of flagged data cells.
+`results/recovery/recovery_{A,C}.pdf` (main comparison) and `recovery_{A,C}_ablation.pdf` (hard
+against soft use). UE on 12 PRBs, jammer on a 4-PRB block inside the allocation, SNR 15 dB, Colab
+T4. Every batch is decoded by all receivers (same slots); each receiver runs until 100 block
+errors or 3 200 slots, so a point without errors means BLER below 0.12% (95% upper bound).
+Receivers (`jamloc/recovery.py`):
+
+- **No protection:** Sionna's PUSCH receiver.
+- **DMRS-only (no map):** what a receiver can do with its DMRS alone. PRBs whose residual exceeds
+  the analytic 1% threshold get down-weighted pilots, and the interference measured on the DMRS is
+  assumed to last the whole slot.
+- **Power-test map, hard (Li et al. 2012):** per-cell power test (relative to the slot's median),
+  pilots of flagged PRBs dropped, flagged data erased.
+- **Map, hard:** the same with the U-Net's map (this was the receiver of the first round).
+- **Map, soft (proposed):** the map says *where*; the receiver estimates *how strong* from the
+  flagged cells. Pilots of flagged PRBs are kept but their noise variance is multiplied by the
+  PRB's residual; the jamming power on flagged data cells is estimated from their excess received
+  energy and added to their noise variance before demapping.
+- **True map:** the jammer's real cells, used hard or soft (its strength is still estimated).
 
 BLER, TDL-C (TDL-A is similar, slightly easier):
 
-| Case | JSR | No protection | LMMSE, no map | Map P+E | **Map P+R+E** | True map |
-| --- | --- | --- | --- | --- | --- | --- |
-| No jammer | – | 0.000 | 0.000 | 0.002 | 0.003 | 0.000 |
-| Pilot | −9 dB | 0.000 | 0.000 | 0.079 | 0.059 | 0.000 |
-| Pilot | 0 dB | 0.009 | 0.002 | 0.037 | 0.010 | 0.000 |
-| Pilot | +9 dB | 0.320 | 0.175 | 0.003 | **0.003** | 0.000 |
-| Data | −9 dB | 0.001 | 0.001 | 0.033 | 0.046 | 0.002 |
-| Data | 0 dB | 0.164 | 0.175 | 0.007 | **0.007** | 0.002 |
-| Data | +9 dB | 0.836 | 0.836 | 0.002 | **0.002** | 0.002 |
-| Partial | 0 dB | 0.271 | 0.234 | 0.011 | **0.008** | 0.004 |
-| Partial | +9 dB | 0.906 | 0.836 | 0.003 | **0.003** | 0.002 |
-| Whole-allocation pilot | 0 dB | 0.088 | – | – | – | 0.088 |
+| Case | JSR | No protection | DMRS-only | Power map, hard | P+R+E map, hard | **P+R+E map, soft** | True map, soft |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| No jammer | – | 0 | 0 | 0.003 | 0.003 | **0** | 0 |
+| Pilot | −15 dB | 0 | 0 | 0.003 | 0.053 | **0** | 0 |
+| Pilot | 0 dB | 0.011 | 0 | 0.022 | 0.009 | **0** | 0 |
+| Pilot | +9 dB | 0.325 | 0.008 | 0.048 | 0.003 | **0.001** | 0 |
+| Data | −15 dB | 0.0003 | 0 | 0.005 | **0.115** | **0** | 0 |
+| Data | 0 dB | 0.158 | 0.159 | 0.156 | 0.005 | **0** | 0 |
+| Data | +9 dB | 0.844 | 0.844 | 0.177 | 0.001 | **0.0003** | 0.0003 |
+| Partial | −15 dB | 0 | 0 | 0.003 | 0.125 | **0** | 0 |
+| Partial | +9 dB | 0.898 | 0.011 | 0.268 | 0.003 | **0.001** | 0.001 |
+| All pilots jammed | +3 dB | 0.409 | – | – | 0.409 (true map) | – | **0.040** |
+| All pilots jammed | +9 dB | 0.945 | – | – | 0.945 (true map) | – | **0.395** |
 
 **Reading.**
-- **Strong jamming:** the map turns a broken link into a working one. Data jamming at +9 dB: BLER
-  0.84 → 0.002; pilot jamming: 0.32 → 0.003. The detectors' maps come close to the true map.
-- **The LMMSE estimate alone** helps against pilot jamming (0.32 → 0.18), because it averages over
-  many pilots; it does nothing against data jamming. The map is what removes the rest.
-- **The residual matters for recovery too:** against pilot jamming the P+R+E map beats the P+E
-  map from −9 dB upward (e.g. 0.010 vs 0.037 at 0 dB), because it localizes the jammed DMRS
-  cells better.
-- **Weak jamming has a price.** Below about −6 dB (data, partial) or 0 dB (pilot) the unprotected
-  link already decodes, and the detector's false alarms then erase clean data or drop clean
-  pilots: BLER up to about 0.06 where no protection gives 0. Without any jammer the cost is small
-  (0.003). In practice the protection should only be switched on when the detector reports a
-  substantial jammed area; that gating is not part of this study.
-- **Limit case:** when every pilot of the allocation is jammed, nothing can be repaired, and the
-  map-aware receiver behaves exactly like the unprotected one (0.088 vs 0.088), as designed.
+- **Soft use costs nothing.** With the fused map used softly the BLER stays at or below 0.001 for
+  every attack and JSR, and is 0 without a jammer, exactly like the true map. Used hard, the same
+  map costs up to 0.12 BLER at weak jamming, where the unprotected link has no errors: false alarms
+  drop clean pilots and erase clean data. Even the *true* map costs about 0.002 when used hard,
+  because erasing four of twelve PRBs throws away symbols that weak jamming had barely damaged.
+  This is the weak-jamming penalty of the first round, now removed without any gating rule.
+- **Without a map, the DMRS is not enough.** The DMRS-only receiver handles pilot and partial-band
+  jamming (0.008 and 0.011 at +9 dB), because both hit the DMRS, but it is blind to data jamming
+  (0.84, like no protection). The map's time resolution (which symbols are jammed) is what makes
+  data jamming recoverable.
+- **The classic power-test receiver** only helps against strong jamming (data +9 dB: 0.18) and
+  adds up to about 0.02 BLER at weak jamming, where the unprotected link is (nearly) error-free:
+  a per-cell power test cannot tell jamming from fading.
+- **With soft use, the map without the residual is as good** (P+E soft equals P+R+E soft within
+  the confidence bands): weak jamming that the P+E network misses also barely hurts decoding, and
+  the receiver weights pilots by their residual anyway. The residual's advantage shows in
+  localization (section 3), and inside the receiver as the pilot weight.
+- **When every pilot is jammed** nothing can be interpolated. The hard receiver falls back to the
+  standard estimate (identical BLER), but weighting all pilots by their residual makes the LMMSE
+  filter average more strongly across the band: 0.040 instead of 0.41 at +3 dB, 0.39 instead of
+  0.95 at +9 dB.
 
 ## 7. Figures for the presentation and the paper
 
 Open `results/figures/index.html`. Explanatory figures (each with its caption): attack patterns,
 system diagram, how the residual works, constellations (wrong-symbol effect), feature
 distributions, detector outputs on typical slots, training curves. Result figures: BER/BLER,
-feature maps, Pd vs JSR (test, scheduling-aware, two SNR ranges), recovery.
+feature maps, Pd vs JSR (test, scheduling-aware, two SNR ranges), recovery (main and hard vs
+soft), the residual against its theory, unseen conditions, mixed training, size and latency.
 
 ## 8. The DMRS residual has an exact, channel-free null distribution
 
