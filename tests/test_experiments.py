@@ -26,3 +26,18 @@ def test_feature_maps_script_runs(tmp_path, monkeypatch):
     feature_maps.main(["--snr-db", "15", "--jsr-db", "0"])
     assert (tmp_path / "feature_maps.png").is_file()
     assert (tmp_path / "feature_maps.pdf").is_file()
+
+
+def test_latency_script_runs(tmp_path, monkeypatch):
+    from jamloc.experiments import latency
+    from jamloc.model import VARIANTS
+
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
+    latency.main(["--reps", "5"])
+    with open(tmp_path / "latency.csv", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["variant"] for r in rows] == list(VARIANTS)
+    for r in rows:
+        assert float(r["feature_ms"]) > 0 and float(r["model_ms"]) > 0
+        assert abs(float(r["total_ms"]) - float(r["feature_ms"]) - float(r["model_ms"])) < 1e-6
+        assert 10_000 <= int(r["params"]) <= 100_000
