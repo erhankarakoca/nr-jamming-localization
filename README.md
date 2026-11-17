@@ -100,11 +100,13 @@ gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper
 | `receiver.py` | Receiver chain: LS estimation, LMMSE equalization, demapping, decoding |
 | `link.py` | The whole slot: UE, channels, jammer, noise, receiver |
 | `features.py` | Power, DMRS residual and EVM maps, plus allocation masks |
-| `baselines.py` | EVM-threshold and residual-threshold detectors |
+| `baselines.py` | Threshold detectors: EVM, residual, residual CFAR (analytic), per-cell power |
+| `theory.py` | Exact statistics of the DMRS residual: false-alarm threshold, Pd, leakage |
+| `recovery.py` | Map-aware receiver: hard (drop/erase) and soft (weight by estimated jamming) |
 | `model.py`, `train.py` | U-Net detector and its training |
 | `dataset.py` | Train / validation / test / scheduling-aware splits with fixed seeds |
 | `evaluate.py`, `metrics.py` | Pd at 1% per-cell false alarm vs JSR, cell-level F1 |
-| `experiments/` | Scripts for the figures (BER/BLER, feature maps, latency) |
+| `experiments/` | One script per experiment and figure (see below) |
 
 ### Reproducing the results
 
@@ -139,6 +141,17 @@ open it in any browser.
 
 On Windows PowerShell, run the dataset loop as
 `foreach ($s in "train","val","test","sched") { uv run python -m jamloc.dataset --split $s }`.
+
+**Second round** (`docs/plan-v2.md`): the residual's theory, unseen conditions, network size,
+mixed training. All reuse the trained models and the `val` / `test` splits:
+
+```bash
+uv run python -m jamloc.experiments.residual_theory    # analytic threshold and Pd vs simulation
+uv run python -m jamloc.experiments.generalization     # long delays, 30 m/s, QPSK jammer (GPU)
+uv run python -m jamloc.experiments.size_sweep         # narrower U-Nets: train + evaluate (GPU)
+uv run python -m jamloc.experiments.size_sweep --latency   # their CPU latency (run on the CPU)
+uv run python -m jamloc.experiments.robust_training    # retrain on mixed channels (GPU)
+```
 
 **Other figures** (run locally; latency should be measured on the target CPU):
 

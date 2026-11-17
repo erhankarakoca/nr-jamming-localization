@@ -918,11 +918,13 @@ RESULT_FIGURES = [
         "../recovery/recovery_A.png",
         "Map-aware recovery, TDL-A",
         (
-            "BLER without protection, with the map of the fused U-Net (P+R+E) and with the true map, all "
-            "decoding the same slots. Green background: JSRs where the detector's map beats no "
-            "protection; at weaker jamming the unprotected link already decodes and the map's false "
-            "alarms cost a little. Bands: 95% confidence; hollow triangles: no block error (95% upper "
-            "bound). The title gives the BLER without any jammer."
+            "BLER of five receivers decoding the same slots: no protection; DMRS-only "
+            "interference estimation without a map (what a receiver can do today: it cannot see "
+            "data jamming); the classic power-test map with dropped pilots and erased data (Li et "
+            "al.); the fused U-Net's map used softly (the map says where, the receiver estimates "
+            "how strong); and the true map used the same way. Green background: JSRs where the "
+            "soft P+R+E receiver beats no protection. Bands: 95% confidence; hollow triangles: no "
+            "block error (95% upper bound). The title gives the BLER without any jammer."
         ),
         "python -m jamloc.experiments.recovery --channel A",
     ),
@@ -930,8 +932,10 @@ RESULT_FIGURES = [
         "../recovery/recovery_A_ablation.png",
         "Recovery ablation, TDL-A",
         (
-            "Where the gain comes from: the LMMSE channel estimate alone (no map), the map of the U-Net "
-            "without the residual (P+E), and the fused map (P+R+E), against no protection."
+            "Hard against soft use of the map: dropping flagged pilots and erasing flagged data "
+            "costs BLER at weak jamming, where false alarms hit clean cells; weighting them by the "
+            "estimated jamming power does not. Also the map of the U-Net without the residual "
+            "(P+E), and the true map used both ways."
         ),
         "python -m jamloc.experiments.recovery --channel A",
     ),
@@ -946,6 +950,51 @@ RESULT_FIGURES = [
         "Recovery ablation, TDL-C",
         "The same for TDL-C.",
         "python -m jamloc.experiments.recovery --channel C",
+    ),
+    (
+        "../theory/residual_theory.png",
+        "The DMRS residual against its theory",
+        (
+            "(a) Without jamming, the residual of a PRB is a weighted sum of exponentials that "
+            "depends on neither the channel nor the SNR, so its 1% threshold is computed from the "
+            "allocation alone: the measured false-alarm rate stays at 1% from 5 to 25 dB on both "
+            "channels, with no training data. With delays beyond tau_max (unseen 1000 ns channel) "
+            "the assumption breaks and so does the rate. (b) Probability of exceeding the threshold "
+            "for pilot jamming of 4 of 12 PRBs: lines are the formula, markers the link simulation; "
+            "the PRB next to the block is a false alarm caused by leakage of the projection."
+        ),
+        "python -m jamloc.experiments.residual_theory",
+    ),
+    (
+        "../generalization/generalization.png",
+        "Conditions never seen in training",
+        (
+            "Detectors trained on 100/300 ns channels at up to 3 m/s with a Gaussian jammer, "
+            "thresholds unchanged. A QPSK jammer changes nothing. Long delays and high speed raise "
+            "the false alarms of everything that uses receiver features (residual, EVM), because "
+            "the channel no longer fits the delay subspace or changes within the slot; the power "
+            "feature alone is robust."
+        ),
+        "python -m jamloc.experiments.generalization",
+    ),
+    (
+        "../robust_training/robust_training.png",
+        "Mixed training against unseen conditions",
+        (
+            "The same U-Nets retrained on batches cycling through nominal channels, long delay "
+            "spreads and speeds up to 30 m/s, against the nominally trained ones."
+        ),
+        "python -m jamloc.experiments.robust_training",
+    ),
+    (
+        "../size_sweep/size_sweep.png",
+        "How small can the U-Net be?",
+        (
+            "F1 and Pd of the fused detector against the number of parameters (width of the first "
+            "level 4, 6, 8, 12), and the CPU time per slot with feature extraction (one thread, "
+            "plain PyTorch and frozen graph). A 30 kHz slot lasts 0.5 ms."
+        ),
+        "python -m jamloc.experiments.size_sweep",
     ),
 ]
 

@@ -32,15 +32,19 @@ What is defensible and new in combination:
 2. **The DMRS delay-subspace residual** as a per-PRB feature in a single-antenna NR receiver. The
    projection principle exists (`mehrabian2026robust`, multi-antenna, per-block decision;
    `wang2023sequential`, spatial sparsity against DMRS spoofing). Our construction (uniform delay
-   profile, raw LS pilots, per-pilot noise normalization) and its role in detecting *weak* pilot
-   jamming are the contribution.
+   profile, raw LS pilots, per-pilot noise normalization), its **exact statistics** (a weighted sum
+   of exponentials that depends on neither the channel nor the SNR, so the false-alarm threshold
+   is computed, not learned, and Pd and the leakage into neighbouring PRBs follow in closed form)
+   and its role in detecting *weak* pilot jamming are the contribution.
 3. **Fusion with matched ablations and low-false-alarm evaluation** (Pd at 1% per-cell false
    alarm, seeds, scheduling-aware attacker). Fusing features with a network alone is not new
    (`honkala2021deeprx` on NR grids, `neasamonisanthi2025interfo` for uplink interference,
    detection only, `ulbricht2024pyjama` for jamming in Sionna).
-4. **Map-conditioned NR recovery** as an evaluation of the map's value: PRB-level pilot exclusion,
-   LMMSE interpolation with per-subcarrier error variance, erasure, with *estimated* maps against
-   the true map. Present it as an NR refinement of `li2012robust`, not as a new receiver idea.
+4. **Map-conditioned NR recovery** as an evaluation of the map's value: the map says *where*, the
+   receiver estimates *how strong* from the flagged cells (pilot noise weighting in an LMMSE
+   interpolator, interference-aware LLRs), compared with hard exclusion and erasure
+   (`li2012robust`), with DMRS-only interference estimation (no map), and with the true map.
+   Present it as an NR refinement of `li2012robust`, not as a new receiver idea.
 
 **Claims to avoid:** "first jamming map", "first U-Net jamming detector", "first receiver that
 uses localized interference knowledge", "a new scheduling-aware attack" (`wang2026downlink`,
@@ -56,8 +60,8 @@ estimated map drives pilot exclusion, uncertainty-aware channel interpolation an
 | Work | What it does | Our difference |
 | --- | --- | --- |
 | `li2012robust` (MILCOM 2012) | Per-symbol corrupted-tone detection (power test), pilot erasure, linear interpolation, robust LLRs, LDPC-coded OFDM | Learned map from three receiver features that also catches *weak* pilot jamming; NR PRB granularity; LMMSE interpolation with per-subcarrier uncertainty; evaluation with estimated vs true maps |
-| `ornek2024advanced`, `ornek2023securing` (EVM per symbol × RB) | EVM maps for time-frequency jamming detection | Labels mark attacked cells, not impaired cells; residual handles pilot jamming that EVM mislocates; full text of the 2024 paper not yet obtained |
-| `mehrabian2026robust` (IEEE COMML 2026) | Pilot-subspace projection detector, multi-antenna, weak-signal robust, binary decision | Single-antenna, frequency/delay subspace, per-PRB feature fused with power and EVM; full text not yet obtained, so our residual baseline is "inspired by" it, not a reproduction |
+| `ornek2024advanced`, `ornek2023securing` (EVM per symbol × RB) | 5G *downlink* MATLAB link; per-symbol × RB EVM images under tone, chirp and pulse jamming, compared visually with spectrograms, BER and throughput. No detector: no threshold, false-alarm rate or Pd; the "ML alternative to spectrograms" is proposed, not evaluated | We turn the EVM map into a detector with a measured false-alarm rate (our EVM-threshold baseline) and show where it fails: labels mark attacked cells, and under pilot jamming EVM points at the unjammed data symbols |
+| `mehrabian2026robust` (IEEE COMML 2026) | M = 16 antennas; projects the received pilot block onto the complement of the known pilot sequence, then R1 (largest singular value), R1-CFAR and a projected energy detector (PED); one binary decision per pilot interval. States that it cannot see jammers that are silent during pilots and suggests adding data-phase detectors | Single antenna: the user's channel is removed by a *delay* subspace instead of the pilot sequence, and the statistic is per PRB. Our residual threshold is the per-PRB analogue of their PED. We derive its exact null distribution and Pd (they derive R1/R1-CFAR by GLRT) and fuse it with data-phase features, which is the combination they suggest |
 | `kavvousanos2026deep` (arXiv 2026) | 14k-parameter CNN cancels narrowband interference and outputs soft bits; erasure baseline | AWGN channel and multitone interference; no PRB × symbol support map, no pilot jamming or channel reconstruction |
 | `wang2026downlink` (IEEE TIFS 2026) | DCI-sniffing smart PUSCH jamming and spatial suppression | Same attacker idea; we use single-antenna support inference and pilot/LLR processing instead of spatial separation |
 | `kazemian2024investigating` (arXiv 2024) | Finds attacked subcarriers from loss of orthogonality, cancels the jamming | Frequency-only localization; we resolve symbols and separate pilot from data attacks |
@@ -72,8 +76,7 @@ estimated map drives pilot exclusion, uncertainty-aware channel interpolation an
 2. **Fix the latency claim.** At 30 kHz a slot lasts 0.5 ms, so 0.80 ms per slot on one core is
    not real time on one core. Report it honestly (two cores, or batching), and run the U-Net size
    sweep to find a smaller model below 0.5 ms in total.
-3. **Get two full texts** through the university library: `ornek2024advanced` (BlackSeaCom 2024)
-   and `mehrabian2026robust` (COMML 2026), so the baselines can be described exactly.
+3. ~~Get two full texts~~ (done, November 2026; summarized in the table above).
 4. **Report the residual's limits.** With a truncated subspace the residual also contains channel
    leakage, and the projection spreads localized jamming to neighbouring PRBs. The
    generalization tests (longer delay spread than `tau_max` assumes) cover this.
