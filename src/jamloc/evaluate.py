@@ -50,7 +50,7 @@ DETECTOR_STYLE = {
     },
     "power_threshold": {
         "label": "Power threshold (Li et al.)",
-        "color": "#E69F00",
+        "color": "#999999",
         "marker": "*",
         "linestyle": ":",
     },
@@ -166,7 +166,7 @@ def aggregate(rows: list[dict], values) -> list[dict]:
 
 
 def plot_pd(pd_rows, cells: str, title: str):
-    fig, axes = new_figure(7.16, 2.5, ncols=3, sharey=True)
+    fig, axes = new_figure(7.16, 2.9, ncols=3, sharey=True)
     for ax, attack in zip(axes, ("pilot", "data", "partial"), strict=True):
         for name, style in DETECTOR_STYLE.items():
             rows = [
@@ -186,7 +186,8 @@ def plot_pd(pd_rows, cells: str, title: str):
                 ax.fill_between(x, mean - std, mean + std, color=style["color"], alpha=0.15, lw=0)
         ax.set(title=f"{attack} jamming", xlabel="JSR per jammed RE [dB]", ylim=(-0.02, 1.02))
     axes[0].set_ylabel(f"Pd at {FA:.0%} per-cell false alarm")
-    axes[-1].legend(loc="lower right")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="outside lower center", ncols=4, frameon=False)
     fig.suptitle(title)
     return fig
 
@@ -200,7 +201,7 @@ def _write_csv(rows, path):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Evaluate all detectors on a split.")
-    splits = [s for s in SPLITS if s not in ("train", "val")]
+    splits = [s for s in SPLITS if not s.startswith(("train", "val"))]
     p.add_argument("--split", choices=splits, default="test")
     p.add_argument(
         "--snr-db",
