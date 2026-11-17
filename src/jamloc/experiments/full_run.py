@@ -5,9 +5,11 @@ Meant for a Colab GPU; runs the same way on a laptop CPU (slower training):
     python -m jamloc.experiments.full_run --seeds 0 1 2
 
 1. generate the train / val / test / sched datasets,
-2. train every U-Net variant once per seed,
+2. train every U-Net variant once per seed (with per-epoch loss histories),
 3. evaluate on the test split, the scheduling-aware split, and two SNR ranges of the test split,
-4. pack ``results/eval`` and ``results/models`` into ``results/full_run.zip``.
+4. run the map-aware recovery experiment for TDL-A and TDL-C (seed-0 detectors),
+5. draw the explanatory figures and the gallery page,
+6. pack ``results/{eval,models,recovery,figures}`` into ``results/full_run.zip``.
 
 The BER/BLER sweep, the feature-map figure and the CPU latency benchmark are separate scripts
 (see the README); latency in particular should be measured on the target CPU, not on Colab.
@@ -19,6 +21,7 @@ import zipfile
 
 from jamloc import evaluate
 from jamloc.dataset import SPLITS, generate
+from jamloc.experiments import figures, recovery
 from jamloc.model import VARIANTS
 from jamloc.paths import data_dir, results_dir
 from jamloc.train import train
@@ -63,10 +66,20 @@ def main(argv=None):
             evaluate.main(["--split", "test", "--snr-db", str(lo), str(hi)])
     print(f"[eval] done after {_elapsed(start)}")
 
-    # 4. One file to download
+    # 4. What the map is good for: recovery with the detectors' maps
+    small = ["--batch-size", "8", "--max-mc-iter", "1", "--jsr-db", "0"] if args.small else []
+    for channel in ("A", "C"):
+        recovery.main(["--channel", channel, *small])
+    print(f"[recovery] done after {_elapsed(start)}")
+
+    # 5. Explanatory figures and the gallery page
+    figures.main([])
+    print(f"[figures] done after {_elapsed(start)}")
+
+    # 6. One file to download
     archive = results_dir() / "full_run.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
-        for folder in ("eval", "models"):
+        for folder in ("eval", "models", "recovery", "figures"):
             for path in sorted((results_dir() / folder).glob("*")):
                 z.write(path, f"{folder}/{path.name}")
     print(f"Wrote {archive} after {_elapsed(start)}")

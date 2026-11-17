@@ -72,6 +72,13 @@ def test_full_run_small(tmp_path, monkeypatch):
         names
     )
     assert {"models/fused_seed0.pt", "models/fused_seed1.pt"} <= set(names)
+    assert {
+        "models/fused_seed0_history.csv",
+        "recovery/recovery_A.csv",
+        "recovery/recovery_C.csv",
+        "figures/index.html",
+        "figures/detector_outputs.png",
+    } <= set(names)
 
 
 def test_recovery_script_runs(tmp_path, monkeypatch):

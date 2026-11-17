@@ -111,8 +111,9 @@ gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper
 Every command writes into `data/` or `results/` (or the folders set by `JAMLOC_DATA_DIR` /
 `JAMLOC_RESULTS_DIR`). Times are for a MacBook Pro M1 Pro, CPU only.
 
-**Detection experiment (datasets, training, evaluation).** One command does it all and leaves
-`results/full_run.zip`. Training 4 variants x 3 seeds takes about 2.5 hours on a laptop CPU, so
+**Detection experiment (datasets, training, evaluation, recovery, figures).** One command does
+it all and leaves `results/full_run.zip` (evaluation CSVs and plots, trained models with their
+loss histories, recovery curves, explanatory figures and the gallery page). Training 4 variants x 3 seeds takes about 2.5 hours on a laptop CPU, so
 it is meant for a Colab GPU: run [`notebooks/colab_setup.ipynb`](notebooks/colab_setup.ipynb),
 whose last cell is this command.
 
@@ -128,7 +129,13 @@ uv run python -m jamloc.train --variant all --epochs 15 --seeds 0 1 2
 uv run python -m jamloc.evaluate --split test                   # mean +- std over seeds
 uv run python -m jamloc.evaluate --split sched                  # scheduling-aware jammer
 uv run python -m jamloc.evaluate --split test --snr-db 15 25    # one SNR range only
+uv run python -m jamloc.experiments.recovery --channel A        # map-aware receiver vs none
+uv run python -m jamloc.experiments.figures                     # explanatory figures + gallery
 ```
+
+**Figures:** everything lands in `results/` as PDF (paper) and PNG (slides).
+`results/figures/index.html` shows every figure with a caption saying what it shows and why;
+open it in any browser.
 
 On Windows PowerShell, run the dataset loop as
 `foreach ($s in "train","val","test","sched") { uv run python -m jamloc.dataset --split $s }`.
