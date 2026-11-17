@@ -47,7 +47,7 @@ def test_train_writes_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
     generate("train", num_slots=64, batch_size=32)
     generate("val", num_slots=32, batch_size=32)
-    path = train("evm", epochs=1, batch_size=32)
-    assert path == tmp_path / "results" / "models" / "evm.pt"
-    model = load_model("evm")
+    path = train("evm", epochs=1, batch_size=32, seed=1)
+    assert path == tmp_path / "results" / "models" / "evm_seed1.pt"
+    model = load_model("evm", seed=1)
     assert isinstance(model, TinyUNet) and not model.training

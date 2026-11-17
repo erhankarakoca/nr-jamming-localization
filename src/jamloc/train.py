@@ -1,7 +1,7 @@
 """Train one detector variant on the ``train`` split, keeping the epoch with the best ``val`` loss.
 
 python -m jamloc.train --variant fused
-python -m jamloc.train --variant all
+python -m jamloc.train --variant all --seeds 0 1 2
 """
 
 import argparse
@@ -23,8 +23,8 @@ def _tensors(split: str, variant: str, device: str):
     return x, y
 
 
-def _checkpoint_path(variant: str):
-    return results_dir() / "models" / f"{variant}.pt"
+def checkpoint_path(variant: str, seed: int = 0):
+    return results_dir() / "models" / f"{variant}_seed{seed}.pt"
 
 
 def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-3, seed: int = 0):
@@ -41,7 +41,7 @@ def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
-    path = _checkpoint_path(variant)
+    path = checkpoint_path(variant, seed)
     path.parent.mkdir(parents=True, exist_ok=True)
     best = float("inf")
     gen = torch.Generator().manual_seed(seed)
@@ -66,6 +66,7 @@ def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-
             torch.save(
                 {
                     "variant": variant,
+                    "seed": seed,
                     "in_channels": x_tr.shape[1],
                     "epoch": epoch,
                     "val_loss": val_loss,
@@ -74,16 +75,16 @@ def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-
                 path,
             )
         print(
-            f"[{variant}] epoch {epoch + 1}/{epochs}  train loss {loss.item():.4f}  "
+            f"[{variant}, seed {seed}] epoch {epoch + 1}/{epochs}  train loss {loss.item():.4f}  "
             f"val loss {val_loss:.4f}  ({time.perf_counter() - start:.1f} s)",
             flush=True,
         )
     return path
 
 
-def load_model(variant: str) -> TinyUNet:
+def load_model(variant: str, seed: int = 0) -> TinyUNet:
     """Trained model in eval mode, on ``sionna.phy.config.device``."""
-    ckpt = torch.load(_checkpoint_path(variant), map_location=config.device)
+    ckpt = torch.load(checkpoint_path(variant, seed), map_location=config.device)
     model = TinyUNet(ckpt["in_channels"]).to(config.device)
     model.load_state_dict(ckpt["state_dict"])
     return model.eval()
@@ -95,10 +96,11 @@ def main(argv=None):
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seeds", type=int, nargs="+", default=[0])
     args = p.parse_args(argv)
     for variant in VARIANTS if args.variant == "all" else [args.variant]:
-        print("Saved", train(variant, args.epochs, args.batch_size, args.lr, args.seed))
+        for seed in args.seeds:
+            print("Saved", train(variant, args.epochs, args.batch_size, args.lr, seed))
 
 
 if __name__ == "__main__":

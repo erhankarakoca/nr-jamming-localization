@@ -4,8 +4,13 @@ Thresholds always come from the ``val`` split (1% of its non-jammed cells flagge
 applied unchanged to the evaluated split. Pd is reported over all jammed cells and over the
 jammed cells inside the allocation ("scheduled"), where the UE's own signal is present.
 
+Every training seed found in ``results/models`` is evaluated separately (with its own
+thresholds); the CSVs give the mean and the sample standard deviation over seeds, and the
+``*_per_seed.csv`` files keep the individual runs.
+
     python -m jamloc.evaluate --split test
-    python -m jamloc.evaluate --split sched    # scheduling-aware jammer (robustness)
+    python -m jamloc.evaluate --split sched                 # scheduling-aware jammer
+    python -m jamloc.evaluate --split test --snr-db 5 15    # only slots with 5 <= SNR < 15 dB
 """
 
 import argparse
@@ -46,12 +51,24 @@ DETECTOR_STYLE = {
 }
 
 
-def score_split(d: dict) -> dict[str, np.ndarray]:
+def available_seeds() -> list[int]:
+    """Training seeds for which every U-Net variant has a checkpoint."""
+    seeds = None
+    for variant in VARIANTS:
+        found = {
+            int(path.stem.rsplit("_seed", 1)[1])
+            for path in (results_dir() / "models").glob(f"{variant}_seed*.pt")
+        }
+        seeds = found if seeds is None else seeds & found
+    return sorted(seeds or [])
+
+
+def score_split(d: dict, seed: int = 0) -> dict[str, np.ndarray]:
     """Scores ``[N, 24, 14]`` of every detector on one loaded split."""
     features = torch.from_numpy(d["features"])
     scores = {}
     for variant in VARIANTS:
-        model = load_model(variant)
+        model = load_model(variant, seed)
         with torch.no_grad():
             logits = [
                 model(select_inputs(features[i].to(config.device), variant)).cpu()
@@ -112,6 +129,28 @@ def evaluate_scores(scores: dict, val: dict, test: dict, fa: float = FA):
     return pd_rows, f1_rows
 
 
+def aggregate(rows: list[dict], values) -> list[dict]:
+    """Mean and sample standard deviation over seeds of the column(s) ``values``.
+
+    Rows that agree on every other column (except ``seed``) form one group.
+    """
+    values = (values,) if isinstance(values, str) else tuple(values)
+    groups = {}
+    for r in rows:
+        key = tuple((k, v) for k, v in r.items() if k != "seed" and k not in values)
+        groups.setdefault(key, []).append(r)
+    out = []
+    for key, group in groups.items():
+        row = dict(key)
+        for v in values:
+            x = np.array([r[v] for r in group], dtype=float)
+            row[f"{v}_mean"] = float(np.mean(x))
+            row[f"{v}_std"] = float(np.std(x, ddof=1)) if len(x) > 1 else 0.0
+        row["n_seeds"] = len(group)
+        out.append(row)
+    return out
+
+
 def plot_pd(pd_rows, cells: str, title: str):
     fig, axes = new_figure(7.16, 2.5, ncols=3, sharey=True)
     for ax, attack in zip(axes, ("pilot", "data", "partial"), strict=True):
@@ -125,7 +164,12 @@ def plot_pd(pd_rows, cells: str, title: str):
                 and r["cells"] == cells
             ]
             if rows:
-                ax.plot([r["jsr_db"] for r in rows], [r["pd"] for r in rows], **style)
+                x = np.array([r["jsr_db"] for r in rows])
+                mean = np.array([r["pd_mean"] for r in rows])
+                std = np.array([r["pd_std"] for r in rows])
+                ax.plot(x, mean, **style)
+                # band: +-1 standard deviation over training seeds
+                ax.fill_between(x, mean - std, mean + std, color=style["color"], alpha=0.15, lw=0)
         ax.set(title=f"{attack} jamming", xlabel="JSR per jammed RE [dB]", ylim=(-0.02, 1.02))
     axes[0].set_ylabel(f"Pd at {FA:.0%} per-cell false alarm")
     axes[-1].legend(loc="lower right")
@@ -143,28 +187,56 @@ def _write_csv(rows, path):
 def main(argv=None):
     p = argparse.ArgumentParser(description="Evaluate all detectors on a split.")
     p.add_argument("--split", choices=("test", "sched"), default="test")
+    p.add_argument(
+        "--snr-db",
+        type=float,
+        nargs=2,
+        metavar=("MIN", "MAX"),
+        help="only evaluate slots with MIN <= SNR < MAX",
+    )
     args = p.parse_args(argv)
 
+    seeds = available_seeds()
+    if not seeds:
+        raise SystemExit("No trained models in results/models: run python -m jamloc.train first.")
+
     val, test = load("val"), load(args.split)
-    s_val, s_test = score_split(val), score_split(test)
-    scores = {name: (s_val[name], s_test[name]) for name in s_val}
-    pd_rows, f1_rows = evaluate_scores(scores, val, test)
+    name, what = args.split, "scheduling-aware jammer" if args.split == "sched" else "test set"
+    if args.snr_db:
+        lo, hi = args.snr_db
+        keep = (test["snr_db"] >= lo) & (test["snr_db"] < hi)
+        test = {k: v[keep] for k, v in test.items()}
+        name += f"_snr{lo:g}-{hi:g}"
+        what += f", SNR {lo:g}-{hi:g} dB"
+
+    pd_rows, f1_rows = [], []
+    for seed in seeds:
+        s_val, s_test = score_split(val, seed), score_split(test, seed)
+        scores = {det: (s_val[det], s_test[det]) for det in s_val}
+        pd_seed, f1_seed = evaluate_scores(scores, val, test)
+        pd_rows += [{**r, "seed": seed} for r in pd_seed]
+        f1_rows += [{**r, "seed": seed} for r in f1_seed]
+    pd_mean = aggregate(pd_rows, "pd")
+    f1_mean = aggregate(f1_rows, ("f1", "fa", "fa_scored"))
 
     out = results_dir() / "eval"
     out.mkdir(parents=True, exist_ok=True)
-    _write_csv(pd_rows, out / f"{args.split}_pd_vs_jsr.csv")
-    _write_csv(f1_rows, out / f"{args.split}_f1.csv")
-    what = "scheduling-aware jammer" if args.split == "sched" else "test set"
+    _write_csv(pd_rows, out / f"{name}_pd_vs_jsr_per_seed.csv")
+    _write_csv(f1_rows, out / f"{name}_f1_per_seed.csv")
+    _write_csv(pd_mean, out / f"{name}_pd_vs_jsr.csv")
+    _write_csv(f1_mean, out / f"{name}_f1.csv")
     for cells in ("all", "scheduled"):
+        title = f"{what}, {cells} jammed cells, TDL-A and TDL-C, {len(seeds)} seed(s)"
         with paper_style():
-            fig = plot_pd(pd_rows, cells, f"{what}, {cells} jammed cells, TDL-A and TDL-C")
-        save(fig, out / f"{args.split}_pd_vs_jsr_{cells}")
+            fig = plot_pd(pd_mean, cells, title)
+        save(fig, out / f"{name}_pd_vs_jsr_{cells}")
 
-    for r in f1_rows:
+    print(f"{name}: seeds {seeds}")
+    for r in f1_mean:
         if r["attack"] == "all":
             print(
-                f"{r['detector']:20s} F1 {r['f1']:.3f}  FA (all cells) {r['fa']:.4f}  "
-                f"FA (scored cells) {r['fa_scored']:.4f}"
+                f"{r['detector']:20s} F1 {r['f1_mean']:.3f} +- {r['f1_std']:.3f}  "
+                f"FA (all cells) {r['fa_mean']:.4f}  FA (scored cells) {r['fa_scored_mean']:.4f}"
             )
 
 

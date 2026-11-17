@@ -3,7 +3,7 @@ import csv
 import numpy as np
 
 from jamloc.dataset import generate, load
-from jamloc.evaluate import evaluate_scores, main
+from jamloc.evaluate import aggregate, evaluate_scores, main
 from jamloc.model import VARIANTS
 from jamloc.train import train
 
@@ -23,6 +23,19 @@ def test_oracle_detector(tmp_path, monkeypatch):
     assert all(r["fa"] == 0.0 and r["fa_scored"] == 0.0 for r in f1_rows)
 
 
+def test_aggregate_over_seeds():
+    rows = [
+        {"detector": "fused", "attack": "pilot", "seed": 0, "pd": 0.4},
+        {"detector": "fused", "attack": "pilot", "seed": 1, "pd": 0.6},
+        {"detector": "power", "attack": "pilot", "seed": 0, "pd": 0.3},
+    ]
+    out = {r["detector"]: r for r in aggregate(rows, "pd")}
+    assert np.isclose(out["fused"]["pd_mean"], 0.5)
+    assert np.isclose(out["fused"]["pd_std"], np.std([0.4, 0.6], ddof=1))
+    assert out["fused"]["n_seeds"] == 2 and "seed" not in out["fused"]
+    assert out["power"]["pd_std"] == 0.0 and out["power"]["n_seeds"] == 1
+
+
 def test_main_runs_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
@@ -30,13 +43,21 @@ def test_main_runs_end_to_end(tmp_path, monkeypatch):
     generate("val", num_slots=32, batch_size=32)
     generate("test", num_slots=60, batch_size=32)
     for variant in VARIANTS:
-        train(variant, epochs=1, batch_size=32)
+        for seed in (0, 1):
+            train(variant, epochs=1, batch_size=32, seed=seed)
 
     main(["--split", "test"])
     out = tmp_path / "results" / "eval"
     with open(out / "test_pd_vs_jsr.csv", encoding="utf-8", newline="") as f:
-        detectors = {r["detector"] for r in csv.DictReader(f)}
-    assert detectors == {*VARIANTS, "evm_threshold", "residual_threshold"}
-    assert (out / "test_f1.csv").is_file()
+        rows = list(csv.DictReader(f))
+    assert {r["detector"] for r in rows} == {*VARIANTS, "evm_threshold", "residual_threshold"}
+    assert {"pd_mean", "pd_std", "n_seeds"} <= set(rows[0])
+    assert {r["n_seeds"] for r in rows} == {"2"}
+    with open(out / "test_f1.csv", encoding="utf-8", newline="") as f:
+        assert {"f1_mean", "f1_std", "fa_mean"} <= set(next(csv.DictReader(f)))
+    assert (out / "test_pd_vs_jsr_per_seed.csv").is_file()
     assert (out / "test_pd_vs_jsr_all.png").is_file()
     assert (out / "test_pd_vs_jsr_scheduled.png").is_file()
+
+    main(["--split", "test", "--snr-db", "5", "15"])
+    assert (out / "test_snr5-15_pd_vs_jsr.csv").is_file()
