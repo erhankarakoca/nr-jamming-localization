@@ -44,7 +44,9 @@ ALLOC_COLOR, DMRS_COLOR, JAM_COLOR = "#CFE3F3", "#0072B2", "#D55E00"
 CLEAN_COLOR = "#0072B2"
 
 
-def _example_batch(attack: str, jsr_db: float, snr_db: float, channel: str, seed: int = 7):
+def _example_batch(
+    attack: str, jsr_db: float, snr_db: float, channel: str, seed: int = 7, decode: bool = False
+):
     """One slot with the example allocation and jammer block.
 
     Re-seeding before every call gives the same UE channel and noise for every attack, so the
@@ -61,7 +63,7 @@ def _example_batch(attack: str, jsr_db: float, snr_db: float, channel: str, seed
         jsr_db=torch.tensor([jsr_db]),
         snr_db=torch.tensor([snr_db]),
     )
-    return JammedPUSCHLink(CFG)(sc)
+    return JammedPUSCHLink(CFG)(sc, decode=decode)
 
 
 def _fmt_db(x: float) -> str:
@@ -725,6 +727,118 @@ def training_curves():
     return fig, caption
 
 
+# --- 8. What the receiver sees once it knows the jamming map ---------------------------------
+
+
+def constellations_with_map(seed: int | None = None, jsr_db: float = 6.0):
+    from jamloc.evaluate import available_seeds
+    from jamloc.experiments.recovery import detector_cells, val_threshold
+    from jamloc.recovery import MapAwareReceiver
+
+    if seed is None:  # the first training seed that has every model
+        seed = (available_seeds() or [0])[0]
+    _require_models(("fused",), seed)
+    _load_split("val")  # needed for the detector's threshold
+    model, thr = load_model("fused", seed), val_threshold("fused", seed)
+    example = _example_seed("A")
+    alloc = slice(ALLOC[0], ALLOC[0] + ALLOC[1])
+
+    fig, axes = new_figure(5.0, 5.8, nrows=2, ncols=2, sharex=True, sharey=True)
+    stats = {}
+    for col, attack in enumerate(("pilot", "data")):
+        batch = _example_batch(attack, jsr_db, 20.0, "A", seed=example, decode=True)
+        # The map the fused U-Net predicts for this slot, cut to the scheduled PRBs
+        cells = detector_cells(batch, CFG, model, "fused", thr)[:, alloc]
+        protected = MapAwareReceiver(batch.tx, CFG)(batch.y_alloc, batch.no, cells)
+        sym, sc = (t.cpu().numpy() for t in data_positions(batch.tx))
+        prb = ALLOC[0] + sc // 12
+        in_block = (prb >= JAM[0]) & (prb < JAM[0] + JAM[1])
+        erased = cells[0, sc // 12, sym].cpu().numpy()  # data symbols the decoder will ignore
+
+        for row, (rx, name) in enumerate(
+            ((batch.rx, "standard receiver"), (protected, "with the jamming map"))
+        ):
+            ax = axes[row, col]
+            x_hat = rx["x_hat"][0].cpu().numpy()
+            decoded = bool(rx["tb_crc"][0])
+            hide = erased if row == 1 else np.zeros_like(erased)
+            ax.scatter(
+                x_hat[~in_block & ~hide].real,
+                x_hat[~in_block & ~hide].imag,
+                s=1.5,
+                alpha=0.35,
+                color=CLEAN_COLOR,
+                label="PRBs the jammer did not touch",
+            )
+            ax.scatter(
+                x_hat[in_block & ~hide].real,
+                x_hat[in_block & ~hide].imag,
+                s=4,
+                alpha=0.6,
+                color=JAM_COLOR,
+                marker="x",
+                lw=0.6,
+                label="PRBs 10-13 (jammed block)",
+            )
+            ax.scatter(
+                x_hat[hide].real,
+                x_hat[hide].imag,
+                s=3,
+                alpha=0.25,
+                color="#999999",
+                label="erased: flagged by the map, ignored by the decoder",
+            )
+            ax.set(
+                xlim=(-2.2, 2.2),
+                ylim=(-2.2, 2.2),
+                aspect="equal",
+                title=f"{attack} jamming, {name}:\ntransport block "
+                f"{'decoded' if decoded else 'lost'}",
+            )
+            ideal = (np.abs(x_hat.real) + 1j * np.abs(x_hat.imag)) - (1 + 1j) / np.sqrt(2)
+            stats[(attack, row)] = {
+                "mse_block": float(np.mean(np.abs(ideal[in_block]) ** 2)),
+                "decoded": decoded,
+            }
+            if row == 1:
+                stats[(attack, "erased")] = int(erased.sum())
+                stats[(attack, "erased_in_block")] = int((erased & in_block).sum())
+                stats[(attack, "block")] = int(in_block.sum())
+            if col == 0:
+                ax.set_ylabel("quadrature")
+            if row == 1:
+                ax.set_xlabel("in-phase")
+    handles = [axes[1, 0].collections[i] for i in range(3)]
+    fig.legend(handles=handles, loc="outside lower center", ncols=2, frameon=False, markerscale=4)
+
+    def outcome(attack, row):
+        return "decoded" if stats[(attack, row)]["decoded"] else "lost"
+
+    copes = ""
+    if stats[("pilot", 0)]["decoded"]:
+        copes = (
+            " (here the decoder copes even without the map, because only a third of the block "
+            "is affected; the recovery curves show how often it does not)"
+        )
+    caption = (
+        "The same two slots before and after the receiver uses the jamming map predicted by the "
+        f"fused U-Net (QPSK, TDL-A, SNR 20 dB, jammer on PRBs 10-13 of 12 scheduled PRBs, JSR "
+        f"{jsr_db:+.0f} dB). Pilot jamming (left): the standard receiver trusts the jammed DMRS, "
+        "so the data symbols of the jammed PRBs scatter (mean squared error "
+        f"{stats[('pilot', 0)]['mse_block']:.2f}) and the transport block is "
+        f"{outcome('pilot', 0)}. With the map, those pilots are dropped and the channel is "
+        "interpolated from the clean ones: the same symbols pull back to the four QPSK points "
+        f"(mean squared error {stats[('pilot', 1)]['mse_block']:.2f}) and the block is "
+        f"{outcome('pilot', 1)}{copes}. Data jamming (right): no channel estimate can remove the jammer's "
+        "noise from the symbols themselves, so the map instead tells the decoder to ignore them - "
+        f"{stats[('data', 'erased_in_block')]} of the {stats[('data', 'block')]} data symbols of "
+        f"the jammed PRBs are erased (grey) - and the block, {outcome('data', 0)} without the "
+        f"map, is {outcome('data', 1)} with it. Any grey symbols outside the jammed block are "
+        "the map's false alarms."
+    )
+    return fig, caption
+
+
 FIGURES = {
     "attack_patterns": attack_patterns,
     "system_diagram": system_diagram,
@@ -733,6 +847,7 @@ FIGURES = {
     "feature_distributions": feature_distributions,
     "detector_outputs": detector_outputs,
     "training_curves": training_curves,
+    "constellations_with_map": constellations_with_map,
 }
 
 # Result figures written by the other scripts: (path from results/figures, title, caption,

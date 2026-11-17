@@ -40,7 +40,12 @@ def _tiny_project(tmp_path, monkeypatch):
 
 def test_data_figures_and_gallery(tmp_path, monkeypatch):
     _tiny_project(tmp_path, monkeypatch)
-    for name in ("feature_distributions", "detector_outputs", "training_curves"):
+    for name in (
+        "feature_distributions",
+        "detector_outputs",
+        "training_curves",
+        "constellations_with_map",
+    ):
         fig, caption = figures.FIGURES[name]()
         assert fig.axes and caption.count(". ") >= 1 and len(caption) > 120, name
 
