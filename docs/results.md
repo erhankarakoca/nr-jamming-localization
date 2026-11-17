@@ -67,12 +67,15 @@ allocation, TDL-A and TDL-C together:
 | | U-Net, power only | 0.25 ± 0.04 | 0.60 ± 0.03 | 0.85 ± 0.01 | 0.96 ± 0.00 |
 | | U-Net, EVM only | 0.14 ± 0.02 | 0.38 ± 0.03 | 0.66 ± 0.02 | 0.79 ± 0.02 |
 | | Residual threshold | 0.10 | 0.33 | 0.60 | 0.86 |
+| | Residual, exact p-value | 0.10 | 0.33 | 0.61 | 0.87 |
+| | Power threshold (Li et al.) | 0.01 | 0.01 | 0.03 | 0.13 |
 | | EVM threshold | 0 | 0 | 0 | 0 |
 | Data | **U-Net, P+R+E** | **0.78 ± 0.01** | **0.96 ± 0.00** | 0.99 ± 0.00 | 1.00 ± 0.00 |
 | | U-Net, P+E | 0.74 ± 0.01 | 0.96 ± 0.00 | 0.99 ± 0.00 | 1.00 ± 0.00 |
 | | U-Net, power only | 0.55 ± 0.04 | 0.84 ± 0.02 | 0.95 ± 0.01 | 0.99 ± 0.00 |
 | | U-Net, EVM only | 0.47 ± 0.02 | 0.75 ± 0.02 | 0.92 ± 0.01 | 0.99 ± 0.00 |
 | | EVM threshold | 0 | 0.04 | 0.21 | 0.43 |
+| | Power threshold (Li et al.) | 0.01 | 0.01 | 0.03 | 0.12 |
 | | Residual threshold | 0 | 0 | 0 | 0 |
 
 Cell-level F1 at the same thresholds:
@@ -85,6 +88,8 @@ Cell-level F1 at the same thresholds:
 | U-Net, EVM only | 0.459 ± 0.041 | 0.792 ± 0.003 | 0.782 ± 0.001 | 0.772 ± 0.001 |
 | EVM threshold | 0 | 0.324 | 0.319 | 0.303 |
 | Residual threshold | 0.584 | 0 | 0.057 | 0.058 |
+| Residual, exact p-value | 0.588 | 0 | 0.058 | 0.059 |
+| Power threshold (Li et al.) | 0.105 | 0.118 | 0.112 | 0.120 |
 
 By SNR (overall F1, `test_snr5-15_*` and `test_snr15-25_*`): P+R+E 0.916 / 0.987, P+E
 0.914 / 0.979, power only 0.867 / 0.959, EVM only 0.707 / 0.834 for SNR 5–15 dB / 15–25 dB.
@@ -97,6 +102,17 @@ By SNR (overall F1, `test_snr5-15_*` and `test_snr15-25_*`): P+R+E 0.916 / 0.987
 - Each threshold baseline sees only half of the problem: the EVM threshold cannot score the DMRS
   symbol (and flags data cells of pilot-jammed PRBs instead), and the residual threshold is blind
   to data jamming.
+- The classic per-cell power test (Li et al.; power relative to the slot's median scheduled cell)
+  is weak at every JSR: one cell's power cannot tell jamming from the UE's own fading, which
+  varies by more than 10 dB across PRBs. The power-only U-Net succeeds with the same input because
+  it compares each cell with the other symbols of the same PRB, which share its channel.
+- Scoring the residual by its exact tail probability instead of its raw value changes little
+  here (F1 0.059 vs 0.058). Like every detector in this table it is thresholded on the
+  validation set, whose non-jammed DMRS cells include neighbours of jammed PRBs: leakage raises
+  that threshold (to p = 10^-10.3 instead of 10^-2). At the analytic threshold, the false-alarm
+  rate is 0.95% in benign slots but 4.5% over all non-jammed DMRS cells. The value of the exact
+  distribution is the training-free threshold in benign conditions (section 8); in jammed slots
+  the leakage must be handled, which the U-Net does.
 
 ## 4. Robustness: scheduling-aware jammer
 
@@ -121,17 +137,26 @@ unseen attacker.
 
 ## 5. Size and latency
 
-`results/latency.csv`. One slot, one CPU thread, MacBook Pro M1 Pro.
+`results/size_sweep/size_sweep.pdf`, `results/latency.csv`. Fused detector (P+R+E) with the width
+of the first U-Net level set to 4, 6, 8 and 12 channels (3 seeds each, same data and training).
+CPU time for one slot on one thread of a MacBook Pro M1 Pro, with the feature extraction
+(0.26 ms); "frozen graph" is the same network as a TorchScript graph with batch norm folded into
+the convolutions, i.e. without Python between the layers.
 
-| | Value |
-| --- | --- |
-| U-Net parameters | 66 553 (fused) |
-| Feature extraction from receiver outputs | 0.29 ms |
-| U-Net forward pass | 0.51 ms |
-| **Total** | **0.80 ms** |
+| Width | Parameters | F1, all | F1, pilot | Pd pilot, −15 dB | Pd data, −15 dB | Total time | Total, frozen graph |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 4 | 7 657 | 0.943 ± 0.002 | 0.799 ± 0.012 | 0.55 ± 0.02 | 0.72 ± 0.01 | 0.53 ms | **0.43 ms** |
+| 6 | 16 933 | 0.948 ± 0.001 | 0.821 ± 0.005 | 0.59 ± 0.01 | 0.75 ± 0.01 | 0.59 ms | **0.48 ms** |
+| 8 | 29 841 | 0.949 ± 0.001 | 0.812 ± 0.011 | 0.60 ± 0.02 | 0.77 ± 0.01 | 0.64 ms | 0.53 ms |
+| 12 | 66 553 | 0.951 ± 0.002 | 0.834 ± 0.010 | 0.62 ± 0.02 | 0.78 ± 0.01 | 0.74 ms | 0.64 ms |
 
-With PyTorch's default eight threads the U-Net takes about 1.3 ms; for an input this small the
-thread pool only adds overhead.
+**Reading.** A 30 kHz slot lasts 0.5 ms. The reference network (width 12) does not fit in one
+slot on one core (0.74 ms), but it is 9 times larger than it needs to be: with 7.7k parameters
+the overall F1 drops by only 0.008, and as a frozen graph the whole detector runs in 0.43 ms.
+The loss is concentrated in weak pilot jamming (Pd at −15 dB 0.55 instead of 0.62). The U-Net's
+time grows much more slowly than its size (9× parameters, 1.8× time): for inputs this small,
+per-layer overhead dominates, not arithmetic. With PyTorch's default eight threads the U-Net is
+slower (about 1.3 ms) than on one.
 
 ## 6. What the map is good for: map-aware recovery
 
@@ -179,6 +204,95 @@ Open `results/figures/index.html`. Explanatory figures (each with its caption): 
 system diagram, how the residual works, constellations (wrong-symbol effect), feature
 distributions, detector outputs on typical slots, training curves. Result figures: BER/BLER,
 feature maps, Pd vs JSR (test, scheduling-aware, two SNR ranges), recovery.
+
+## 8. The DMRS residual has an exact, channel-free null distribution
+
+`jamloc/theory.py` and `results/theory/residual_theory.pdf`. Derivation (checked independently,
+and by Monte Carlo with 250 000 draws per number): without jamming, and with the UE's channel inside
+the delay subspace, the residual of PRB b is `R_b = sum_i lambda_i E_i` with independent `Exp(1)`
+variables `E_i` and weights given by the eigenvalues of the 6 x 6 block of the projector
+`I - U U^H` on the PRB's pilots. The channel, the SNR and the pilot sequence drop out. So:
+
+- the 1% threshold is **computed from the allocation alone**: 2.31 in the middle of a 12-PRB
+  allocation, 2.56 at its edges (fewer degrees of freedom remain where the subspace vectors
+  concentrate);
+- under Gaussian pilot jamming the same formula with the eigenvalues of
+  `P (I + JNR G) P` gives the detection probability, and for unjammed PRBs the false alarms
+  caused by **leakage** of the projection.
+
+Check against the link simulation (no training data involved):
+
+| Quantity | Theory | Simulation |
+| --- | --- | --- |
+| False-alarm rate at the analytic 1% threshold, benign test slots, TDL-A | 1% | 0.91% (34 368 cells) |
+| Same, TDL-C | 1% | 0.92% (28 640 cells) |
+| Same, 5 to 25 dB SNR in 2.5 dB bins | flat | flat within the 95% intervals |
+| Pd inside a 4-PRB pilot-jammed block, JNR 0 / 6 / 12 dB (block Rayleigh) | 0.29 / 0.69 / 0.93 | 0.30 / 0.71-0.74 / 0.93-0.94 |
+| False alarm of the unjammed PRB next to the block, JNR 12 / 18 dB | 0.16 / 0.50 | 0.17 / 0.54-0.55 |
+| False-alarm rate, TDL-C with 1000 ns delay spread (delays up to 8.7 us > tau_max) | assumption broken | **61%** |
+
+**Reading.** The residual is a CFAR statistic: its false-alarm rate does not move with the SNR
+or the channel model, which a threshold on EVM or power cannot offer. Strictly, the derivation
+needs the UE's channel energy outside the subspace to be small compared with the noise. The
+subspace keeps all but 1e-6 of the energy of the *average* channel with delays up to 3 us; a
+single path close to 3 us at a band-edge PRB leaks about 1.4e-4 of its energy, which matters
+above about 25 dB SNR (checked independently). Our SNRs end at 25 dB and TDL-C's last tap is at
+2.6 us, so no effect is visible (the 22.5-25 dB bin is at 0.6%); at higher SNR, `tau_max` or the
+kept energy fraction must grow. Its two limits are also
+predicted by the same formula: leakage into neighbouring PRBs under strong pilot jamming (a
+reason to fuse it with the other features in a network that sees the whole map), and channels
+whose delays exceed `tau_max`.
+
+## 9. Conditions the detectors never saw
+
+`results/generalization/generalization.pdf` (thresholds unchanged, from the matched `val` split;
+200 slots per grid point, 3 seeds). Each test grid changes one thing:
+
+| Condition | P+R+E: F1 / FA | P+E: F1 / FA | Power only: F1 / FA | EVM only: F1 | Residual threshold: FA |
+| --- | --- | --- | --- | --- | --- |
+| Matched test | 0.951 / 1.2% | 0.946 / 1.3% | 0.913 / 1.2% | 0.772 | 1.3% |
+| TDL-C, 1000 ns delay spread | 0.818 / **6.1%** | 0.701 / **15.7%** | **0.923 / 1.3%** | 0.657 | **28%** |
+| Speeds up to 30 m/s | 0.865 / **5.1%** | 0.835 / **6.7%** | **0.912 / 1.5%** | 0.707 | 1.2% |
+| QPSK jammer | **0.951 / 1.1%** | 0.942 / 1.3% | 0.905 / 1.2% | **0.593** | 1.1% |
+
+**Reading.**
+- **The jammer's waveform does not matter** for the fused detector (0.951 with a QPSK jammer).
+  Only the EVM-only network drops (0.77 to 0.59): QPSK interference on QPSK data moves symbols
+  between constellation points, which a decision-directed EVM partly hides.
+- **Long delays** break the assumption of the residual (delays up to 8.7 us > `tau_max` = 3 us):
+  the UE's own channel leaks into it, exactly as section 8 predicts (61% false alarms at the
+  analytic threshold). The EVM rises too, because the channel varies faster across subcarriers.
+  The fused network suffers less than the one without the residual (6% vs 16% false alarms).
+- **High speed** leaves the residual untouched (one DMRS symbol, 1.2% false alarms), but the
+  channel changes within the slot, so the EVM of the late symbols grows without any jamming and
+  the networks that use EVM flag them.
+- **Power alone is robust** to both, but weaker in matched conditions.
+- In practice `tau_max` should cover the deployment's delay spread (it costs subspace dimensions
+  and therefore sensitivity), and a gNB serving fast users would use an additional DMRS symbol,
+  as NR allows. Section 10 tests whether training on such channels is enough.
+
+## 10. Training on mixed channels
+
+`results/robust_training/robust_training.pdf`. Every U-Net trained again (3 seeds, same size and
+epochs) on `train_mix`: batches cycling through the nominal channels, long delay spreads
+(TDL-A 300 ns, TDL-C 1000 ns) and speeds up to 30 m/s; thresholds from `val_mix`. The test grids
+are those of section 9, so their channel *types* were part of the mix (with different seeds):
+this tests whether diversity is enough, not whether the detector handles a truly unknown channel.
+
+| Condition | P+R+E nominal | P+R+E mixed | P+E mixed | Power only mixed |
+| --- | --- | --- | --- | --- |
+| Matched test | 0.951 / 1.2% | **0.955 / 0.7%** | 0.948 / 0.7% | 0.914 / 1.0% |
+| TDL-C, 1000 ns | 0.818 / 6.1% | **0.921 / 1.7%** | 0.911 / 2.1% | 0.928 / 1.0% |
+| Speeds up to 30 m/s | 0.865 / 5.1% | **0.946 / 1.0%** | 0.939 / 1.0% | 0.917 / 1.1% |
+
+(F1 / false-alarm rate on the cells each detector scores, mean over 3 seeds.)
+
+**Reading.** Diverse training removes most of the loss: on fast users the fused detector is back
+to 0.946 with the design false-alarm rate, and with long delays to 0.921 (1.7% false alarms),
+level with the power-only network, which needed no help. It costs nothing in matched conditions
+(0.955; the false-alarm rate there is lower because the thresholds come from the more varied
+`val_mix`). The residual still loses information when delays exceed `tau_max`; the network
+learns to rely on the other features there.
 
 ## Caveats before these go into the paper
 

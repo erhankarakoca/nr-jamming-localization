@@ -14,3 +14,18 @@ Kartal 2024). This plan adds the pieces that make our combination defensible and
 
 Order: 4 and 3 are launched on Colab first (they only need small code changes), 1 is done on the
 CPU meanwhile, then 2 is implemented and run on Colab.
+
+## Status (17 November 2026, night)
+
+- [x] 1. Theory: `jamloc/theory.py`, `experiments/residual_theory.py`, results section 8. Derived
+  twice independently; matches Monte Carlo and the link simulation (false alarm 0.91-0.92% at the
+  analytic 1% threshold, flat in SNR).
+- [x] 3. Generalization: `experiments/generalization.py`. QPSK jammer: no change. Long delays and
+  high speed: false alarms of the residual/EVM-based detectors rise (fused 6% and 5%); power alone
+  is robust. Mixed training (`experiments/robust_training.py`) tests whether diversity fixes it.
+- [x] 4. Size sweep: `experiments/size_sweep.py`. 7.7k parameters: F1 0.943 (vs 0.951), 0.43 ms
+  per slot on one core as a frozen graph.
+- [x] 2. Recovery: soft and DMRS-only modes in `jamloc/recovery.py`; full runs on Colab (TDL-A,
+  TDL-C, 3 200 slots per point for receivers that rarely fail).
+- [x] 5. Paper draft in `paper/main.tex` (IEEE conference format; figures are read from
+  `results/`, so run the experiments first).
