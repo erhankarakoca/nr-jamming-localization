@@ -72,6 +72,59 @@ git add -A && git commit -m "..." && git push
 Add a dependency with `uv add <package>` (dev-only tools: `uv add --dev <package>`) and commit
 both `pyproject.toml` and `uv.lock`.
 
+## How it works
+
+One uplink slot is simulated as a chain of Sionna blocks, written out step by step like the Sionna
+tutorials ([`notebooks/01_link_walkthrough.ipynb`](notebooks/01_link_walkthrough.ipynb) walks
+through one slot):
+
+```text
+UE: PUSCH transmitter (n PRBs) -> place on 24-PRB carrier -> TDL channel --+
+                                                                           +-> AWGN -> gNB
+Jammer: Gaussian noise on attacked PRB x symbol cells -> TDL channel ------+
+
+gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper -> LDPC decoder
+         |                        |                        |
+         v                        v                        v
+     power P              DMRS residual R              EVM E        (one value per PRB x symbol)
+         +------------------------+------------------------+
+                                  v
+                 small U-Net (66k params) -> jamming map (24 PRB x 14 symbols)
+```
+
+| Module | What it does |
+| --- | --- |
+| `config.py` | Simulation parameters (proposal Table 1) |
+| `ue.py` | PUSCH transmitter per allocation size; placing the allocation on the carrier |
+| `jammer.py` | Attack patterns (pilot / data / partial-band) and the Gaussian jammer |
+| `receiver.py` | Receiver chain: LS estimation, LMMSE equalization, demapping, decoding |
+| `link.py` | The whole slot: UE, channels, jammer, noise, receiver |
+| `features.py` | Power, DMRS residual and EVM maps, plus allocation masks |
+| `baselines.py` | EVM-threshold and residual-threshold detectors |
+| `model.py`, `train.py` | U-Net detector and its training |
+| `dataset.py` | Train / validation / test / scheduling-aware splits with fixed seeds |
+| `evaluate.py`, `metrics.py` | Pd at 1% per-cell false alarm vs JSR, cell-level F1 |
+| `experiments/` | Scripts for the figures (BER/BLER, feature maps, latency) |
+
+### Reproducing the results
+
+Every command writes into `data/` or `results/` (or the folders set by `JAMLOC_DATA_DIR` /
+`JAMLOC_RESULTS_DIR`). Times are for a MacBook Pro M1 Pro, CPU only.
+
+```bash
+uv run python -m jamloc.experiments.ber_bler --channel A        # BER/BLER vs JSR (~4 min each)
+uv run python -m jamloc.experiments.ber_bler --channel C
+uv run python -m jamloc.experiments.feature_maps                # example feature maps
+for s in train val test sched; do uv run python -m jamloc.dataset --split $s; done   # ~2 min
+uv run python -m jamloc.train --variant all --epochs 15         # ~50 min on CPU
+uv run python -m jamloc.evaluate --split test                   # main detection results
+uv run python -m jamloc.evaluate --split sched                  # scheduling-aware jammer
+uv run python -m jamloc.experiments.latency                     # CPU latency per slot, 1 thread
+```
+
+On Windows PowerShell, run the dataset loop as
+`foreach ($s in "train","val","test","sched") { uv run python -m jamloc.dataset --split $s }`.
+
 ## Layout
 
 | Path | Contents |
