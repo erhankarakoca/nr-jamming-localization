@@ -87,9 +87,27 @@ def test_residual_stays_low_away_from_jammed_prbs():
     assert r[:, 8:].mean().item() < 1.5  # two or more PRBs away from the jammed block
 
 
-@pytest.mark.parametrize("alloc", [(0, 6), (18, 6)])
-def test_features_finite_and_masked(alloc):
-    out = _batch(5, "C", 3, snr_db=0.0, jsr_db=20.0, batch=16, alloc=alloc)
+# Allocation at either carrier edge, with a jammer block that straddles the allocation edge
+@pytest.mark.parametrize("alloc, jam", [((0, 6), (4, 5)), ((18, 6), (15, 5))])
+def test_features_finite_and_masked(alloc, jam):
+    seed_everything(5)
+    n = 16
+    sc = Scenario(
+        channel="C",
+        alloc_start=alloc[0],
+        alloc_size=alloc[1],
+        attack=torch.full((n,), ATTACKS.index("partial")),
+        jam_start=torch.full((n,), jam[0]),
+        jam_size=torch.full((n,), jam[1]),
+        jsr_db=torch.full((n,), 20.0),
+        snr_db=torch.zeros(n),
+    )
+    out = link(sc)
+    jammed_prbs = out.labels.any(dim=2)  # [B, 24]
+    inside = torch.zeros(24, dtype=torch.bool)
+    inside[alloc[0] : alloc[0] + alloc[1]] = True
+    assert jammed_prbs[:, inside].any(1).all() and jammed_prbs[:, ~inside].any(1).all()
+
     f = extract(out, cfg)
     assert f.shape == (16, len(FEATURE_NAMES), 24, 14) and f.dtype == torch.float32
     assert torch.isfinite(f).all()
