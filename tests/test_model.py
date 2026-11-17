@@ -47,7 +47,13 @@ def test_train_writes_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
     generate("train", num_slots=64, batch_size=32)
     generate("val", num_slots=32, batch_size=32)
-    path = train("evm", epochs=1, batch_size=32, seed=1)
+    path = train("evm", epochs=2, batch_size=32, seed=1)
     assert path == tmp_path / "results" / "models" / "evm_seed1.pt"
+    import csv
+
+    with open(path.with_name("evm_seed1_history.csv"), encoding="utf-8", newline="") as f:
+        history = list(csv.DictReader(f))
+    assert [int(r["epoch"]) for r in history] == [1, 2]
+    assert all(float(r["train_loss"]) > 0 and float(r["val_loss"]) > 0 for r in history)
     model = load_model("evm", seed=1)
     assert isinstance(model, TinyUNet) and not model.training

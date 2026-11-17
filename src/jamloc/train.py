@@ -5,6 +5,7 @@ python -m jamloc.train --variant all --seeds 0 1 2
 """
 
 import argparse
+import csv
 import time
 
 import torch
@@ -45,15 +46,19 @@ def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-
     path.parent.mkdir(parents=True, exist_ok=True)
     best = float("inf")
     gen = torch.Generator().manual_seed(seed)
+    history = []  # one row per epoch, saved next to the checkpoint for the training-curve figure
     for epoch in range(epochs):
         start = time.perf_counter()
         model.train()
+        batch_losses = []
         for idx in torch.randperm(len(x_tr), generator=gen).split(batch_size):
             loss = loss_fn(model(x_tr[idx]), y_tr[idx])
             opt.zero_grad()
             loss.backward()
             opt.step()
+            batch_losses.append(loss.item())
         sched.step()
+        train_loss = sum(batch_losses) / len(batch_losses)
 
         model.eval()
         with torch.no_grad():
@@ -74,11 +79,17 @@ def train(variant: str, epochs: int = 30, batch_size: int = 128, lr: float = 1e-
                 },
                 path,
             )
+        history.append({"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss})
         print(
-            f"[{variant}, seed {seed}] epoch {epoch + 1}/{epochs}  train loss {loss.item():.4f}  "
+            f"[{variant}, seed {seed}] epoch {epoch + 1}/{epochs}  train loss {train_loss:.4f}  "
             f"val loss {val_loss:.4f}  ({time.perf_counter() - start:.1f} s)",
             flush=True,
         )
+
+    with open(path.with_name(f"{path.stem}_history.csv"), "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(history[0]))
+        writer.writeheader()
+        writer.writerows(history)
     return path
 
 
