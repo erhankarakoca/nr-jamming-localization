@@ -25,7 +25,7 @@ from jamloc.baselines import evm_scores, residual_scores
 from jamloc.config import SimConfig
 from jamloc.dataset import load
 from jamloc.evaluate import FA
-from jamloc.features import FEATURE_NAMES, delay_subspace, dmrs_ls, residual_map
+from jamloc.features import FEATURE_NAMES, delay_subspace, dmrs_ls, power_map, residual_map
 from jamloc.jammer import ATTACKS, cell_mask
 from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
 from jamloc.metrics import threshold_at_fa
@@ -62,6 +62,36 @@ def _example_batch(attack: str, jsr_db: float, snr_db: float, channel: str, seed
         snr_db=torch.tensor([snr_db]),
     )
     return JammedPUSCHLink(CFG)(sc)
+
+
+def _fmt_db(x: float) -> str:
+    """Rounded dB value for captions, without a misleading "-0"."""
+    if not np.isfinite(x):
+        return "n/a"
+    v = round(float(x))
+    return f"{v} dB" if v else "0 dB"
+
+
+def _block_power_ok(batch, max_drop_db: float = 3.0) -> bool:
+    """True if no PRB of the example jammer block (PRBs 10-13) is in a deep fade: each receives at
+    least the allocation's mean power minus ``max_drop_db``."""
+    p_db = 10 * np.log10(power_map(batch.y, batch.no, CFG)[0].mean(dim=1).cpu().numpy())
+    alloc = p_db[ALLOC[0] : ALLOC[0] + ALLOC[1]]
+    block = p_db[JAM[0] : JAM[0] + JAM[1]]
+    return bool(block.min() >= 10 * np.log10(np.mean(10 ** (alloc / 10))) - max_drop_db)
+
+
+def _example_seed(channel: str) -> int:
+    """First seed whose slot has no deep fade on the jammer block.
+
+    The explanatory figures compare attacks on one slot; a fade on PRBs 10-13 would make even the
+    clean slot look jammed. The seed is chosen by this rule when the figure is drawn, not by hand,
+    because CPU and GPU draw different channels for the same seed.
+    """
+    for seed in range(200):
+        if _block_power_ok(_example_batch("none", 0.0, 20.0, channel, seed)):
+            return seed
+    return 0
 
 
 # --- 1. What the attacker does ---------------------------------------------------------------
@@ -255,8 +285,9 @@ def residual_explained():
     alloc_prbs = np.arange(ALLOC[0], ALLOC[0] + ALLOC[1])
     jammed = (alloc_prbs >= JAM[0]) & (alloc_prbs < JAM[0] + JAM[1])
     r_db = {}
+    seed = _example_seed("C")
     for col, (attack, title) in enumerate([("none", "No jammer"), ("pilot", "Pilot jamming")]):
-        batch = _example_batch(attack, 0.0, 20.0, "C")
+        batch = _example_batch(attack, 0.0, 20.0, "C", seed=seed)
         h_ls, pilot_sc, _ = dmrs_ls(batch.y_alloc, batch.tx)
         u = delay_subspace(pilot_sc, CFG.scs, CFG.tau_max)
         fit = (h_ls @ u.conj()) @ u.T  # projection onto the physically possible channels
@@ -296,7 +327,9 @@ def residual_explained():
     handles, _ = axes[0, 0].get_legend_handles_labels()
     handles.append(Patch(facecolor=JAM_COLOR, alpha=0.25, label="jammed PRBs 10-13"))
     fig.legend(handles=handles, loc="outside lower center", ncols=3, frameon=False)
-    neighbours = r_db["pilot"][[JAM[0] - 1 - ALLOC[0], JAM[0] + JAM[1] - ALLOC[0]]]
+    distance = np.maximum(JAM[0] - alloc_prbs, alloc_prbs - (JAM[0] + JAM[1] - 1))  # PRBs away
+    near = r_db["pilot"][(distance >= 1) & (distance <= 2)]
+    far = r_db["pilot"][distance > 2]
     caption = (
         "How the DMRS residual tells jamming apart from the user's own signal (TDL-C, SNR 20 dB, "
         "same slot in both columns). Top: magnitude of the raw LS channel estimate at every "
@@ -304,13 +337,13 @@ def residual_explained():
         "delays up to 3 us (line). A real channel varies smoothly across frequency, so without "
         "jamming the line follows the dots; on the jammed PRBs (shaded) the dots jump around in "
         "a way no real channel can. Bottom: what is left after the projection, per PRB, relative "
-        f"to noise. Without jamming it stays near 0 dB (mean {r_db['none'].mean():.1f} dB); on "
-        f"the jammed PRBs it rises to {r_db['pilot'][jammed].mean():.0f} dB on average, at a "
-        "JSR of only 0 dB. Two details: with only 6 pilots per PRB the clean values swing by a few "
-        f"dB ({r_db['none'].min():.0f} to {r_db['none'].max():.0f} dB here), and the PRBs right "
-        f"next to the jammed block rise a little (about {neighbours.mean():.0f} dB) "
-        "because the projection spreads part of the jamming into its neighbours. The detector "
-        "learns both effects."
+        f"to noise. Without jamming it stays near 0 dB (mean {_fmt_db(r_db['none'].mean())}; "
+        f"single PRBs range from {_fmt_db(r_db['none'].min())} to {_fmt_db(r_db['none'].max())} "
+        "because each PRB has only 6 pilots). With pilot jamming at a JSR of only 0 dB it rises "
+        f"to {_fmt_db(r_db['pilot'][jammed].mean())} on the jammed PRBs. The projection also "
+        f"spreads part of the jamming to nearby PRBs: up to {_fmt_db(near.max())} within two "
+        f"PRBs of the block, {_fmt_db(far.mean())} on average farther away. The detector learns "
+        "this spread, but it is one reason its maps sometimes reach a little beyond the block."
     )
     return fig, caption
 
@@ -322,10 +355,10 @@ def constellations():
     fig, axes = new_figure(7.16, 2.6, ncols=3, sharex=True, sharey=True)
     titles = {"none": "No jammer", "pilot": "Pilot jamming", "data": "Data jamming"}
     spread = {}
+    seed = _example_seed("A")
     for ax, attack in zip(axes, ("none", "pilot", "data"), strict=True):
-        # Seed 12: a channel draw without a deep fade on PRBs 10-13, so the only difference
-        # between the panels is the jammer (a fade alone would also scatter those symbols)
-        batch = _example_batch(attack, 0.0, 20.0, "A", seed=12)
+        # Same slot in every panel, chosen by _example_seed (no deep fade on the jammer block)
+        batch = _example_batch(attack, 0.0, 20.0, "A", seed=seed)
         x_hat = batch.rx["x_hat"][0].cpu().numpy()
         _, sc = data_positions(batch.tx)
         prb = ALLOC[0] + sc.cpu().numpy() // 12
@@ -395,47 +428,69 @@ def _require_models(variants, seed: int = 0):
 # --- 5. Which feature separates which attack -------------------------------------------------
 
 
+def _feature_groups(d: dict, attack: str, feature: str, mask: str, jsr_db=(-6.0, 0.0)):
+    """Values of one feature in the scheduled cells where it is defined: (not jammed, jammed).
+
+    Power is compared cell by cell: jammed cells against all others. The residual and EVM are
+    compared by PRB: cells of the PRBs the jammer hit against cells of untouched PRBs. That
+    grouping shows their key behaviour: under pilot jamming EVM rises in data cells that were
+    never jammed (the wrong-symbol effect), and under data jamming the residual does not move.
+    """
+    idx = {name: i for i, name in enumerate(FEATURE_NAMES)}
+    slots = (
+        (d["attack"] == ATTACKS.index(attack))
+        & (d["jsr_db"] >= jsr_db[0])
+        & (d["jsr_db"] <= jsr_db[1])
+    )
+    defined = d["features"][slots, idx[mask]] > 0
+    values = d["features"][slots, idx[feature]]
+    labels = d["labels"][slots].astype(bool)
+    if feature == "power_db":
+        jammed = labels
+    else:
+        jammed = np.broadcast_to(labels.any(axis=2, keepdims=True), labels.shape)
+    return values[defined & ~jammed], values[defined & jammed]
+
+
+def _median(x: np.ndarray) -> float:
+    return float(np.median(x)) if x.size else float("nan")
+
+
 def feature_distributions(split: str = "test"):
     d = _load_split(split)
-    f, labels = d["features"], d["labels"].astype(bool)
-    idx = {name: i for i, name in enumerate(FEATURE_NAMES)}
     rows = [
-        ("power_db", "alloc_mask", "Power P [dB]"),
-        ("residual_db", "dmrs_mask", "DMRS residual R [dB]"),
-        ("evm_db", "data_mask", "EVM E [dB]"),
+        ("power_db", "alloc_mask", "Power P [dB]\n(per cell)"),
+        ("residual_db", "dmrs_mask", "Residual R [dB]\n(per PRB)"),
+        ("evm_db", "data_mask", "EVM E [dB]\n(per PRB)"),
     ]
-    moderate = (d["jsr_db"] >= -6) & (d["jsr_db"] <= 0)
-    jammed_prb = labels.any(axis=2, keepdims=True)  # [N, 24, 1]: the jammer hit this PRB
     bins = np.linspace(-10, 40, 51)
-    fig, axes = new_figure(7.16, 4.6, nrows=3, ncols=3, sharex=True)
-    medians = {}
+    fig, axes = new_figure(7.16, 4.8, nrows=3, ncols=3, sharex=True)
+    gap, spread = {}, {}
     for col, attack in enumerate(("pilot", "data", "partial")):
-        slots = moderate & (d["attack"] == ATTACKS.index(attack))
         for row, (feature, mask, label) in enumerate(rows):
+            clean, jammed = _feature_groups(d, attack, feature, mask)
             ax = axes[row, col]
-            defined = f[slots, idx[mask]] > 0  # cells where this feature exists (scheduled)
-            values = f[slots, idx[feature]]
-            hit = np.broadcast_to(jammed_prb[slots], defined.shape)
-            clean_vals, jam_vals = values[defined & ~hit], values[defined & hit]
             ax.hist(
-                clean_vals,
+                clean,
                 bins=bins,
                 density=True,
                 histtype="stepfilled",
                 alpha=0.35,
                 color=CLEAN_COLOR,
-                label="cells in PRBs the jammer did not touch",
+                label="not jammed",
             )
             ax.hist(
-                jam_vals,
+                jammed,
                 bins=bins,
                 density=True,
                 histtype="step",
                 lw=1.2,
                 color=JAM_COLOR,
-                label="cells in the jammed PRBs",
+                label="jammed (power: the cell itself; R and E: the cell's PRB)",
             )
-            medians[(attack, feature)] = (np.median(clean_vals), np.median(jam_vals))
+            gap[(attack, feature)] = _median(jammed) - _median(clean)
+            if clean.size:
+                spread[(attack, feature)] = float(np.subtract(*np.percentile(clean, [75, 25])))
             if row == 0:
                 ax.set_title(f"{attack} jamming")
             if col == 0:
@@ -444,25 +499,24 @@ def feature_distributions(split: str = "test"):
                 ax.set_xlabel("feature value [dB]")
             ax.set_yticks([])
     handles, labels_ = axes[0, 0].get_legend_handles_labels()
+    shifts = [gap[(a, "power_db")] for a in ("pilot", "data", "partial")]
+    lo, hi = _fmt_db(min(shifts)), _fmt_db(max(shifts))
+    power_shift = f"about {lo}" if lo == hi else f"{lo} to {hi} depending on the attack"
     fig.legend(handles, labels_, loc="outside lower center", ncols=2, frameon=False)
-
-    def gap(attack, feature):
-        clean, jam = medians[(attack, feature)]
-        return jam - clean
-
     caption = (
         "Distributions of the three features over the scheduled cells of the test set (JSR -6 to "
-        "0 dB), split into cells of PRBs the jammer hit (orange) and cells of untouched PRBs "
-        "(blue). Rows: power, DMRS residual (DMRS symbol only), EVM (data symbols only); columns: "
-        "attack. Where the orange curve moves away from the blue one, that feature can see the "
-        "attack. The residual separates pilot jamming clearly (median shift "
-        f"{gap('pilot', 'residual_db'):.0f} dB) but does not move under data jamming "
-        f"({gap('data', 'residual_db'):+.0f} dB); EVM moves under data jamming "
-        f"({gap('data', 'evm_db'):.0f} dB) and also under pilot jamming "
-        f"({gap('pilot', 'evm_db'):.0f} dB), although no data cell was jammed there - the "
-        "wrong-symbol effect. Power alone overlaps heavily, because the UE's own fading changes "
-        "it as much as the jammer does. No single feature covers every attack, which is why "
-        "the detector fuses them."
+        "0 dB). Blue: not jammed; orange: jammed - for power the cell itself, for the residual "
+        "and EVM the cell's PRB, for the reason given below. Where orange moves away from blue, "
+        "the feature can see the attack. The residual separates pilot jamming clearly (median "
+        f"shift {_fmt_db(gap[('pilot', 'residual_db')])}) but does not move at all under data "
+        f"jamming ({_fmt_db(gap[('data', 'residual_db')])}). EVM moves under data jamming "
+        f"({_fmt_db(gap[('data', 'evm_db')])}) and also in the data cells of pilot-jammed PRBs "
+        f"({_fmt_db(gap[('pilot', 'evm_db')])}), although none of those cells was jammed - the "
+        "wrong-symbol effect, which is why these rows are grouped by PRB. The power of a jammed "
+        f"cell shifts by only {power_shift}, small against the "
+        f"{_fmt_db(spread.get(('data', 'power_db'), float('nan')))} interquartile spread that the "
+        "UE's own fading causes, so power alone separates the attacks poorly. No single feature "
+        "covers every attack, which is why the detector fuses them."
     )
     return fig, caption
 
@@ -494,9 +548,12 @@ def _median_slot(cand: np.ndarray, values: np.ndarray) -> int:
     return int(cand[np.argsort(values, kind="stable")[len(values) // 2]])
 
 
-def detector_outputs(split: str = "test", seed: int = 0):
+def detector_outputs(split: str = "test", seed: int | None = None):
+    from jamloc.evaluate import available_seeds
     from jamloc.experiments.recovery import val_threshold
 
+    if seed is None:  # the first training seed that has every model
+        seed = (available_seeds() or [0])[0]
     _require_models(("fused", "no_residual", "power"), seed)
     d, val = _load_split(split), _load_split("val")
     unets = (("fused", "U-Net P+R+E"), ("no_residual", "U-Net P+E"), ("power", "U-Net power only"))
@@ -515,19 +572,23 @@ def detector_outputs(split: str = "test", seed: int = 0):
         lab = d["labels"][idx].astype(bool)
         return (p & lab).sum(axis=(1, 2)) / np.maximum(lab.sum(axis=(1, 2)), 1)
 
-    # Example slots. Rows 1, 3, 4: the median detection rate of the fused U-Net (a typical slot,
-    # not the best one). Row 2 illustrates the wrong-symbol effect, which only some slots show:
-    # the median among the slots where the EVM threshold flags any unjammed cell.
+    # Example slots, each chosen by a stated rule rather than by hand. Row 1: the median
+    # advantage of the fused U-Net over the one without the residual. Row 2 (the wrong-symbol
+    # effect, which only some slots show): the median slot among those where the EVM threshold
+    # flags unjammed cells. Rows 3-4: the median detection rate of the fused U-Net.
     cand = _candidates(d)
     stats = {}
     picks = []
     for row, idx in enumerate(cand):
-        fused_rate = hit_rate(predict("fused", idx), idx)
+        fused_pred = predict("fused", idx)
+        fused_rate = hit_rate(fused_pred, idx)
         if row == 0:
-            stats["fused"], stats["pe"] = (
-                fused_rate.mean(),
-                hit_rate(predict("no_residual", idx), idx).mean(),
-            )
+            pe_pred = predict("no_residual", idx)
+            lab = d["labels"][idx].astype(bool)
+            stats["fused"] = (fused_pred & lab).sum() / max(lab.sum(), 1)  # pooled over cells
+            stats["pe"] = (pe_pred & lab).sum() / max(lab.sum(), 1)
+            picks.append(_median_slot(idx, fused_rate - hit_rate(pe_pred, idx)))
+            continue
         if row == 1:
             lab = d["labels"][idx].astype(bool)
             evm_fa = ((evm_scores(d["features"][idx]) > evm_thr) & ~lab).sum(axis=(1, 2))
@@ -592,16 +653,17 @@ def detector_outputs(split: str = "test", seed: int = 0):
     caption = (
         "What each detector reports on four test slots (jammer block inside the allocation), all "
         "thresholded at 1% false alarm on the validation set. Green: jammed cells found; orange: "
-        "missed; pink: flagged although not jammed; light blue: the UE's allocation. Rows 1, 3 "
-        "and 4 show the slot with the median detection rate of the fused U-Net (a typical case, "
-        "not the best one). Weak pilot jamming (row 1): over all "
+        "missed; pink: flagged although not jammed; light blue: the UE's allocation. Each row "
+        "is picked by a stated rule, not by hand: row 1 is the slot with the median advantage of "
+        "the fused U-Net over the U-Net without the residual, row 2 the median slot among those "
+        "where the EVM threshold flags unjammed cells, rows 3-4 the slot with the median "
+        "detection rate of the fused U-Net. Weak pilot jamming (row 1): over all "
         f"{stats['n'][0]} such test slots the fused U-Net finds {stats['fused']:.0%} of the jammed "
         f"DMRS cells and the U-Net without the residual {stats['pe']:.0%}. Strong pilot jamming "
-        f"(row 2): the EVM threshold never finds the jammed DMRS cells, and in "
-        f"{stats['evm_share']:.0%} of the {stats['n'][1]} slots it flags data cells that were "
-        f"never jammed ({stats['evm_fa']:.1f} per slot on average) - the wrong-symbol effect; the "
-        "row shows the median slot among those. The residual threshold cannot see data jamming "
-        "at all."
+        f"(row 2): the EVM threshold never finds the jammed DMRS cells (it has no value there), "
+        f"and in {stats['evm_share']:.0%} of the {stats['n'][1]} slots it flags data cells that "
+        f"were never jammed ({stats['evm_fa']:.1f} per slot on average) - the wrong-symbol effect. "
+        "The residual threshold cannot see data jamming at all."
     )
     return fig, caption
 
@@ -620,6 +682,7 @@ def training_curves():
     fig, axes = new_figure(7.16, 2.4, ncols=len(VARIANTS), sharey=True)
     seed_colors = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
     best_epochs = []
+    best_loss = {}
     titles = {
         "fused": "U-Net P+R+E",
         "no_residual": "U-Net P+E",
@@ -639,16 +702,25 @@ def training_curves():
             ax.plot(epoch, [float(r["train_loss"]) for r in h], ls="--", color=color, lw=0.9)
             ax.plot(epoch, val_loss, ls="-", color=color, lw=1.2, label=f"seed {seed}")
             best_epochs.append(epoch[int(np.argmin(val_loss))])
+            best_loss.setdefault(variant, []).append(min(val_loss))
         ax.set(title=titles[variant], xlabel="epoch")
     axes[0].set_ylabel("loss (weighted BCE)")
     axes[-1].legend(loc="upper right")
+    worst = max(best_loss, key=lambda v: np.mean(best_loss[v]))
+    spreads = [(max(v) - min(v)) / np.mean(v) for v in best_loss.values() if len(v) > 1]
+    seeds_text = (
+        f"Across seeds the best validation loss of a detector differs by at most "
+        f"{max(spreads):.0%}. "
+        if spreads
+        else ""
+    )
     caption = (
         "Training (dashed) and validation (solid) loss per epoch for each detector, one colour "
-        "per training seed. The validation loss flattens early (lowest at epoch "
-        f"{int(np.median(best_epochs))} in the median run), and the weights of that best epoch "
-        "are the ones kept, so the later epochs, where the training loss keeps falling, cannot "
-        "overfit the reported models. The seeds lie close together, which is why the results "
-        "vary little between them; EVM-only stays highest because it has the least information."
+        "per training seed. The validation loss is lowest at epoch "
+        f"{int(np.median(best_epochs))} in the median run, and the weights of that epoch are the "
+        "ones kept, so later epochs, where the training loss may keep falling, cannot overfit "
+        f"the reported models. {seeds_text}{titles[worst]} ends with the highest loss, as it "
+        "sees the least information."
     )
     return fig, caption
 
@@ -663,96 +735,121 @@ FIGURES = {
     "training_curves": training_curves,
 }
 
-# Result figures written by the other scripts, shown in the gallery when they exist
+# Result figures written by the other scripts: (path from results/figures, title, caption,
+# command that produces it). Shown in the gallery when they exist.
 RESULT_FIGURES = [
     (
         "../ber_bler/ber_bler_A.png",
-        "BER/BLER sweep, TDL-A (experiments.ber_bler)",
+        "BER/BLER sweep, TDL-A",
         (
             "BLER of the unprotected link when the jammer covers the whole allocation, against JSR per "
             "jammed resource element (left) and against the jammer's total energy in the slot (right). "
             "Per unit of energy, pilot jamming is the most damaging attack."
         ),
+        "python -m jamloc.experiments.ber_bler --channel A",
     ),
     (
         "../ber_bler/ber_bler_C.png",
-        "BER/BLER sweep, TDL-C (experiments.ber_bler)",
+        "BER/BLER sweep, TDL-C",
         "The same for TDL-C.",
+        "python -m jamloc.experiments.ber_bler --channel C",
     ),
     (
         "../feature_maps.png",
-        "Feature maps of one slot per attack (experiments.feature_maps)",
+        "Feature maps of one slot per attack",
         (
             "Label, power, DMRS residual and EVM maps of one slot per attack (grey: feature not "
             "defined). The jammer block partly leaves the allocation, where only power can see it."
         ),
+        "python -m jamloc.experiments.feature_maps",
     ),
     (
         "../eval/test_pd_vs_jsr_scheduled.png",
-        "Detection, test set (evaluate)",
+        "Detection, test set",
         (
             "Probability of detecting a jammed cell inside the allocation at 1% per-cell false alarm, "
             "against JSR, mean and +-1 standard deviation over training seeds."
         ),
+        "python -m jamloc.evaluate --split test",
     ),
     (
         "../eval/test_pd_vs_jsr_all.png",
-        "Detection, all jammed cells (evaluate)",
+        "Detection, all jammed cells",
         "The same, including jammed cells outside the allocation (easier: no UE signal there).",
+        "python -m jamloc.evaluate --split test",
     ),
     (
         "../eval/sched_pd_vs_jsr_scheduled.png",
-        "Detection, scheduling-aware jammer (evaluate)",
+        "Detection, scheduling-aware jammer",
         "The jammer hits exactly the scheduled PRBs, an attacker no detector saw in training.",
+        "python -m jamloc.evaluate --split sched",
     ),
     (
         "../eval/test_snr5-15_pd_vs_jsr_scheduled.png",
-        "Detection at SNR 5-15 dB (evaluate)",
+        "Detection at SNR 5-15 dB",
         "Test slots with low SNR only.",
+        "python -m jamloc.evaluate --split test --snr-db 5 15",
     ),
     (
         "../eval/test_snr15-25_pd_vs_jsr_scheduled.png",
-        "Detection at SNR 15-25 dB (evaluate)",
+        "Detection at SNR 15-25 dB",
         "Test slots with high SNR only.",
+        "python -m jamloc.evaluate --split test --snr-db 15 25",
     ),
     (
         "../recovery/recovery_A.png",
-        "Map-aware recovery, TDL-A (experiments.recovery)",
+        "Map-aware recovery, TDL-A",
         (
             "BLER of five receivers decoding the same slots: no protection, the LMMSE estimate without a "
-            "map, and the map-aware receiver with the maps of two detectors and with the true map."
+            "map, and the map-aware receiver with the maps of two detectors and with the true map. The "
+            "title gives the BLER without any jammer, i.e. what false alarms cost on clean slots."
         ),
+        "python -m jamloc.experiments.recovery --channel A",
     ),
     (
         "../recovery/recovery_C.png",
-        "Map-aware recovery, TDL-C (experiments.recovery)",
+        "Map-aware recovery, TDL-C",
         "The same for TDL-C.",
+        "python -m jamloc.experiments.recovery --channel C",
     ),
 ]
 
 
+def _missing(title: str, why: str) -> str:
+    return f'<div class="missing"><b>{html.escape(title)}</b>: Not produced yet - {why}</div>'
+
+
+def _figure(src: str, title: str, caption: str) -> str:
+    return (
+        f'<figure><img src="{src}" alt="{html.escape(title)}"><figcaption><b>'
+        f"{html.escape(title)}</b>: {html.escape(caption)}</figcaption></figure>"
+    )
+
+
 def write_gallery(captions: dict, skipped: dict) -> None:
-    """``results/figures/index.html``: every figure with its caption, readable offline."""
+    """``results/figures/index.html``: every figure with its caption, readable offline.
+
+    Missing figures are listed with the command that produces them.
+    """
     out = results_dir() / "figures"
     parts = ["<h2>Explanatory figures</h2>"]
     for name in FIGURES:
         if name in skipped:
-            parts.append(
-                f'<div class="missing"><b>{name}</b>: Not produced yet - '
-                f"{html.escape(skipped[name])}</div>"
-            )
+            parts.append(_missing(name, html.escape(skipped[name])))
         elif (out / f"{name}.png").is_file():
+            parts.append(_figure(f"{name}.png", name, captions.get(name, "")))
+        else:
             parts.append(
-                f'<figure><img src="{name}.png" alt="{name}"><figcaption><b>{name}</b>'
-                f": {html.escape(captions.get(name, ''))}</figcaption></figure>"
+                _missing(
+                    name, f"run <code>python -m jamloc.experiments.figures --only {name}</code>"
+                )
             )
     parts.append("<h2>Results</h2>")
-    for rel, title, caption in RESULT_FIGURES:
+    for rel, title, caption, command in RESULT_FIGURES:
         if (out / rel).resolve().is_file():
-            parts.append(
-                f'<figure><img src="{rel}" alt="{html.escape(title)}"><figcaption><b>'
-                f"{html.escape(title)}</b>: {html.escape(caption)}</figcaption></figure>"
-            )
+            parts.append(_figure(rel, title, caption))
+        else:
+            parts.append(_missing(title, f"run <code>{html.escape(command)}</code>"))
     page = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -772,6 +869,12 @@ def write_gallery(captions: dict, skipped: dict) -> None:
 def main(argv=None):
     p = argparse.ArgumentParser(description="Explanatory figures with captions, and a gallery.")
     p.add_argument("--only", nargs="+", choices=list(FIGURES), help="only these figures")
+    p.add_argument(
+        "--gallery-only",
+        action="store_true",
+        help="only rebuild index.html from the figures already there (e.g. after "
+        "unzipping a Colab run, so its reference figures are kept)",
+    )
     args = p.parse_args(argv)
 
     out = results_dir() / "figures"
@@ -782,7 +885,7 @@ def main(argv=None):
         captions = json.loads(captions_path.read_text(encoding="utf-8"))
 
     skipped = {}
-    for name in args.only or FIGURES:
+    for name in [] if args.gallery_only else (args.only or FIGURES):
         try:
             with paper_style():
                 fig, caption = FIGURES[name]()

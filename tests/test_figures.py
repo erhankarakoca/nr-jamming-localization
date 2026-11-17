@@ -48,10 +48,12 @@ def test_data_figures_and_gallery(tmp_path, monkeypatch):
     out = tmp_path / "results" / "figures"
     html = (out / "index.html").read_text(encoding="utf-8")
     captions = json.loads((out / "captions.json").read_text(encoding="utf-8"))
+    import html as html_lib
+
     for name in figures.FIGURES:
         assert f'src="{name}.png"' in html, name
-        assert name in captions
-    assert "Not produced yet" not in html
+        assert html_lib.escape(captions[name]) in html, name  # every caption is on the page
+        assert f"<b>{name}</b>: Not produced yet" not in html
 
 
 def test_gallery_without_models(tmp_path, monkeypatch):
@@ -61,3 +63,54 @@ def test_gallery_without_models(tmp_path, monkeypatch):
     html = (tmp_path / "results" / "figures" / "index.html").read_text(encoding="utf-8")
     assert 'src="attack_patterns.png"' in html
     assert "Not produced yet" in html and "detector_outputs" in html
+
+
+def test_power_is_compared_per_cell_and_evm_per_prb():
+    import numpy as np
+
+    from jamloc.features import FEATURE_NAMES
+    from jamloc.jammer import ATTACKS
+
+    names = list(FEATURE_NAMES)
+    f = np.zeros((1, 6, 24, 14), dtype=np.float32)
+    f[0, names.index("alloc_mask"), 0:6] = 1
+    f[0, names.index("dmrs_mask"), 0:6, 2] = 1
+    f[0, names.index("data_mask"), 0:6] = 1
+    f[0, names.index("data_mask"), 0:6, 2] = 0
+    labels = np.zeros((1, 24, 14), dtype=np.uint8)
+    labels[0, 2:4, 2] = 1  # pilot jamming of PRBs 2-3
+    f[0, names.index("power_db"), 2:4, 2] = 10.0
+    d = {
+        "features": f,
+        "labels": labels,
+        "attack": np.array([ATTACKS.index("pilot")]),
+        "jsr_db": np.array([-3.0]),
+    }
+
+    clean, jammed = figures._feature_groups(d, "pilot", "power_db", "alloc_mask")
+    assert jammed.tolist() == [10.0, 10.0] and clean.size == 6 * 14 - 2
+    clean, jammed = figures._feature_groups(d, "pilot", "evm_db", "data_mask")
+    assert jammed.size == 2 * 13  # data cells of the pilot-jammed PRBs
+
+
+@pytest.mark.parametrize("channel", ["A", "C"])
+def test_example_seed_has_no_fade_on_the_jammed_block(channel):
+    seed = figures._example_seed(channel)
+    assert figures._block_power_ok(figures._example_batch("none", 0.0, 20.0, channel, seed))
+
+
+def test_gallery_only_keeps_existing_figures(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
+    out = tmp_path / "figures"
+    out.mkdir(parents=True)
+    (out / "attack_patterns.png").write_bytes(b"not really a png")
+    captions = {"attack_patterns": "Caption <with> special & characters."}
+    (out / "captions.json").write_text(json.dumps(captions), encoding="utf-8")
+
+    figures.main(["--gallery-only"])
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert 'src="attack_patterns.png"' in page
+    assert "Caption &lt;with&gt; special &amp; characters." in page
+    assert not (out / "system_diagram.png").exists()  # nothing was regenerated
+    assert "python -m jamloc.experiments.figures --only system_diagram" in page
+    assert "python -m jamloc.experiments.ber_bler" in page  # missing result figure explained
