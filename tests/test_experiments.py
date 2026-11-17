@@ -72,3 +72,36 @@ def test_full_run_small(tmp_path, monkeypatch):
         names
     )
     assert {"models/fused_seed0.pt", "models/fused_seed1.pt"} <= set(names)
+
+
+def test_recovery_script_runs(tmp_path, monkeypatch):
+    from jamloc.dataset import generate
+    from jamloc.experiments import recovery
+    from jamloc.train import train
+
+    monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
+    generate("train", num_slots=64, batch_size=32)
+    generate("val", num_slots=32, batch_size=32)
+    for variant in ("fused", "no_residual"):
+        train(variant, epochs=1, batch_size=32)
+
+    args = ["--channel", "A", "--batch-size", "8", "--max-mc-iter", "1", "--jsr-db", "-3", "3"]
+    recovery.main(args)
+    out = tmp_path / "results" / "recovery"
+    with open(out / "recovery_A.csv", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    main_rows = {
+        (r["receiver"], r["attack"], r["jsr_db"])
+        for r in rows
+        if r["attack"] in ("pilot", "data", "partial")
+    }
+    assert main_rows == {
+        (rx, a, j)
+        for rx in recovery.RECEIVERS
+        for a in ("pilot", "data", "partial")
+        for j in ("-3.0", "3.0")
+    }
+    limit = [r for r in rows if r["attack"] == "pilot_whole_allocation"]
+    assert {r["receiver"] for r in limit} == {"standard", "true_map"}
+    assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
