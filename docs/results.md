@@ -117,6 +117,9 @@ thread pool only adds overhead.
 
 ## Caveats before these go into the paper
 
+- These numbers were produced before the per-pilot residual normalization (issue #1), which
+  removed a ~1 dB low bias of R on the two edge PRBs of each allocation. Regenerate the
+  datasets and retrain before using them in the paper; changes should be small.
 - One training seed per variant. P+R+E and P+E differ by 0.007 in overall F1; that gap is not
   established without several seeds. The pilot-attack gap (Pd 0.61 vs 0.42 at −15 dB, F1 0.835 vs
   0.784) is much larger.
