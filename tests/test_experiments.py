@@ -56,3 +56,19 @@ def test_ber_bler_title_uses_snr_from_csv(tmp_path, monkeypatch):
     rows = ber_bler.read_rows(tmp_path / "ber_bler" / "ber_bler_A.csv")
     assert all(r["snr_db"] == 12.0 for r in rows)
     assert "SNR 12 dB" in ber_bler.plot(rows, "A").axes[0].get_title()
+
+
+def test_full_run_small(tmp_path, monkeypatch):
+    import zipfile
+
+    from jamloc.experiments import full_run
+
+    monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
+    full_run.main(["--small", "--seeds", "0", "1"])
+    archive = tmp_path / "results" / "full_run.zip"
+    names = zipfile.ZipFile(archive).namelist()
+    assert {"eval/test_f1.csv", "eval/sched_f1.csv", "eval/test_pd_vs_jsr_scheduled.pdf"} <= set(
+        names
+    )
+    assert {"models/fused_seed0.pt", "models/fused_seed1.pt"} <= set(names)

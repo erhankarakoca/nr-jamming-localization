@@ -111,19 +111,36 @@ gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper
 Every command writes into `data/` or `results/` (or the folders set by `JAMLOC_DATA_DIR` /
 `JAMLOC_RESULTS_DIR`). Times are for a MacBook Pro M1 Pro, CPU only.
 
+**Detection experiment (datasets, training, evaluation).** One command does it all and leaves
+`results/full_run.zip`. Training 4 variants x 3 seeds takes about 2.5 hours on a laptop CPU, so
+it is meant for a Colab GPU: run [`notebooks/colab_setup.ipynb`](notebooks/colab_setup.ipynb),
+whose last cell is this command.
+
 ```bash
-uv run python -m jamloc.experiments.ber_bler --channel A        # BER/BLER vs JSR (~4 min each)
-uv run python -m jamloc.experiments.ber_bler --channel C
-uv run python -m jamloc.experiments.feature_maps                # example feature maps
+uv run python -m jamloc.experiments.full_run --seeds 0 1 2
+```
+
+The same steps one by one:
+
+```bash
 for s in train val test sched; do uv run python -m jamloc.dataset --split $s; done   # ~2 min
-uv run python -m jamloc.train --variant all --epochs 15         # ~50 min on CPU
-uv run python -m jamloc.evaluate --split test                   # main detection results
+uv run python -m jamloc.train --variant all --epochs 15 --seeds 0 1 2
+uv run python -m jamloc.evaluate --split test                   # mean +- std over seeds
 uv run python -m jamloc.evaluate --split sched                  # scheduling-aware jammer
-uv run python -m jamloc.experiments.latency                     # CPU latency per slot, 1 thread
+uv run python -m jamloc.evaluate --split test --snr-db 15 25    # one SNR range only
 ```
 
 On Windows PowerShell, run the dataset loop as
 `foreach ($s in "train","val","test","sched") { uv run python -m jamloc.dataset --split $s }`.
+
+**Other figures** (run locally; latency should be measured on the target CPU):
+
+```bash
+uv run python -m jamloc.experiments.ber_bler --channel A        # BER/BLER vs JSR (~4 min each)
+uv run python -m jamloc.experiments.ber_bler --channel C
+uv run python -m jamloc.experiments.feature_maps                # example feature maps
+uv run python -m jamloc.experiments.latency                     # CPU latency per slot, 1 thread
+```
 
 ## Layout
 
