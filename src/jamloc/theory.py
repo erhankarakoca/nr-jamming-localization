@@ -8,7 +8,9 @@ Notation (one allocation of ``n`` PRBs, ``N = 6n`` DMRS pilots on one comb):
   onto its complement. The residual is ``r = P h_ls``.
 * Statistic of PRB b (pilot set B): ``R_b = ||r_B||^2 / (s2 * tr P_BB)`` (``features.residual_map``).
 
-**No jamming.** If the UE channel lies in the delay subspace, ``P h = 0`` and ``r_B = (P w/x)_B``
+**No jamming.** If the UE channel lies in the delay subspace (in practice: if its energy outside
+the subspace is small compared with the noise; for a path near ``tau_max`` at the band edge this
+holds up to about 25 dB SNR, beyond which a larger ``tau_max`` is needed), ``P h = 0`` and ``r_B = (P w/x)_B``
 is complex Gaussian with covariance ``s2 * P_BB`` (a 6 x 6 block of ``P``). Rotating it to the
 eigenvectors of ``P_BB`` gives
 
@@ -103,7 +105,7 @@ def ccdf(t, lam) -> np.ndarray:
             for row in np.atleast_2d(lam_in)
         ]
     )
-    out = np.clip(out, 0.0, 1.0).reshape((-1, *t.shape))
+    out = np.where(t.reshape(-1) < 0, 1.0, np.clip(out, 0.0, 1.0)).reshape((-1, *t.shape))
     return out[0] if lam_in.ndim == 1 else out
 
 

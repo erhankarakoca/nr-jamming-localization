@@ -90,7 +90,7 @@ def residual_per_prb(
     h_ls: torch.Tensor, pilot_sc: torch.Tensor, no: torch.Tensor, pilot_power: float, cfg: SimConfig
 ) -> torch.Tensor:
     """DMRS residual ``[B, n]`` of each PRB of the allocation, from the LS pilot estimates."""
-    u = delay_subspace(pilot_sc, cfg.scs, cfg.tau_max)
+    u = delay_subspace(pilot_sc, cfg.scs, cfg.tau_max).to(h_ls.dtype)
 
     # Remove the part of the pilot estimates that a real channel can explain
     residual = h_ls - (h_ls @ u.conj()) @ u.T

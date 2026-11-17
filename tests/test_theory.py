@@ -9,6 +9,7 @@ def test_tail_of_weighted_exponentials_matches_closed_forms():
     assert np.allclose(theory.ccdf(t, [1.0]), np.exp(-t), atol=1e-9)
     # equal weights: a Gamma distribution
     assert np.allclose(theory.ccdf(t, np.full(6, 1 / 6)), stats.gamma(6, scale=1 / 6).sf(t))
+    assert theory.ccdf(-1.0, [0.5, 0.5]) == 1.0  # a sum of exponentials is never negative
 
 
 def test_weights_sum_to_one_and_edges_have_heavier_tails():

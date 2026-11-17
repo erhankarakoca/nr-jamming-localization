@@ -36,8 +36,8 @@ approaches the channel power, the equalizer reports a large effective noise, and
 shrink towards zero by themselves: repair turns smoothly into erasure.
 
 If the hard map flags every DMRS cell there is no clean pilot to interpolate from. The receiver
-then uses Sionna's standard estimate, exactly like the unprotected receiver, and only erases
-flagged data cells; it can never do worse than no protection.
+then uses Sionna's standard channel estimate, exactly like the unprotected receiver, and only
+erases the flagged data cells.
 """
 
 import math
@@ -100,7 +100,8 @@ def lmmse_interpolation(
     g = r_ap[None] * c[:, None, :]  # [B, num_sc, N_p]
 
     # h_hat = R_ac (R_cc + S)^-1 h_c, S = diag(noise variance of each pilot)
-    weights = torch.linalg.solve(a, (h_ls.to(torch.complex128) * c)[..., None])
+    observed = torch.where(clean, h_ls.to(torch.complex128), 0)  # also drops NaNs of unused pilots
+    weights = torch.linalg.solve(a, observed[..., None])
     h_hat = (g @ weights)[..., 0]
 
     # err_k = R_kk - R_kc (R_cc + s2 I)^-1 R_ck, with R_kk = 1
@@ -251,6 +252,8 @@ class MapAwareReceiver(Block):
         total = excess.new_zeros(excess.shape[0], num_prb).index_add_(
             1, data_prb, torch.where(flagged, excess, torch.zeros_like(excess))
         )
-        count = excess.new_zeros(excess.shape[0], num_prb).index_add_(1, data_prb, flagged.float())
+        count = excess.new_zeros(excess.shape[0], num_prb).index_add_(
+            1, data_prb, flagged.to(excess.dtype)
+        )
         per_prb = (total / count.clamp_min(1)).clamp_min(0)
         return torch.where(flagged, per_prb[:, data_prb], torch.zeros_like(excess))

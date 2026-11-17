@@ -100,7 +100,7 @@ gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper
 | `receiver.py` | Receiver chain: LS estimation, LMMSE equalization, demapping, decoding |
 | `link.py` | The whole slot: UE, channels, jammer, noise, receiver |
 | `features.py` | Power, DMRS residual and EVM maps, plus allocation masks |
-| `baselines.py` | Threshold detectors: EVM, residual, residual CFAR (analytic), per-cell power |
+| `baselines.py` | Threshold detectors: EVM, residual, residual exact p-value, per-cell power |
 | `theory.py` | Exact statistics of the DMRS residual: false-alarm threshold, Pd, leakage |
 | `recovery.py` | Map-aware receiver: hard (drop/erase) and soft (weight by estimated jamming) |
 | `model.py`, `train.py` | U-Net detector and its training |

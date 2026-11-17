@@ -55,7 +55,7 @@ DETECTOR_STYLE = {
         "linestyle": ":",
     },
     "residual_cfar": {
-        "label": "Residual CFAR (analytic)",
+        "label": "Residual, exact p-value",
         "color": "#000000",
         "marker": "+",
         "linestyle": "-.",

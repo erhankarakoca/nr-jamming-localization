@@ -5,10 +5,13 @@
   wrong symbols.
 * Residual threshold (OFDM counterpart of pilot-subspace detection, Mehrabian & Kaddoum): flags
   DMRS cells whose residual is high. It is blind to data-only jamming.
-* Residual CFAR: the same residual, scored by its exact tail probability without jamming
-  (``jamloc.theory``), ``-log10 p``. Its threshold for a false-alarm rate ``alpha`` is
-  ``-log10 alpha`` on every PRB, at every SNR and on every channel, so it needs no training data;
-  it also accounts for the PRBs at the band edges, whose residual has a heavier tail.
+* Residual, exact p-value ("residual CFAR"): the same residual, scored by its exact tail
+  probability without jamming (``jamloc.theory``), ``-log10 p``. In benign slots its threshold for
+  a false-alarm rate ``alpha`` is ``-log10 alpha`` on every PRB, at every SNR and on every channel,
+  so it needs no training data; it also accounts for the PRBs at the band edges, whose residual
+  has a heavier tail. (``evaluate`` still calibrates it on validation like every detector, where
+  leakage from jammed PRBs raises the threshold; the analytic threshold is checked in
+  ``experiments/residual_theory``.)
 
 * Power threshold (Li et al., MILCOM 2012): flags scheduled cells whose received power is high
   relative to the slot's typical scheduled cell, the classic per-tone power test. Fading of the
