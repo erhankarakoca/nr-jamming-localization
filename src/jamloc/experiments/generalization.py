@@ -24,6 +24,7 @@ from jamloc.paths import data_dir, results_dir
 from jamloc.plotting import new_figure, paper_style, save
 
 CONDITIONS = {"test": "matched (test)", **{k: v["title"] for k, v in GENERALIZATION.items()}}
+SHORT = {"test": "matched", "longdelay": "1000 ns", "fast": "30 m/s", "qpskjam": "QPSK"}
 DETECTORS = ("fused", "no_residual", "power", "evm", "evm_threshold", "residual_threshold")
 
 
@@ -74,8 +75,7 @@ def plot(rows, splits):
                 vals.append(r[key])
             x = np.arange(len(splits)) + (i - (len(DETECTORS) - 1) / 2) * width
             ax.bar(x, vals, width, color=style[det]["color"], label=style[det]["label"])
-        ax.set_xticks(np.arange(len(splits)), [CONDITIONS[s].split(" (")[0] for s in splits])
-        ax.tick_params(axis="x", labelsize=6)
+        ax.set_xticks(np.arange(len(splits)), [SHORT[s] for s in splits])
         ax.set_title(title)
         if key == "fa_scored":
             ax.axhline(evaluate.FA, color="k", lw=0.8, ls=":")
@@ -84,7 +84,10 @@ def plot(rows, splits):
     axes[1].set_ylim(0, 1)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="outside lower center", ncols=6, frameon=False)
-    fig.suptitle("Unseen conditions, thresholds from the matched validation set")
+    fig.suptitle(
+        "Unseen conditions: TDL-C at 1000 ns delay spread, speeds up to 30 m/s, QPSK jammer\n"
+        "(thresholds from the matched validation set)"
+    )
     return fig
 
 

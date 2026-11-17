@@ -147,6 +147,12 @@ def measure_latency(widths, reps: int, alloc_prb: int = 24) -> list[dict]:
     return rows
 
 
+def _size_ticks(ax, thousands):
+    """One labelled tick per network size instead of log-axis decades."""
+    ax.minorticks_off()
+    ax.set_xticks(thousands, [f"{t:.1f}k" for t in thousands])
+
+
 def plot(quality: list[dict], latency: list[dict] | None):
     fig, axes = new_figure(7.16, 2.4, ncols=3 if latency else 2)
     mean = aggregate(quality, [k for k in quality[0] if k not in ("width", "params", "seed")])
@@ -164,8 +170,9 @@ def plot(quality: list[dict], latency: list[dict] | None):
             m = np.array([r[f"{key}_mean"] for r in mean])
             s = np.array([r[f"{key}_std"] for r in mean])
             ax.errorbar(x, m, yerr=s, marker=marker, capsize=2, label=label)
-        ax.set(xscale="log", xlabel="U-Net parameters [thousands]", title=title)
-        ax.legend(loc="lower right")
+        ax.set(xscale="log", xlabel="U-Net parameters", title=title)
+        _size_ticks(ax, x)
+        ax.legend(loc="center right")
     if latency:
         latency = sorted(latency, key=lambda r: r["params"])
         lx = np.array([r["params"] for r in latency]) / 1e3
@@ -175,14 +182,15 @@ def plot(quality: list[dict], latency: list[dict] | None):
         if "frozen_total_ms" in latency[0]:
             ax.plot(lx, [r["frozen_total_ms"] for r in latency], "^-.", label="total, frozen graph")
         ax.axhline(SLOT_MS, color="k", lw=0.8, ls=":")
-        ax.text(lx[0], SLOT_MS * 1.03, "one slot (0.5 ms)", fontsize=6, va="bottom")
+        ax.text(lx[0] * 1.1, SLOT_MS * 1.02, "one slot (0.5 ms)", fontsize=6, va="bottom")
         ax.set(
             xscale="log",
-            xlabel="U-Net parameters [thousands]",
+            xlabel="U-Net parameters",
             ylabel="ms per slot, 1 CPU thread",
             title="CPU latency",
             ylim=(0, None),
         )
+        _size_ticks(ax, lx)
         ax.legend(loc="lower right")
     fig.suptitle("Fused detector (P+R+E) with narrower U-Nets; bars: std over training seeds")
     return fig
