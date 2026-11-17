@@ -63,3 +63,9 @@ def test_jammer_outside_allocation_is_harmless():
     jammed_prbs = out.labels.any(dim=2)  # [B, 24]
     assert jammed_prbs[:, 12:21].all() and not jammed_prbs[:, :12].any()
     assert not jammed_prbs[:, 21:].any()
+
+
+def test_default_config():
+    rng = seed_everything(7)
+    out = JammedPUSCHLink()(draw_scenario(rng, 2, cfg, "A"))
+    assert out.y.shape == (2, 14, 288)

@@ -118,7 +118,7 @@ class JammedPUSCHLink:
     which Sionna's automatic input-to-tensor conversion does not accept."""
 
     def __init__(self, cfg: SimConfig | None = None):
-        self.cfg = cfg or SimConfig()
+        self.cfg = cfg = cfg or SimConfig()
         self.device = config.device
         self.ue = UEPool(cfg)
         self._receivers = {}
