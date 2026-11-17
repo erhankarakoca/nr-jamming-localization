@@ -33,7 +33,9 @@ def test_delay_subspace():
     u = delay_subspace(pilot_sc, cfg.scs, cfg.tau_max)
     n_p, n_basis = u.shape
     assert n_basis < n_p == pilot_sc.numel()
-    assert torch.allclose(u.conj().T @ u, torch.eye(n_basis, dtype=u.dtype, device=u.device), atol=1e-4)
+    assert torch.allclose(
+        u.conj().T @ u, torch.eye(n_basis, dtype=u.dtype, device=u.device), atol=1e-4
+    )
 
     # A noiseless TDL-C channel lies inside the subspace
     residual = h_ls - (h_ls @ u.conj()) @ u.T
