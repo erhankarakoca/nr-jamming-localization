@@ -122,3 +122,10 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
     recovery.main(["--channel", "A", "--plot-only"])
     assert (out / "recovery_A.png").is_file()
     assert all(int(r["block_errors"]) <= int(r["blocks"]) for r in rows)
+
+    # Re-run one receiver: its rows are replaced, all others kept
+    recovery.main([*args, "--receivers", "power_hard"])
+    with open(out / "recovery_A.csv", encoding="utf-8", newline="") as f:
+        merged = list(csv.DictReader(f))
+    assert len(merged) == len(rows)
+    assert {r["receiver"] for r in merged} == {r["receiver"] for r in rows}

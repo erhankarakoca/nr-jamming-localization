@@ -79,17 +79,19 @@ STYLE = {
 
 
 def _power_scores(features: torch.Tensor) -> torch.Tensor:
-    """Per-cell power test: linear received power on scheduled cells, -inf elsewhere.
+    """Per-cell power test: received power of each scheduled cell relative to the slot's median
+    scheduled cell, -inf elsewhere (the same score as ``baselines.power_scores``).
 
-    The recovery experiment runs at one SNR with normalized channels, so the absolute power is
-    used here; the detection evaluation (``baselines.power_scores``, SNR 5-25 dB) divides it by
-    the slot's median scheduled power first.
+    The threshold comes from validation slots of 5-25 dB SNR; without the per-slot reference it
+    would be set by the strongest slots and flag almost nothing at the 15 dB used here.
     """
     from jamloc.features import FEATURE_NAMES
 
     power = 10 ** (features[:, FEATURE_NAMES.index("power_db")] / 10)
     alloc = features[:, FEATURE_NAMES.index("alloc_mask")] > 0
-    return torch.where(alloc, power, torch.full_like(power, -torch.inf))
+    level = torch.nanmedian(torch.where(alloc, power, torch.nan).flatten(1), dim=1).values
+    relative = power / level[:, None, None]
+    return torch.where(alloc, relative, torch.full_like(power, -torch.inf))
 
 
 def _scores(detector: str, model, features: torch.Tensor) -> torch.Tensor:
@@ -178,7 +180,9 @@ def simulate_point(link, detectors, scenario_fn, receivers, max_mc_iter, target_
     return counts
 
 
-def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_errors, seed):
+def simulate(
+    channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_errors, seed, only=None
+):
     cfg = SimConfig()
     link = JammedPUSCHLink(cfg)
     detectors = {}
@@ -193,6 +197,9 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
     cases += [(attack, False, tuple(RECEIVERS)) for attack in ("pilot", "data", "partial")]
     # limit case: no clean pilot left
     cases.append(("pilot", True, ("standard", "true_hard", "true_soft")))
+    if only:  # re-run some receivers only
+        cases = [(a, w, tuple(rx for rx in rxs if rx in only)) for a, w, rxs in cases]
+        cases = [c for c in cases if c[2]]
     rows = []
     for attack, whole, receivers in cases:
         name = "pilot_whole_allocation" if whole else attack
@@ -289,6 +296,18 @@ def plot(rows, channel, receivers=MAIN_RECEIVERS, shade=True):
     return fig
 
 
+def _read_rows(path) -> list[dict]:
+    with open(path, encoding="utf-8", newline="") as f:
+        text = ("receiver", "attack")
+        return [
+            {k: (v if k in text else float(v)) for k, v in r.items()} for r in csv.DictReader(f)
+        ]
+
+
+def rows_rx(rows) -> set:
+    return {r["receiver"] for r in rows}
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--channel", choices=("A", "C"), default="A")
@@ -299,17 +318,19 @@ def main(argv=None):
     p.add_argument("--target-block-errors", type=int, default=100)
     p.add_argument("--seed", type=int, default=0, help="training seed of the detector models")
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
+    p.add_argument(
+        "--receivers",
+        nargs="+",
+        choices=list(RECEIVERS),
+        help="simulate only these receivers and replace their rows in the saved CSV",
+    )
     args = p.parse_args(argv)
 
     out = results_dir() / "recovery"
     out.mkdir(parents=True, exist_ok=True)
     stem = out / f"recovery_{args.channel}"
     if args.plot_only:
-        with open(stem.with_suffix(".csv"), encoding="utf-8", newline="") as f:
-            text = ("receiver", "attack")
-            rows = [
-                {k: (v if k in text else float(v)) for k, v in r.items()} for r in csv.DictReader(f)
-            ]
+        rows = _read_rows(stem.with_suffix(".csv"))
     else:
         rows = simulate(
             args.channel,
@@ -319,7 +340,15 @@ def main(argv=None):
             args.max_mc_iter,
             args.target_block_errors,
             args.seed,
+            args.receivers,
         )
+        if args.receivers and stem.with_suffix(".csv").is_file():
+            kept = [
+                r
+                for r in _read_rows(stem.with_suffix(".csv"))
+                if r["receiver"] not in rows_rx(rows)
+            ]
+            rows = kept + rows
         with open(stem.with_suffix(".csv"), "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(rows[0]))
             writer.writeheader()
