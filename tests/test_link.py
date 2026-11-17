@@ -69,3 +69,20 @@ def test_default_config():
     rng = seed_everything(7)
     out = JammedPUSCHLink()(draw_scenario(rng, 2, cfg, "A"))
     assert out.y.shape == (2, 14, 288)
+
+
+def test_allocation_past_carrier_edge_is_rejected():
+    import pytest
+
+    with pytest.raises(ValueError, match="allocation"):
+        draw_scenario(seed_everything(0), 2, cfg, "A", alloc=(20, 8))
+    sc = draw_scenario(seed_everything(0), 2, cfg, "A", alloc=(16, 8))
+    sc.alloc_start = 20  # hand-edited scenario
+    with pytest.raises(ValueError, match="allocation"):
+        link(sc)
+
+
+def test_fixed_jam_size():
+    sc = draw_scenario(seed_everything(0), 64, cfg, "A", jam_size=4)
+    assert torch.all(sc.jam_size == 4)
+    assert torch.all(sc.jam_start + sc.jam_size <= cfg.num_prb)

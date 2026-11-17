@@ -40,11 +40,21 @@ class UEPool:
         return self._transmitters[num_prb]
 
 
+def check_allocation(start_prb: int, num_prb: int, cfg: SimConfig) -> None:
+    """Raise ``ValueError`` unless PRBs ``start_prb .. start_prb + num_prb - 1`` fit on the carrier."""
+    if num_prb < 1 or start_prb < 0 or start_prb + num_prb > cfg.num_prb:
+        raise ValueError(
+            f"allocation of {num_prb} PRBs starting at PRB {start_prb} does not fit on the "
+            f"{cfg.num_prb}-PRB carrier"
+        )
+
+
 def place_on_carrier(x: torch.Tensor, start_prb: int, cfg: SimConfig) -> torch.Tensor:
     """Put an allocation grid ``[..., 12 n]`` on PRBs ``start_prb ..`` of the carrier.
 
     Returns ``[..., 288]`` with zeros on the subcarriers outside the allocation.
     """
+    check_allocation(start_prb, x.shape[-1] // 12, cfg)
     left = 12 * start_prb
     right = cfg.num_subcarriers - left - x.shape[-1]
     return F.pad(x, (left, right))

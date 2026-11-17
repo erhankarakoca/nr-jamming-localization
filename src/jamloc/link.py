@@ -22,7 +22,13 @@ from sionna.phy.nr import PUSCHTransmitter
 from jamloc.config import SimConfig
 from jamloc.jammer import ATTACKS, Jammer, cell_mask
 from jamloc.receiver import PUSCHReceiverChain
-from jamloc.ue import UEPool, carrier_resource_grid, place_on_carrier, take_allocation
+from jamloc.ue import (
+    UEPool,
+    carrier_resource_grid,
+    check_allocation,
+    place_on_carrier,
+    take_allocation,
+)
 
 
 @dataclass
@@ -78,13 +84,17 @@ def draw_scenario(
         start = int(rng.integers(0, cfg.num_prb - size + 1))
     else:
         start, size = alloc
+        check_allocation(start, size, cfg)
 
     attack = rng.choice(np.asarray(attacks), batch_size)
     if scheduling_aware:
         j_size = np.full(batch_size, size)
         j_start = np.full(batch_size, start)
     else:
-        j_size = rng.integers(jam_size[0], jam_size[1] + 1, batch_size)
+        if isinstance(jam_size, (tuple, list)):
+            j_size = rng.integers(jam_size[0], jam_size[1] + 1, batch_size)
+        else:
+            j_size = np.full(batch_size, int(jam_size))
         j_start = rng.integers(0, cfg.num_prb - j_size + 1)
 
     return Scenario(
