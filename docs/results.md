@@ -17,6 +17,18 @@ for data, training and evaluation), every seed evaluated with its own validation
 the recovery experiment and the figures. Detection values are **mean ± standard deviation over
 the three seeds**. Sections 1, 2 and 5 were run on a MacBook Pro M1 Pro CPU.
 
+**Second round** (`docs/plan-v2.md`, also on the Colab T4 with the same GPU-generated datasets
+and the same trained models; latency on the Mac):
+- **Theory of the residual (section 8):** its distribution without jamming depends on neither the
+  channel nor the SNR, so its 1% threshold is computed, not learned; measured 0.91-0.92% at every
+  SNR. Pd and the leakage into neighbouring PRBs also follow in closed form and match.
+- **Recovery (section 6):** the map is used softly (it says *where*; the receiver estimates *how
+  strong*), which removes the BLER penalty hard erasure paid at weak jamming, and is compared
+  with DMRS-only interference estimation and the classic power-test receiver.
+- **Size (section 5):** 7.7k parameters lose 0.008 F1 and fit in one slot (0.43 ms on one core).
+- **Unseen conditions (sections 9, 10):** a QPSK jammer changes nothing; long delays and fast users
+  raise false alarms, and training on mixed channels removes most of that.
+
 ## 1. What each attack does to the link
 
 `results/ber_bler/ber_bler_{A,C}.pdf` (Colab GPU, up to 12 800 slots or 100 block errors per point;
@@ -117,20 +129,26 @@ By SNR (overall F1, `test_snr5-15_*` and `test_snr15-25_*`): P+R+E 0.916 / 0.987
 ## 4. Robustness: scheduling-aware jammer
 
 `results/eval/sched_pd_vs_jsr_scheduled.pdf`. The jammer hits exactly the scheduled PRBs. No
-U-Net saw this attacker during training.
+U-Net saw this attacker during training. (Numbers from the second-round regeneration of this
+split, batch size 64 instead of 128, so other slots than the reference run; the differences are
+within about one standard deviation.)
 
 | Detector | F1 pilot | F1 data | F1 all | Pd pilot, −15 dB | Pd data, −15 dB |
 | --- | --- | --- | --- | --- | --- |
-| **U-Net, P+R+E** | **0.884 ± 0.014** | 0.927 ± 0.014 | 0.933 ± 0.011 | **0.62 ± 0.01** | 0.52 ± 0.03 |
-| U-Net, P+E | 0.791 ± 0.013 | **0.936 ± 0.017** | **0.936 ± 0.014** | 0.36 ± 0.04 | **0.58 ± 0.05** |
-| U-Net, power only | 0.817 ± 0.008 | 0.895 ± 0.008 | 0.888 ± 0.009 | 0.21 ± 0.03 | 0.45 ± 0.04 |
-| U-Net, EVM only | 0.468 ± 0.032 | 0.696 ± 0.061 | 0.685 ± 0.062 | 0.05 ± 0.01 | 0.19 ± 0.01 |
+| **U-Net, P+R+E** | **0.880 ± 0.011** | 0.930 ± 0.011 | 0.934 ± 0.011 | **0.59 ± 0.01** | 0.50 ± 0.02 |
+| U-Net, P+E | 0.789 ± 0.015 | **0.937 ± 0.011** | **0.937 ± 0.011** | 0.35 ± 0.03 | **0.55 ± 0.04** |
+| U-Net, power only | 0.815 ± 0.009 | 0.897 ± 0.008 | 0.888 ± 0.008 | 0.21 ± 0.03 | 0.40 ± 0.04 |
+| U-Net, EVM only | 0.473 ± 0.031 | 0.712 ± 0.063 | 0.696 ± 0.057 | 0.05 ± 0.02 | 0.19 ± 0.01 |
+| Power threshold (Li et al.) | | | 0.030 | | |
+
+The slot-relative power test fails here by construction: its reference, the median scheduled
+cell, is itself jammed when the jammer covers the whole allocation.
 
 **Reading.** When the whole allocation is jammed there is no clean neighbouring PRB to compare
-against. For **pilot jamming** the fused detector is unaffected (Pd 0.62 at −15 dB in both tests),
-because the residual is an absolute measure; without it Pd falls from 0.43 to 0.36. For **data
-jamming** every U-Net loses some sensitivity, the fused one slightly more than P+E (overall F1
-0.933 vs 0.936, within one standard deviation). The networks were trained only on jammers placed
+against. For **pilot jamming** the fused detector is hardly affected (Pd 0.59 at −15 dB, against 0.62
+in the test set), because the residual is an absolute measure; without it Pd falls from 0.43 to
+0.35. For **data jamming** every U-Net loses some sensitivity, the fused one slightly more than
+P+E (overall F1 0.934 vs 0.937, within one standard deviation). The networks were trained only on jammers placed
 at random, so part of what they learned is contrast between jammed and unjammed PRBs; adding
 scheduling-aware slots to training is the obvious fix, at the cost of no longer testing an
 unseen attacker.
