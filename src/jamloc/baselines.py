@@ -10,9 +10,9 @@
   ``-log10 alpha`` on every PRB, at every SNR and on every channel, so it needs no training data;
   it also accounts for the PRBs at the band edges, whose residual has a heavier tail.
 
-* Power threshold (Li et al., MILCOM 2012): flags scheduled cells whose received power is high,
-  the classic per-tone power test. Fading of the UE's own signal makes it insensitive to weak
-  jamming.
+* Power threshold (Li et al., MILCOM 2012): flags scheduled cells whose received power is high
+  relative to the slot's typical scheduled cell, the classic per-tone power test. Fading of the
+  UE's own signal makes it insensitive to weak jamming.
 
 Scores are the linear feature values; cells where the feature is not defined get ``-inf``.
 """
@@ -35,8 +35,18 @@ def evm_scores(features: np.ndarray) -> np.ndarray:
 
 
 def power_scores(features: np.ndarray) -> np.ndarray:
-    """``[N, 24, 14]``: linear received power on scheduled cells, ``-inf`` elsewhere."""
-    return _masked_linear(features, "power_db", "alloc_mask")
+    """``[N, 24, 14]``: received power of each scheduled cell relative to the slot's median
+    scheduled cell, ``-inf`` elsewhere.
+
+    The test compares the power with the level the UE's signal is expected to have; the median
+    over the slot's scheduled cells is a robust estimate of that level as long as the jammer
+    covers fewer than half of them. Without it, one threshold for slots of 5 to 25 dB SNR would be
+    set by the strongest slots.
+    """
+    scores = _masked_linear(features, "power_db", "alloc_mask")
+    scheduled = np.where(np.isfinite(scores), scores, np.nan)
+    level = np.nanmedian(scheduled.reshape(len(scores), -1), axis=1)
+    return scores / level[:, None, None]
 
 
 def residual_scores(features: np.ndarray) -> np.ndarray:

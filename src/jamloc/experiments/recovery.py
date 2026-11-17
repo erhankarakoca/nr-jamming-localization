@@ -79,7 +79,12 @@ STYLE = {
 
 
 def _power_scores(features: torch.Tensor) -> torch.Tensor:
-    """Per-cell power test: linear received power on scheduled cells, -inf elsewhere."""
+    """Per-cell power test: linear received power on scheduled cells, -inf elsewhere.
+
+    The recovery experiment runs at one SNR with normalized channels, so the absolute power is
+    used here; the detection evaluation (``baselines.power_scores``, SNR 5-25 dB) divides it by
+    the slot's median scheduled power first.
+    """
     from jamloc.features import FEATURE_NAMES
 
     power = 10 ** (features[:, FEATURE_NAMES.index("power_db")] / 10)
