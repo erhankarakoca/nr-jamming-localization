@@ -51,11 +51,18 @@ def lmmse_interpolation(
     ``[B, N_p]``: which pilots to use. ``s2`` ``[B]``: LS noise variance per pilot.
     Returns ``h_hat`` ``[B, num_sc]`` and its error variance ``[B, num_sc]`` (channel power 1).
     """
+    # Everything below runs on the CPU and the results go back to the input's device. On CUDA,
+    # PyTorch hands batched complex double-precision solves to the MAGMA library, which crashes
+    # with an illegal memory access on the CUDA 13 build Colab uses (reproduced with random
+    # matrices, no project code involved). The matrices are small (one 72 x 72 per slot for a
+    # 12-PRB allocation), so the CPU solves them in about a millisecond, on every machine alike.
+    device = h_ls.device
+    h_ls, pilot_sc, clean, s2 = h_ls.cpu(), pilot_sc.cpu(), clean.cpu(), s2.cpu()
+
     # Frequency correlation of a channel with delays spread uniformly over [0, tau_max].
     # Computed in double precision: the matrix is close to singular (that is the point of the
     # model), and single precision would lose the small eigenvalues.
-    device = h_ls.device
-    k = torch.arange(num_sc, device=device, dtype=torch.float64)
+    k = torch.arange(num_sc, dtype=torch.float64)
     x = (k[:, None] - k[None, :]) * scs * tau_max
     corr = torch.exp(-1j * math.pi * x) * torch.sinc(x)  # [num_sc, num_sc]
     r_ap = corr[:, pilot_sc]  # all subcarriers x pilots
@@ -77,7 +84,8 @@ def lmmse_interpolation(
     # err_k = R_kk - R_kc (R_cc + s2 I)^-1 R_ck, with R_kk = 1
     z = torch.linalg.solve(a, g.conj().transpose(1, 2))  # [B, N_p, num_sc]
     err_var = 1 - (g * z.transpose(1, 2)).sum(-1).real
-    return h_hat.to(h_ls.dtype), err_var.clamp(0, 1).to(torch.float32)
+    h_hat = h_hat.to(device=device, dtype=h_ls.dtype)
+    return h_hat, err_var.clamp(0, 1).to(device=device, dtype=torch.float32)
 
 
 class MapAwareReceiver(Block):
