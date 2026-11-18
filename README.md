@@ -100,10 +100,10 @@ gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper
 | `receiver.py` | Receiver chain: LS estimation, LMMSE equalization, demapping, decoding |
 | `link.py` | The whole slot: UE, channels, jammer, noise, receiver |
 | `features.py` | Power, DMRS residual and EVM maps, plus allocation masks |
-| `baselines.py` | Threshold detectors: EVM, residual, residual exact p-value, per-cell power |
-| `theory.py` | Exact statistics of the DMRS residual: false-alarm threshold, Pd, leakage |
+| `baselines.py` | Threshold detectors (EVM, residual, residual exact p-value, per-cell power) and the training-free block test |
+| `theory.py` | Exact statistics of the DMRS residual (one slot or averaged over K): threshold, Pd, leakage |
 | `recovery.py` | Map-aware receiver: hard (drop/erase) and soft (weight by estimated jamming) |
-| `model.py`, `train.py` | U-Net detector and its training |
+| `model.py`, `train.py` | U-Net detector, per-cell MLP (ablation), training (optionally with noise-estimate jitter) |
 | `dataset.py` | Train / validation / test / scheduling-aware splits with fixed seeds |
 | `evaluate.py`, `metrics.py` | Pd at 1% per-cell false alarm vs JSR, cell-level F1 |
 | `experiments/` | One script per experiment and figure (see below) |
@@ -151,6 +151,18 @@ uv run python -m jamloc.experiments.generalization     # long delays, 30 m/s, QP
 uv run python -m jamloc.experiments.size_sweep         # narrower U-Nets: train + evaluate (GPU)
 uv run python -m jamloc.experiments.size_sweep --latency   # their CPU latency (run on the CPU)
 uv run python -m jamloc.experiments.robust_training    # retrain on mixed channels (GPU)
+```
+
+**Third round** (`docs/plan-v3.md`): fair baselines, detection before damage, calibration,
+multi-slot residual. All run on a laptop CPU (the jittered U-Net trains in about 15 min per seed):
+
+```bash
+uv run python -m jamloc.train --variant fused --arch pixel --epochs 15 --seeds 0 1 2   # per-cell MLP
+uv run python -m jamloc.train --variant fused --epochs 15 --seeds 0 1 2 --noise-jitter-db 1
+uv run python -m jamloc.evaluate --split test        # now also: block test, per-cell MLP, jittered U-Net
+uv run python -m jamloc.experiments.detection_margin # slot-level Pd vs unprotected BLER (needs ber_bler)
+uv run python -m jamloc.experiments.calibration      # false alarms vs SNR and vs noise-estimate error
+uv run python -m jamloc.experiments.multislot        # residual averaged over K slots: theory vs checks
 ```
 
 **Other figures** (run locally; latency should be measured on the target CPU):

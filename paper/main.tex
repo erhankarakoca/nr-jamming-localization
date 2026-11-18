@@ -31,10 +31,13 @@ without jamming depends on neither the channel nor the SNR, which yields an anal
 constant-false-alarm threshold and closed-form detection probabilities, and that EVM alone
 reports pilot jamming at the wrong symbols because the damage appears in unjammed data. A
 66k-parameter U-Net fusing the three features reaches a cell-level F1 of 0.95 at a 1\%
-per-cell false-alarm rate in a Sionna PUSCH simulation, and a 7.7k-parameter version (F1 0.94)
-runs in 0.43\,ms per slot on one CPU core as a frozen graph. Used by the receiver to weight pilots and log-likelihood
-ratios by the estimated jamming power, the map restores the link under strong jamming without
-the penalty that hard erasure pays at weak jamming.
+per-cell false-alarm rate in a Sionna PUSCH simulation, against 0.87 for a training-free block
+test built on exact or calibrated null distributions of the same features, and a 7.7k-parameter version (F1
+0.94) runs in 0.43\,ms per slot on one CPU core as a frozen graph. At 15\,dB SNR, every attack
+on the user's resource blocks is flagged in 90\% of slots at least 7.7\,dB below the jamming
+power at which it raises the unprotected block error rate to 10\%. Used by the receiver to weight pilots and log-likelihood ratios by the estimated jamming
+power, the map restores the link under strong jamming without the penalty that hard erasure pays
+at weak jamming.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -73,11 +76,14 @@ This paper makes the following contributions.
   mislocate pilot jamming.
 \item We introduce a DMRS residual for single-antenna receivers, the per-PRB energy of the
   pilot estimates outside the delay subspace, and derive its exact distribution with and
-  without Gaussian jamming. The threshold for a given false-alarm rate follows from the
-  allocation alone, and the false-alarm rate stays at its design value at every SNR.
+  without Gaussian jamming, in one slot and averaged over several. The threshold for a given
+  false-alarm rate follows from the allocation alone, and the false-alarm rate stays near its
+  design value at every SNR.
 \item We fuse power, residual and EVM in a small U-Net and evaluate it at 1\% per-cell false
-  alarm against the threshold detectors, with matched ablations, a scheduling-aware attacker,
-  unseen channel conditions, and network size and CPU latency.
+  alarm against threshold detectors, a training-free block test that uses the attack structure
+  and exact or calibrated null distributions, and a network without spatial context, under a scheduling-aware
+  attacker, unseen channel conditions and noise-estimation error, together with network size
+  and CPU latency. Every attack is detected well before it damages the link.
 \item We show how the map should be used by the receiver: as a statement of \emph{where} to
   estimate the jamming power, which then weights pilots and log-likelihood ratios (LLRs), rather
   than as a hard erasure mask~\cite{li2012robust}.
@@ -188,6 +194,17 @@ Proposition~\ref{prop:alt} gives the detection probability of a jammed PRB and, 
 \mathcal{J}$, the false alarms caused by leakage: the projection spreads part of the jamming
 energy onto neighbouring pilots. Averaging over the jammer's fading gives $P_d(\rho)$.
 
+\emph{Several slots.} A jammer that stays on the same PRBs can be found at lower power by
+averaging $R_b$ over $K$ slots with the same allocation. With independent noise the average is
+again of the form~\eqref{eq:null}, every weight divided by $K$ and repeated $K$ times; under
+jamming the same holds while the jammer's channel stays constant (coherence time about 12\,ms
+at 3\,m/s and 3.5\,GHz). For a mid-band PRB of a 12-PRB allocation the 1\% threshold falls from
+2.31 ($K=1$) to 1.40 ($K=8$), and the JNR at which a jammed PRB is detected with probability 0.9
+from 10.7 to 4.4\,dB (block-Rayleigh jammer fading). Applied to the residuals of the benign
+link-level slots, the $K$-slot thresholds give false-alarm rates of 0.92--1.15\%, and a
+pilot-level simulation differs from the $P_d$ formula by at most 0.02 (both average over random
+jammer gains).
+
 % ---------------------------------------------------------------------------------------------
 \section{Fusion Detector}
 
@@ -201,7 +218,17 @@ subsets of the inputs (power and EVM; power only; EVM only). The threshold basel
 EVM per symbol and resource block~\cite{ornek2024advanced}, the residual (the single-antenna
 counterpart of the projected energy detector of~\cite{mehrabian2026robust}), the residual with
 the analytic threshold of Proposition~\ref{prop:null}, and a per-cell power
-test~\cite{li2012robust}.
+test~\cite{li2012robust}. These score only the cells where their feature is defined. Two further
+detectors isolate what the network adds. The \emph{block test} is the strongest classical
+detector we could build from the same features. Since jammers hit whole PRBs on the DMRS symbol,
+on the other 13 symbols, or on both, each cell receives the $p$-value of its group's statistic:
+outside the allocation, the power of the DMRS cell and the power averaged over the PRB's 13 data
+symbols (exact Gamma nulls); on scheduled PRBs, the residual's exact $p$-value and the
+PRB-averaged EVM (null from benign validation PRBs of the same SNR bin). The data cells of a PRB
+are not flagged when both its residual and its DMRS-to-data power ratio are significant at
+1\%, the signature of pilot-only jamming (both cells see the same channel). The \emph{per-cell
+MLP} sees the six inputs through $1 \times 1$ convolutions only (4\,801 parameters): no
+neighbouring cells.
 
 % ---------------------------------------------------------------------------------------------
 \section{Using the Map in the Receiver}
@@ -277,16 +304,21 @@ lines are the formula, markers the link simulation.}
 \subsection{Detection}
 Table~\ref{tab:detection} and Fig.~\ref{fig:pd} summarize detection. The fused U-Net reaches an
 overall F1 of $0.951 \pm 0.002$. The residual is what makes weak pilot jamming detectable: at
-$-15$\,dB JSR it raises $P_d$ from 0.43 (power and EVM) to 0.62, and the pilot-attack F1 from
-0.757 to 0.834; for data and partial-band jamming the two networks are equal, as they should be,
-since these attacks leave the DMRS alone. Every threshold detector sees only part of the
-problem. The EVM threshold~\cite{ornek2024advanced} cannot score the DMRS symbol at all and,
-under pilot jamming, flags the unjammed data symbols of the attacked PRBs instead (F1 0 on
-pilot attacks). The residual tests are blind to data jamming. The per-cell power
-test~\cite{li2012robust}, even relative to the slot's median scheduled power, cannot separate
-jamming from the UE's own frequency-selective fading (F1 0.12). The power-only U-Net, given the
-same power map, reaches 0.913: it compares each cell with the other symbols of the same PRB,
-which share its channel at low mobility.
+$-15$\,dB JSR it raises $P_d$ from 0.43 (power and EVM) to 0.62 and the pilot-attack F1 from
+0.757 to 0.834; for data and partial-band jamming, which leave the DMRS alone, the two networks
+are equal. The threshold detectors each see part of the problem: the EVM
+threshold~\cite{ornek2024advanced} flags the unjammed data symbols under pilot jamming (F1 0 on
+pilot attacks), the residual is blind to data jamming, and one cell's power, even relative to
+the slot's median~\cite{li2012robust}, cannot separate jamming from the UE's own fading (F1
+0.12). The power-only U-Net, comparing each cell with the other symbols of its PRB, which share
+its channel, reaches 0.913.
+
+The fair classical reference is the block test, which covers every cell and uses the attack
+structure: it reaches 0.872. The network's lead over it lies mostly in pilot jamming (0.834
+against 0.517): from one PRB the block test cannot tell whether a raised EVM comes from jammed data
+or from a corrupted channel estimate unless the pilot-to-data power contrast is significant, which
+fails at weak pilot jamming. Spatial context is what the network exploits: with the same inputs
+and no neighbouring cells, the per-cell MLP falls to 0.694, below the block test.
 
 \begin{table}[t]
 \caption{Cell-level F1 at 1\% per-cell false alarm and $P_d$ at JSR $-15$\,dB (scheduled cells;
@@ -308,6 +340,9 @@ EVM threshold~\cite{ornek2024advanced} & 0 & 0.324 & 0.319 & 0.303 & 0 & 0 \\
 Residual threshold & 0.584 & 0 & 0.057 & 0.058 & 0.10 & 0 \\
 Residual, exact $p$-value & 0.588 & 0 & 0.058 & 0.059 & 0.10 & 0 \\
 Power threshold~\cite{li2012robust} & 0.209 & 0.128 & 0.106 & 0.120 & 0.01 & 0.02 \\
+\midrule
+Block test (no training) & 0.517 & 0.911 & 0.880 & 0.872 & 0.34 & 0.33 \\
+Per-cell MLP, P+R+E & 0.383 & 0.711 & 0.729 & 0.694 & 0.08 & 0.01 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -320,6 +355,26 @@ allocation, TDL-A and TDL-C (bands: $\pm 1$ std over training seeds).}
 \label{fig:pd}
 \end{figure*}
 
+\subsection{Detection before damage}
+Can an attacker hurt the link and stay unseen? We put the jammer on exactly the scheduled PRBs,
+as in the BLER experiments, at 15\,dB SNR and JSRs down to $-30$\,dB (13\,200 slots), and flag
+a slot when its largest cell logit exceeds the level that 1\% of benign slots exceed (measured
+on held-out benign slots: 0.7--1.4\% for the detectors compared). Fig.~\ref{fig:margin} compares this slot-level $P_d$
+with the BLER of the unprotected link, which is all that a detector built on CRC failures or link
+indicators~\cite{kilinc2022jade} can see. The fused detector flags 90\% of the jammed slots
+13.9, 7.7 and 8.6\,dB (TDL-C; TDL-A: 15.8, 10.3 and 11.4\,dB) below the JSR at which pilot,
+data and partial-band jamming push the BLER to 10\%: no range of jamming powers lets an attack
+hurt the link unseen. The residual matters most for pilot jamming, the attacker's most efficient
+option: without it the margin shrinks to 11.1\,dB (10.1\,dB on TDL-A).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{margin/margin_compact.pdf}
+\caption{Slot-level $P_d$ of the fused detector at 1\% slot false alarm (solid) and BLER of
+the unprotected link (dashed), jammer on the scheduled PRBs, TDL-C, 15\,dB SNR.}
+\label{fig:margin}
+\end{figure}
+
 \subsection{Robustness}
 \emph{Scheduling-aware jammer.} When the jammer hits exactly the scheduled PRBs, an attacker no
 network saw in training, there is no unjammed neighbouring PRB to compare with. For pilot
@@ -330,16 +385,26 @@ for P+R+E, 0.937 for P+E): part of what they learned is contrast between jammed 
 PRBs.
 
 \emph{Unseen channels and waveforms.} Table~\ref{tab:unseen} keeps the thresholds from the
-matched validation set and changes one condition at a time. A constant-envelope QPSK jammer
-changes nothing for the fused detector. Delays beyond $\tau_{\max}$ violate the assumption of
-Proposition~\ref{prop:null} and raise its false alarms; at 30\,m/s the single DMRS symbol keeps
-the residual intact (1.2\% false alarms), but the channel changes within the slot and the EVM of
-the late symbols grows without jamming. The power-only network is robust to both. Training on more diverse channels removes most of the loss
-(last rows of Table~\ref{tab:unseen}): with batches cycling through the nominal channels, long
-delay spreads and speeds up to 30\,m/s, the fused detector reaches 0.921 at 1000\,ns and 0.946 at
-30\,m/s with false-alarm rates of 1.7\% and 1.0\%, and 0.955 in matched conditions. These channel
-types were part of the mix (with independent realizations), so this shows that diversity is
-sufficient, not that arbitrary channels are handled.
+matched validation set and changes one condition at a time. A QPSK jammer changes nothing.
+Delays beyond $\tau_{\max}$ violate Proposition~\ref{prop:null} and raise the false alarms; at
+30\,m/s the residual stays intact (1.2\% false alarms), but the channel changes within the slot
+and the EVM of the late symbols grows. Power alone is robust to both. Training on batches that
+cycle through the nominal channels, long delay spreads and speeds up to 30\,m/s removes most of
+the loss (last rows); these channel types were part of the mix, with independent realizations,
+so this shows that diversity suffices, not that arbitrary channels are handled.
+
+\emph{SNR and noise power.} With thresholds set on benign validation cells, one threshold leaves
+the fused detector's per-cell false-alarm rate at 3.9\% at 6\,dB SNR and 0.1\% at 24\,dB; one
+threshold per 4\,dB SNR bin, which the gNB can apply since it knows its SNR, holds it at
+0.6--1.4\% for 0.006 F1. The residual and the block test stay near 1\% with one threshold.
+Every feature is divided by the estimated noise power, which is the learned detectors' weak
+point: an estimate 0.5\,dB too low raises the fused detector's false alarms to 15\% (1\,dB:
+37\%), the residual's only to 2.3\% (4.7\%), exactly as Proposition~\ref{prop:null} predicts.
+Training with the noise estimate off by an error drawn from $\pm 1$\,dB per slot removes this
+sensitivity: within $\pm 1$\,dB the false-alarm rate stays at 0.7--2.0\% and F1 at 0.94--0.95,
+at a cost of 0.003 F1 in matched conditions ($0.948 \pm 0.001$). Overestimating the noise power
+by 0.5\,dB costs no detector anything; by 2\,dB it lowers the fused detector's F1 to 0.90. The block test breaks harder than the networks on unseen channels
+(F1 0.60 at 1000\,ns, 0.65 at 30\,m/s), since its nulls hold only under their assumptions.
 
 \begin{table}[t]
 \caption{F1 / false-alarm rate on unseen conditions (thresholds from the matched validation
@@ -366,12 +431,12 @@ TDL-C, 1000\,ns & 0.921 / 1.7\% & 0.911 / 2.1\% & \textbf{0.928} / 1.0\% \\
 
 \subsection{Size and latency}
 A 30\,kHz slot lasts 0.5\,ms. On one core of an Apple M1 Pro CPU, feature extraction takes
-0.26\,ms per slot and the 66k-parameter U-Net 0.49\,ms, more than a slot in total. The network
-is larger than it needs to be: with the first level narrowed from 12 to 4 channels (7\,657
-parameters) the overall F1 drops only from 0.951 to $0.943 \pm 0.002$, mostly through weak pilot
-jamming ($P_d$ 0.55 instead of 0.62 at $-15$\,dB), and the complete detector runs in 0.53\,ms in
-eager PyTorch and 0.43\,ms as a frozen graph with batch normalization folded into the
-convolutions. With 16\,933 parameters (F1 0.948) it still fits, at 0.48\,ms.
+0.26\,ms per slot and the 66k-parameter U-Net 0.49\,ms, more than a slot in total. With the first
+level narrowed from 12 to 4 channels (7\,657 parameters) the overall F1 drops only from 0.951 to
+$0.943 \pm 0.002$, mostly through weak pilot jamming ($P_d$ 0.55 instead of 0.62 at
+$-15$\,dB), and the complete detector runs in 0.43\,ms as a frozen graph with batch
+normalization folded into the convolutions (0.53\,ms in eager PyTorch); with 16\,933 parameters
+(F1 0.948), in 0.48\,ms.
 
 \subsection{Using the map in the receiver}
 Fig.~\ref{fig:recovery} shows the BLER of the receivers of Section~\ref{sec:receiver} on TDL-C at 15\,dB SNR,
@@ -387,13 +452,11 @@ JSR, and at 0 without a jammer, the same as with the true map.
 The difference between hard and soft use appears at weak jamming, where the unprotected link
 decodes. Used hard, the fused map raises the BLER to 0.12 at $-15$\,dB data or partial-band
 jamming, because false alarms drop clean pilots and erase clean data; even the true map costs
-about 0.002, since erasing a third of the allocation discards symbols that weak jamming barely
-damaged. Used softly, neither costs anything. With soft use, the map without the residual is as
-good as the fused one: weak jamming that it misses also barely hurts decoding, and the receiver
-weights the pilots by their residual anyway. When every pilot of the allocation is jammed, no
-clean pilot is left to interpolate from; weighting all of them by their residual still lets the
-LMMSE filter average across the band, which lowers the BLER at $+3$\,dB from 0.41 to 0.04.
-Results on TDL-A are similar.
+about 0.002. Used softly, neither costs anything, and the map without the residual is as good as
+the fused one: the jamming it misses barely hurts decoding, and the receiver weights the pilots
+by their residual anyway. When every pilot is jammed, weighting all of them by their residual
+still lets the LMMSE filter average across the band, which lowers the BLER at $+3$\,dB from 0.41
+to 0.04. Results on TDL-A are similar.
 
 \begin{figure*}[t]
 \centering
@@ -414,12 +477,17 @@ the allocation, which gives an analytic threshold and closed-form detection and 
 probabilities, confirmed by the link simulation. Fused with power and EVM in a U-Net of a few
 thousand parameters, it localizes pilot, data and partial-band jamming at 1\% per-cell false
 alarm, including weak pilot jamming that EVM-based maps place on the wrong symbols, within one
-slot of CPU time. Used to decide where the receiver estimates the jamming power, rather than what
-it erases, the map protects the link against strong jamming at no measurable cost under weak jamming
+slot of CPU time. A training-free block test built on the same statistics comes within 0.08 F1;
+the network's lead comes from context across neighbouring cells and lies mostly in pilot
+jamming, whose effect appears away from the attacked cells. At 15\,dB SNR, every attack is
+detected well before it damages the link. Used to decide where the receiver estimates the
+jamming power, rather than what it erases, the map protects the link against strong jamming at no measurable cost under weak jamming
 or false alarms.
 
-The study is limited to one receive antenna, a Gaussian jammer aligned with the slot grid,
-perfect synchronization and known noise power. The residual generalizes naturally to multiple
+The study is limited to one receive antenna, a Gaussian jammer aligned with the slot grid and
+perfect synchronization. All features rely on the gNB's estimate of its noise power; training
+with a deliberately misestimated noise power makes the fused detector tolerate errors of
+$\pm 1$\,dB. The residual generalizes naturally to multiple
 antennas (a space--frequency subspace) and to additional DMRS symbols, which would also address
 fast users; delay spreads beyond $\tau_{\max}$ require a wider subspace or training on such
 channels, as our mixed-training results show.
