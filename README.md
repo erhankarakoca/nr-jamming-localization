@@ -106,6 +106,7 @@ gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper
 | `model.py`, `train.py` | U-Net detector, per-cell MLP (ablation), training (optionally with noise-estimate jitter) |
 | `dataset.py` | Train / validation / test / scheduling-aware splits with fixed seeds |
 | `evaluate.py`, `metrics.py` | Pd at 1% per-cell false alarm vs JSR, cell-level F1 |
+| `paper.py` | Copies the paper's figures into the local clone of its Overleaf project |
 | `experiments/` | One script per experiment and figure (see below) |
 
 ### Reproducing the results
@@ -181,6 +182,36 @@ uv run python -m jamloc.experiments.ber_bler --channel C
 uv run python -m jamloc.experiments.feature_maps                # example feature maps
 uv run python -m jamloc.experiments.latency                     # CPU latency per slot, 1 thread
 ```
+
+## The paper (Overleaf)
+
+The paper lives in its own Overleaf project. Overleaf's Git integration turns the project into a
+Git repository, so every computer and the browser editor work on the same latest version. This
+repository makes the figures; `python -m jamloc.paper` copies the ones the paper includes into a
+local clone of the project.
+
+**Once per computer.** In Overleaf, *Account Settings -> Git integration*, create a token (one per
+computer, so a lost one can be revoked alone). Then clone the project next to this repository;
+the username is `git` and the password the token, which the system's credential manager keeps
+(macOS Keychain, Git Credential Manager on Windows). Never put the token in the URL or a file.
+
+```bash
+cd ..        # the folder that contains nr-jamming-localization
+git clone https://git.overleaf.com/<project-id> nr-jamming-paper
+```
+
+**Every time.** Pull before editing, push after:
+
+```bash
+git -C ../nr-jamming-paper pull                               # latest text from Overleaf
+uv run python -m jamloc.paper --dest ../nr-jamming-paper      # copy the current figures
+git -C ../nr-jamming-paper add -A
+git -C ../nr-jamming-paper commit -m "Update figures"
+git -C ../nr-jamming-paper push
+```
+
+Set `JAMLOC_PAPER_DIR` to skip `--dest`. `paper/main.tex` in this repository is the draft from
+before the move; the Overleaf copy is the paper.
 
 ## Layout
 
