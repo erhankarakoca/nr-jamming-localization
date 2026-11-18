@@ -206,12 +206,26 @@ days of work, about 3-4 GPU hours on Colab.
 Multiple receive antennas, over-the-air validation, asynchronous jammers in a time-domain link,
 and independent training data per seed.
 
-## Status
+## Status (19 November 2026)
 
-- [ ] A
-- [ ] B / B'
-- [ ] C
-- [ ] D
-- [ ] E
-- [ ] F
-- [ ] G
+- [x] A. Branch `review-v6`, this plan, draft PR #9.
+- [x] B / B'. Code with tests: noise options and per-slot estimator (`noise.py`), empty-comb
+  feature and baselines, 16-slot grids with batch index and estimated SNR, new splits, recovery
+  modes (`lmmse`, `slot`, block-test map, mixed-attack map, true map per PRB), margin at several
+  SNRs and slot false-alarm targets, full-chain calibration; Codex: neighbor-cell UE, intervals
+  and PRB-level F1.
+- [x] C. Full rebuild on a Colab T4 (`experiments.paper_run`, 2 h 10 min, about 3 compute units).
+- [x] D. Evaluations, intervals, `docs/results.md` section 17.
+- [x] E. Recovery (3 seeds, nominal / pulsed / hopping, TDL-A and TDL-C, 8 dB SNR) on the M1 Pro;
+  latency re-measured on an idle CPU.
+- [x] F. Paper rewritten and pushed to Overleaf; independent audit (693 numbers checked) and fixes.
+- [ ] G. Focused re-check of the finished sections; final PR table; 6-page cut as a separate step.
+
+Results that changed the plan along the way:
+
+- The empty-comb U-Net helps on nominal attacks but a pilot-comb jammer defeats it, so it stays an
+  ablation (decision rule of this plan: adopt only if it clearly helps).
+- Training with spoofing in the mix localizes whole-allocation spoofing, so the pilot-versus-data
+  feature of W6 step 2 was not needed; partial spoofing stays unsolved and is reported.
+- The block test's map fails under strong partial-band jamming because of its pilot-only rule; a
+  stricter rule is a trade-off (overall F1 0.868 -> 0.864), so the rule stays and the paper says so.
