@@ -132,6 +132,14 @@ GENERALIZATION = {
         "cfg": {"jammer_waveform": "tone", "jammer_tones": 1},
         "title": "multi-tone jammer: one tone per jammed PRB (unseen)",
     },
+    # Pilot spoofing on a block of PRBs anywhere on the carrier, so usually on part of the
+    # allocation only: the replayed pilots then end inside the allocation, which the residual sees
+    "spoofpart": {
+        "seed": 29_000_000,
+        "cfg": {"jammer_waveform": "dmrs"},
+        "attacks": (1,),
+        "title": "pilot spoofing on part of the band (unseen)",
+    },
     # Legitimate interference: a synchronized UE of a neighboring cell (experiments/neighbor)
     "neighbor": {
         "seed": 19_000_000,

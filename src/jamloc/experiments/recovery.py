@@ -23,6 +23,9 @@ allocation. Every simulated batch is decoded by every receiver, on exactly the s
                     hopping and pilot-comb jammers), soft; only when that model is trained
 * ``true_hard`` / ``true_soft`` - the true jamming map (where the jammer is; its strength is still
                     estimated in the soft mode)
+* ``true_prb_soft`` - the true map coarsened to the block test's resolution (one decision for the
+                    DMRS cell and one for all data cells of each PRB), soft: separates the value of
+                    resolution from the quality of a detector
 
 With the receiver held fixed (soft mode), ``slot_ie`` -> ``dmrs_ie`` -> ``block_soft`` ->
 ``p_r_e_soft`` -> ``true_soft`` changes only where the jamming is assumed to be: nowhere in
@@ -79,6 +82,7 @@ RECEIVERS = {
     "p_r_e_atk_soft": ("fused_atk", "soft"),
     "true_hard": ("true", "hard"),
     "true_soft": ("true", "soft"),
+    "true_prb_soft": ("true_prb", "soft"),
 }
 DETECTORS = ("power_threshold", "block_test", "no_residual", "fused", "fused_atk")
 # Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
@@ -126,6 +130,12 @@ STYLE = {
     "p_r_e_soft": {"label": "Map P+R+E, soft", "color": "#0072B2", "marker": "o", "linestyle": "-"},
     "true_hard": {"label": "True map, hard", "color": "#D55E00", "marker": "<", "linestyle": ":"},
     "true_soft": {"label": "True map, soft", "color": "#009E73", "marker": "^", "linestyle": "-."},
+    "true_prb_soft": {
+        "label": "True map per PRB, soft",
+        "color": "#117733",
+        "marker": "v",
+        "linestyle": "--",
+    },
     "p_r_e_atk_soft": {
         "label": "Map P+R+E (mixed attacks), soft",
         "color": "#332288",
@@ -194,6 +204,16 @@ def detector_cells(batch, cfg, detector: str, model, thr: float) -> torch.Tensor
         return torch.from_numpy(block_test_scores(d, model) > thr).to(features.device)
 
 
+def coarsen_to_prb(cells: torch.Tensor, dmrs_symbol: int) -> torch.Tensor:
+    """A map ``[B, n, 14]`` at the block test's resolution: the DMRS cell of each PRB as it is,
+    and all data cells of the PRB flagged if any of them is."""
+    data = torch.ones(cells.shape[-1], dtype=torch.bool, device=cells.device)
+    data[dmrs_symbol] = False
+    out = cells.clone()
+    out[:, :, data] = cells[:, :, data].any(dim=-1, keepdim=True).expand(-1, -1, int(data.sum()))
+    return out
+
+
 def _scenario(rng, n, channel, attack, jsr_db, snr_db, whole_allocation=False) -> Scenario:
     if whole_allocation:
         start, size = np.full(n, ALLOC[0]), np.full(n, ALLOC[1])
@@ -230,6 +250,7 @@ def simulate_point(link, detectors, scenario_fn, receivers, max_mc_iter, target_
         out = link(scenario_fn(), decode="standard" in active)
         map_aware = map_aware or MapAwareReceiver(out.tx, cfg)
         maps = {"true": out.labels[:, alloc]}
+        maps["true_prb"] = coarsen_to_prb(maps["true"], cfg.dmrs_symbol)
         needed = {RECEIVERS[rx][0] for rx in active}
         for det, (model, thr) in detectors.items():
             if det in needed:
@@ -291,11 +312,14 @@ def simulate(
         cases = [("none", False, tuple(RECEIVERS))]
         cases += [(attack, False, tuple(RECEIVERS)) for attack in ("pilot", "data", "partial")]
         # limit case: no clean pilot left
-        cases.append(("pilot", True, ("standard", "true_hard", "true_soft")))
+        cases.append(
+            ("pilot", True, ("standard", "true_hard", "true_soft"))
+        )  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]
     # leave out receivers whose detector is not available (e.g. a model that was not trained)
-    usable = {rx for rx, (src, _) in RECEIVERS.items() if src in (None, "true") or src in detectors}
+    always = (None, "true", "true_prb")
+    usable = {rx for rx, (src, _) in RECEIVERS.items() if src in always or src in detectors}
     cases = [(a, w, tuple(rx for rx in rxs if rx in usable)) for a, w, rxs in cases]
     if only:  # re-run some receivers only
         cases = [(a, w, tuple(rx for rx in rxs if rx in only)) for a, w, rxs in cases]
@@ -345,6 +369,7 @@ SOURCE_RECEIVERS = (
     "block_soft",
     "p_r_e_soft",
     "p_r_e_atk_soft",
+    "true_prb_soft",
     "true_soft",
 )
 

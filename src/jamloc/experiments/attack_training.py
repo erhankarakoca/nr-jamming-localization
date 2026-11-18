@@ -34,6 +34,7 @@ CONDITIONS = {
     "combjam": "pilot comb",
     "hopjam": "hopping",
     "spoofjam": "spoofing",
+    "spoofpart": "partial spoofing",
     "pulsejam": "pulsed",
     "tonejam": "tone",
 }

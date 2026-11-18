@@ -44,6 +44,7 @@ SHORT = {
     "combjam": "comb",
     "hopjam": "hopping",
     "spoofjam": "spoofing",
+    "spoofpart": "part. spoof",
     "pulsejam": "pulsed",
     "tonejam": "tone",
     "unnorm": "no norm.",

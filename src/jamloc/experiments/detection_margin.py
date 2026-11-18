@@ -328,7 +328,7 @@ def plot_vs_snr(detector: str = "fused"):
     styles = {"C": ("#0072B2", "o"), "A": ("#E69F00", "s")}
     for channel, (color, marker) in styles.items():
         for alpha, ls in ((FA, "-"), (0.001, "--")):
-            ys = []
+            ys, censored = [], []
             for snr in snrs:
                 tag = "" if snr == 15.0 else f"_snr{snr:g}"
                 path = results_dir() / "margin" / f"margin{tag}_summary.csv"
@@ -340,11 +340,17 @@ def plot_vs_snr(detector: str = "fused"):
                         and r["channel"] == channel
                         and float(r["slot_fa_target"]) == alpha
                     ]
-                # an attack never reaching 90% Pd within the grid counts as the worst case
+                # An attack that never reaches 90% Pd within the JSR grid has a margin below
+                # the grid; the smallest margin is then at most the smallest finite one (open
+                # marker)
                 finite = [m for m in margins if np.isfinite(m)]
-                ys.append(min(finite) if len(finite) == len(margins) else min(finite + [np.nan]))
+                ys.append(min(finite) if finite else np.nan)
+                censored.append(len(finite) < len(margins))
             label = f"TDL-{channel}, {alpha:.1%} slot false alarm"
-            ax.plot(snrs, ys, color=color, marker=marker, ls=ls, label=label)
+            ax.plot(snrs, ys, color=color, ls=ls, label=label)
+            for x, y, c in zip(snrs, ys, censored, strict=True):
+                face = "white" if c else color
+                ax.plot(x, y, marker=marker, color=color, markerfacecolor=face, ls="none")
     ax.axhline(0, color="k", lw=0.8)
     ax.set(xlabel="SNR [dB]", ylabel="smallest detection margin [dB]")
     spare = ax.secondary_xaxis(

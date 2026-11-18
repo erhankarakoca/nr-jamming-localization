@@ -775,6 +775,19 @@ seeds:
 | -9 dB | nominal | 0.94 | 0.06-0.11 | 0.65-0.74 | 0.01-0.02 | 46-52% |
 | -9 dB | with spoofing | 0.96-0.97 | 0.96-0.98 | 0.01-0.02 | 0.84-0.90 | 1-2% |
 
+At the analytic 1% residual threshold, 1.03% of the 53 688 spoofed DMRS cells and 0.94% of the
+29 680 benign scheduled DMRS cells of `spoofjam` exceed it (`baselines.residual_cfar_scores`,
+score > 2).
+
+**Partial spoofing** (`spoofpart`: the same replay on a random block of 2-12 PRBs, so usually on
+part of the allocation; 70% of the attacked cells lie inside it). The replay ends inside the
+allocation and the residual sees the step: 22.1% of the 18 035 spoofed scheduled DMRS cells exceed
+the analytic threshold, but so do 15.8% of the 35 381 clean scheduled DMRS cells in those slots
+(0.98% in benign slots). F1 / false alarms: P+R+E 0.133 / 10.9%, P+E 0.318 / 4.3%, P 0.449 /
+1.7%, E 0.511 / 0.9%, P+R+E+C 0.064 / 11.9%, block test 0.111 / 7.3%; trained on mixed attacks
+0.111 / 10.0%, with whole-allocation spoofing in the mix 0.292 / 4.7%. Retraining fixes only the
+form of spoofing it saw.
+
 Unprotected BLER, TDL-C, 15 dB, 512 slots: spoofing 0.158 at -3 dB and 0.693 at +3 dB; Gaussian
 jamming of the DMRS symbol 0.014 and 0.391. The residual is blind to the spoofer, but power and
 EVM carry enough evidence to place it once the network has seen it: the identifiability problem is
@@ -844,10 +857,64 @@ to 99% above -3 dB. The map localizes interference; telling legitimate interfere
 attack needs information the features do not contain (e.g. the neighbor's DMRS sequence, known to
 the network, or coordination between gNBs).
 
-### 17.8 Size
+### 17.8 Size and latency
 
 F1 / pilot Pd at -15 dB: width 4 (7 657 parameters) 0.944 / 0.52, width 6 (16 933) 0.949 / 0.54,
 width 8 (29 841) 0.950 / 0.56, width 12 (66 553) 0.952 / 0.57.
+
+CPU latency (Apple M1 Pro, one thread, 24-PRB allocation, median per stage, after equalization,
+without decoding; `size_sweep --latency`, idle machine, 19 Nov): feature extraction 0.31 ms (all
+seven maps); U-Net eager / frozen 0.27 / 0.17 ms (width 4), 0.32 / 0.22 ms (6), 0.38 / 0.26 ms
+(8), 0.48 / 0.37 ms (12). Totals with the frozen network: 0.48, 0.53, 0.58, 0.68 ms. Only the
+smallest network fits in a 0.5 ms slot. Feature extraction was 0.26 ms before the empty-comb map
+was added.
+
+### 17.9 What the receiver needs from the map (review item 1)
+
+`experiments.recovery`, TDL-C 15 dB unless stated, UE on PRBs 6-17, jammer on 4 of them, three
+detector seeds each on its own 1 600 slots (4 800 per point; a receiver stops after 100 block
+errors per run), run on the M1 Pro (5 processes x 2 threads, about 3.5 h in all). New receivers:
+`lmmse` (the LMMSE interpolator, no map), `slot_ie` (one interference estimate per slot),
+`block_soft` (block-test map), `true_prb_soft` (true map coarsened to one decision for the DMRS
+cell and one for the data cells of each PRB: resolution without detection error),
+`p_r_e_atk_soft` (map of the U-Net trained on `train_atk`). BLER in percent at +9 dB JSR (0: no
+error in 4 800 slots):
+
+| Receiver | pilot | data | partial | pulsed data | pulsed partial | hopping data | hopping partial |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| No protection | 33 | 81 | 88 | 19 | 42 | 29 | 58 |
+| LMMSE, no map | 18 | 81 | 86 | 18 | 36 | 28 | 50 |
+| Slot-wide estimate | 12 | 84 | 90 | 61 | 72 | 75 | 83 |
+| DMRS only | 0.60 | 81 | 1.3 | 18 | 9.9 | 28 | 57 |
+| Power test, hard | 5.1 | 19 | 29 | 1.2 | 4.4 | 1.1 | 12 |
+| Block test, soft | 0.06 | 0.04 | 7.7 | 0 | 3.0 | 54 | 64 |
+| U-Net, hard | 0.17 | 0.08 | 0.19 | 0.42 | 0.65 | 36 | 54 |
+| U-Net, soft | 0.06 | 0.04 | 0.02 | 0 | 0.50 | 21 | 31 |
+| U-Net (mixed attacks), soft | 0.08 | 0.04 | 0.06 | 0 | 0.06 | 0 | 0.25 |
+| True map per PRB, soft | 0.04 | 0.04 | 0.02 | 0 | 0.08 | 52 | 58 |
+| True map, soft | 0.04 | 0.04 | 0.02 | 0 | 0 | 0 | 0.21 |
+
+**Reading.**
+- Without a map, the better interpolator and a slot-wide interference estimate help little; the
+  slot-wide estimate hurts against pulsed and hopping jammers. DMRS-only protects against pilot
+  and partial-band jamming, not data jamming.
+- Resolution: the per-PRB true map is as good as the exact one for jammers that fill PRB rows or
+  pulse within them; against the hopping jammer it fails (52%), because the jamming power estimated
+  over all data symbols of a touched PRB is far too low on the jammed ones.
+- Detection: the U-Net trained on block jammers fails against hopping (21%); trained on mixed
+  attacks it matches the true map (0 / 0.25%). The block test's map falls behind the per-PRB true
+  map under strong partial-band jamming (7.7% vs 0.02%) because its pilot-only rule fires on about
+  a quarter of the jammed data cells (76% flagged at +9 dB, 86% at +3 dB; the rule is a trade-off:
+  testing the power ratio also against the partial-band null raises partial F1 by 0.024 but lowers
+  pilot F1 by 0.067 and overall F1 from 0.868 to 0.864).
+- Hard use at weak jamming: U-Net map without jammer 0.23%; at -15 dB 3.9% (pilot), 9.7% (data),
+  12% (partial). Soft use: no measurable cost at any JSR (0 errors at -15 dB and without jammer).
+- Soft U-Net map, nominal attacks, every JSR: at most 0.08% (4/4 800, partial +3 dB; the true map
+  gives the same).
+- All pilots jammed (whole allocation): true map soft 4.1% at +3 dB, unprotected 38%.
+- 8 dB SNR (about 4 dB spare): unprotected 0.6% without jammer, LMMSE-based receivers 0.2%; data
+  jamming +3 dB: U-Net soft 3.6%, true map 3.6%, unprotected 50%; partial +3 dB: 6.0%, 5.8%, 61%.
+- TDL-A is similar (soft U-Net map at most 0.13%; block map 4.8% under partial +9 dB).
 
 ## Caveats before these go into the paper
 
