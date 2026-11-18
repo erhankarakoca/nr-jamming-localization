@@ -12,8 +12,9 @@ Overleaf is the home of the text (``main.tex``, ``references.bib``); the figures
 here. This command copies every figure that ``main.tex`` includes from ``results_dir()`` into the
 clone's ``figures/`` folder::
 
-    python -m jamloc.paper --dest ../nr-jamming-paper          # or set JAMLOC_PAPER_DIR
-    python -m jamloc.paper --dest ../nr-jamming-paper --init   # first time: main.tex and .bib too
+    python -m jamloc.paper                                     # clone in ../nr-jamming-paper
+    python -m jamloc.paper --dest PATH                         # or set JAMLOC_PAPER_DIR
+    python -m jamloc.paper --init                              # first time: main.tex and .bib too
 
 It never commits or pushes. Pull in the clone before running it, check ``git status`` and
 ``git diff`` there, then commit and push.
@@ -28,6 +29,7 @@ from pathlib import Path
 from jamloc.paths import results_dir
 
 REPO = Path(__file__).resolve().parents[2]
+DEFAULT_CLONE = REPO.parent / "nr-jamming-paper"  # the clone, next to this repository
 INCLUDE = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\{([^}]*)\}")
 # The draft in this repository reads figures from results/ and the bibliography from docs/;
 # the Overleaf project keeps both next to main.tex
@@ -90,8 +92,9 @@ def main(argv=None):
     p.add_argument(
         "--dest",
         type=Path,
-        default=os.environ.get("JAMLOC_PAPER_DIR"),
-        help="local clone of the Overleaf project (default: $JAMLOC_PAPER_DIR)",
+        default=os.environ.get("JAMLOC_PAPER_DIR", DEFAULT_CLONE),
+        help="local clone of the Overleaf project (default: $JAMLOC_PAPER_DIR, else "
+        "../nr-jamming-paper next to this repository)",
     )
     p.add_argument("--init", action="store_true", help="also write main.tex and references.bib")
     p.add_argument("--force", action="store_true", help="with --init: overwrite the paper")

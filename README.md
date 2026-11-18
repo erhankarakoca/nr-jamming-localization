@@ -204,14 +204,15 @@ git clone https://git.overleaf.com/<project-id> nr-jamming-paper
 
 ```bash
 git -C ../nr-jamming-paper pull                               # latest text from Overleaf
-uv run python -m jamloc.paper --dest ../nr-jamming-paper      # copy the current figures
+uv run python -m jamloc.paper                                 # copy the current figures
 git -C ../nr-jamming-paper add -A
 git -C ../nr-jamming-paper commit -m "Update figures"
 git -C ../nr-jamming-paper push
 ```
 
-Set `JAMLOC_PAPER_DIR` to skip `--dest`. `paper/main.tex` in this repository is the draft from
-before the move; the Overleaf copy is the paper.
+`jamloc.paper` looks for the clone in `../nr-jamming-paper`; give `--dest` or set
+`JAMLOC_PAPER_DIR` if it is elsewhere. `paper/main.tex` in this repository is a frozen copy of the
+draft from before the move; the Overleaf copy is the paper.
 
 ## Layout
 
