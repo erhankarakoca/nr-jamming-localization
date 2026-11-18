@@ -1,11 +1,37 @@
 import json
+import xml.etree.ElementTree as ET
 
 import pytest
 from matplotlib.figure import Figure
 
 from jamloc.experiments import figures
+from jamloc.paths import REPO_ROOT
 
-MODEL_FREE = ["attack_patterns", "system_diagram", "residual_explained", "constellations"]
+MODEL_FREE = ["attack_patterns", "residual_explained", "constellations"]
+
+
+def test_drawio_sources_are_xml():
+    sources = sorted((REPO_ROOT / "diagrams").glob("*.drawio"))
+    assert sources
+    for source in sources:
+        root = ET.parse(source).getroot()
+        assert root.tag == "mxfile", source
+        for cell in root.findall(".//mxCell[@vertex='1']"):
+            assert cell.find("mxGeometry[@as='geometry']") is not None, cell.get("id")
+
+
+def test_drawio_export(tmp_path, monkeypatch):
+    from jamloc import diagrams
+
+    if diagrams.find_drawio() is None:
+        pytest.skip("draw.io desktop is not installed")
+
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
+    diagrams.main()
+    for source in (REPO_ROOT / "diagrams").glob("*.drawio"):
+        stem = tmp_path / "figures" / source.stem
+        assert stem.with_suffix(".pdf").read_bytes().startswith(b"%PDF-")
+        assert stem.with_suffix(".png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 @pytest.mark.parametrize("name", MODEL_FREE)
@@ -117,5 +143,11 @@ def test_gallery_only_keeps_existing_figures(tmp_path, monkeypatch):
     assert 'src="attack_patterns.png"' in page
     assert "Caption &lt;with&gt; special &amp; characters." in page
     assert not (out / "system_diagram.png").exists()  # nothing was regenerated
-    assert "python -m jamloc.experiments.figures --only system_diagram" in page
+    assert "python -m jamloc.diagrams" in page
     assert "python -m jamloc.experiments.ber_bler" in page  # missing result figure explained
+
+    (out / "system_diagram.png").write_bytes(b"externally rendered preview")
+    figures.main(["--gallery-only"])
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert 'src="system_diagram.png"' in page
+    assert "second pass through the same slot" in page

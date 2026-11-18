@@ -1,0 +1,115 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile>
+  <diagram id="receiver" name="Receiver and detector">
+    <mxGraphModel page="1" pageScale="1" pageWidth="350" pageHeight="208" grid="0" guides="1" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <!-- Draw.io prints 100 diagram units per inch. The white rectangle sets the cropped PDF to 350 by 208 units (252 by about 150 pt), including the one unit the exporter adds. -->
+        <mxCell id="page-margin" value="" style="fillColor=#FFFFFF;strokeColor=none;" vertex="1" parent="1" connectable="0">
+          <mxGeometry x="0" y="0" width="349" height="207" as="geometry" />
+        </mxCell>
+        <!-- First pass through the standard receiver. -->
+        <mxCell id="grid" value="Received&lt;br&gt;grid" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#FFFFFF;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="11" y="33" width="45" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="estimator" value="DMRS&lt;br&gt;channel&lt;br&gt;estimation" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#FFFFFF;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="67" y="33" width="61" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="equalizer" value="LMMSE&lt;br&gt;equalizer" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#FFFFFF;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="140" y="33" width="54" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="demapper" value="Demapper" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#FFFFFF;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="207" y="33" width="55" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="decoder" value="LDPC&lt;br&gt;decoder" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#FFFFFF;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="275" y="33" width="54" height="38" as="geometry" />
+        </mxCell>
+        <!-- Features use quantities that are already computed by the receiver. -->
+        <mxCell id="power" value="Power &lt;i&gt;P&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#DCEAF4;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="11" y="115" width="45" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="residual" value="DMRS&lt;br&gt;residual &lt;i&gt;R&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#DCEAF4;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="67" y="115" width="61" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="evm" value="EVM &lt;i&gt;E&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#DCEAF4;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="140" y="115" width="54" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="detector" value="U-Net + threshold" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#DCEAF4;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="65" y="162" width="120" height="31" as="geometry" />
+        </mxCell>
+        <mxCell id="map" value="Jamming map&lt;br&gt;(24 × 14)" style="rounded=0;whiteSpace=wrap;strokeColor=#333333;strokeWidth=1.05;fillColor=#DCEAF4;spacing=1;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="203" y="162" width="87" height="31" as="geometry" />
+        </mxCell>
+        <mxCell id="grid-estimator" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="grid" target="estimator">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="estimator-equalizer" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="estimator" target="equalizer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="equalizer-demapper" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="equalizer" target="demapper">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="demapper-decoder" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="demapper" target="decoder">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="grid-power" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="grid" target="power">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="estimator-residual" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="estimator" target="residual">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="equalizer-evm" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="equalizer" target="evm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="power-detector" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;edgeStyle=segmentEdgeStyle;exitX=0.5;exitY=1;entryX=0.1;entryY=0;" edge="1" parent="1" source="power" target="detector">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="33.5" y="151" />
+              <mxPoint x="77" y="151" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="residual-detector" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=0.5;exitY=1;entryX=0.27;entryY=0;" edge="1" parent="1" source="residual" target="detector">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="evm-detector" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=0.5;exitY=1;entryX=0.85;entryY=0;" edge="1" parent="1" source="evm" target="detector">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="detector-map" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="detector" target="map">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <!-- The map feeds both variance adjustments on a second pass through the slot. -->
+        <mxCell id="pilot-variance" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;edgeStyle=segmentEdgeStyle;dashed=1;dashPattern=4 3;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="map" target="estimator">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="337" y="177.5" />
+              <mxPoint x="337" y="15" />
+              <mxPoint x="97.5" y="15" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="data-variance" style="rounded=0;strokeColor=#333333;strokeWidth=1.05;endArrow=block;endSize=4;endFill=1;dashed=1;dashPattern=4 3;entryX=0.5;entryY=0;" edge="1" parent="1" target="demapper">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="234.5" y="15" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ls-label" value="Raw LS pilot&lt;br&gt;estimates" style="shape=rectangle;strokeColor=none;fillColor=#FFFFFF;spacing=0;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="65" y="79" width="65" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="evm-label" value="Equalized symbols&lt;br&gt;+ noise variance" style="shape=rectangle;strokeColor=none;fillColor=#FFFFFF;spacing=0;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="133" y="79" width="86" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="pilot-label" value="Pilot variance" style="shape=rectangle;strokeColor=none;fillColor=#FFFFFF;spacing=0;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="101" y="17" width="68" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="data-label" value="Data variance" style="shape=rectangle;strokeColor=none;fillColor=#FFFFFF;spacing=0;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="238" y="17" width="71" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="pass-label" value="Second pass&lt;br&gt;(same slot)" style="shape=rectangle;strokeColor=none;fillColor=#FFFFFF;spacing=0;html=1;align=center;verticalAlign=middle;fontFamily=Helvetica;fontSize=10;fontColor=#222222;" vertex="1" parent="1">
+          <mxGeometry x="263" y="84" width="70" height="26" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -15,6 +15,7 @@ Checks:
   Rayleigh gain per PRB drawn once per K slots, projected with the same subspace as the receiver.
 
     python -m jamloc.experiments.multislot
+    python -m jamloc.experiments.multislot --plot-only  # reuse the two saved CSVs
 """
 
 import argparse
@@ -113,34 +114,55 @@ def run() -> tuple[list[dict], list[dict]]:
     return curves, checks
 
 
-def plot(curves, checks):
-    fig, ax = new_figure(3.5, 2.4)
-    colors = ("#000000", "#0072B2", "#E69F00", "#D55E00")
-    for k, color in zip(SLOTS, colors, strict=True):
-        rows = [r for r in curves if r["slots"] == k]
+def plot_on_axis(ax, curves, checks, *, show_mc_key=False):
+    """Draw the same K-slot comparison in the standalone figure and the theory panel."""
+    styles = (
+        ("#000000", "-", "o"),
+        ("#0072B2", "--", "s"),
+        ("#D55E00", "-.", "^"),
+        ("#009E73", ":", "D"),
+    )
+    for k, (color, line, marker) in zip(SLOTS, styles, strict=True):
+        rows = sorted((r for r in curves if r["slots"] == k), key=lambda r: r["jnr_db"])
         ax.plot(
             [r["jnr_db"] for r in rows],
             [r["pd_theory"] for r in rows],
             color=color,
+            ls=line,
+            lw=0.9,
             label=f"K = {k}",
         )
-        (c,) = [c for c in checks if c["slots"] == k]
+        (check,) = [r for r in checks if r["slots"] == k]
+        # The Monte Carlo grid is encoded in the column names of the saved run.
+        points = sorted(
+            (float(key.removeprefix("pd_mc_").removesuffix("dB")), value)
+            for key, value in check.items()
+            if key.startswith("pd_mc_") and key.endswith("dB")
+        )
+        jnr, pd = zip(*points, strict=True)
         ax.plot(
-            MC_JNR_DB,
-            [c[f"pd_mc_{j:+.0f}dB"] for j in MC_JNR_DB],
+            jnr,
+            pd,
             ls="none",
-            marker="o",
+            marker=marker,
             mfc="none",
+            ms=3,
+            mew=0.65,
             color=color,
         )
-    ax.plot([], [], ls="none", marker="o", mfc="none", color="gray", label="Monte Carlo")
     ax.set(
-        xlabel="JNR per jammed pilot [dB]",
-        ylabel="Pd at 1% false alarm",
+        xlabel="JNR per pilot [dB]",
+        ylabel=r"$P_d$ at 1% false alarm",
         ylim=(0, 1.02),
-        title="Residual averaged over K slots (theory: lines)",
     )
-    ax.legend(loc="lower right", frameon=False)
+    if show_mc_key:
+        ax.plot([], [], ls="none", marker="o", mfc="none", color="#555555", label="Monte Carlo")
+    ax.legend(loc="lower right", ncols=2, frameon=False, columnspacing=0.9)
+
+
+def plot(curves, checks):
+    fig, ax = new_figure(3.5, 2.4)
+    plot_on_axis(ax, curves, checks, show_mc_key=True)
     return fig
 
 
@@ -151,14 +173,27 @@ def _write(rows, path):
         writer.writerows(rows)
 
 
+def read_results(directory):
+    """Load the theory curves and Monte Carlo checks without running the simulation."""
+    rows = []
+    for name in ("multislot_curves.csv", "multislot.csv"):
+        with (directory / name).open(encoding="utf-8", newline="") as f:
+            rows.append([{k: float(v) for k, v in row.items()} for row in csv.DictReader(f)])
+    return tuple(rows)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.parse_args(argv)
+    p.add_argument("--plot-only", action="store_true", help="plot the saved CSVs")
+    args = p.parse_args(argv)
     out = results_dir() / "theory"
     out.mkdir(parents=True, exist_ok=True)
-    curves, checks = run()
-    _write(curves, out / "multislot_curves.csv")
-    _write(checks, out / "multislot.csv")
+    if args.plot_only:
+        curves, checks = read_results(out)
+    else:
+        curves, checks = run()
+        _write(curves, out / "multislot_curves.csv")
+        _write(checks, out / "multislot.csv")
     with paper_style():
         fig = plot(curves, checks)
     save(fig, out / "multislot")

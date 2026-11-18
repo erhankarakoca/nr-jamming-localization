@@ -9,8 +9,11 @@
     middle of the allocation, SNR 10 dB. Simulated detection rates of the jammed PRBs and the
     false-alarm rate of the unjammed PRB next to the block (leakage) against the formula
     (jammer channel: block Rayleigh fading).
+(c) **K-slot detection.** When available, the saved results from ``multislot`` compare theory
+    and pilot-level Monte Carlo for the average residual of a jammed PRB over K slots.
 
     python -m jamloc.experiments.residual_theory
+    python -m jamloc.experiments.residual_theory --plot-only
 """
 
 import argparse
@@ -19,10 +22,12 @@ import itertools
 
 import numpy as np
 import torch
+from matplotlib.ticker import PercentFormatter
 
 from jamloc import theory
 from jamloc.config import SimConfig
 from jamloc.dataset import CHANNELS, load
+from jamloc.experiments.multislot import plot_on_axis, read_results
 from jamloc.features import FEATURE_NAMES, residual_map
 from jamloc.jammer import ATTACKS
 from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
@@ -130,40 +135,57 @@ def theory_curves(jnr_grid) -> dict:
 
 
 CHANNEL_STYLE = {
-    ("test", "A"): {"color": "#0072B2", "marker": "o", "label": "TDL-A (100 ns)"},
-    ("test", "C"): {"color": "#D55E00", "marker": "s", "label": "TDL-C (300 ns)"},
-    ("longdelay", "C"): {"color": "#CC79A7", "marker": "D", "label": "TDL-C, 1000 ns (unseen)"},
+    ("test", "A"): ("#0072B2", "o", "-", "TDL-A (100 ns)"),
+    ("test", "C"): ("#D55E00", "s", "--", "TDL-C (300 ns)"),
+    ("longdelay", "C"): ("#CC79A7", "D", "-.", "TDL-C (1000 ns)"),
 }
 GROUP_STYLE = {
-    "inside the block": {"color": "#0072B2", "marker": "o"},
-    "block edge": {"color": "#56B4E9", "marker": "^"},
-    "next to the block": {"color": "#D55E00", "marker": "s"},
+    "next to the block": ("#D55E00", "s", "-.", "next to the block\n(leakage)"),
+    "inside the block": ("#0072B2", "o", "-", "Inside the block"),
+    "block edge": ("#56B4E9", "^", "--", "Block edge"),
 }
 
 
-def plot(fa_rows, pd_rows, curves, jnr_grid):
-    fig, (ax_fa, ax_pd) = new_figure(7.16, 2.6, ncols=2)
-    for (split, ch), style in CHANNEL_STYLE.items():
-        sel = [r for r in fa_rows if r["split"] == split and r["channel"] == ch]
+def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None):
+    fig, axes = new_figure(7.16, 2.3, ncols=3 if multislot_results is not None else 2)
+    ax_fa, ax_pd = axes[:2]
+    for (split, ch), (color, marker, line, label) in CHANNEL_STYLE.items():
+        sel = [r for r in fa_rows if r["split"] == split and r["channel"] == ch and r["cells"]]
         if not sel:
             continue
         x = np.array([r["snr_db"] for r in sel])
         k = np.array([r["false_alarms"] for r in sel])
         n = np.array([r["cells"] for r in sel])
         lo, hi = wilson_interval(k, n)
-        ax_fa.errorbar(x, k / n, yerr=[k / n - lo, hi - k / n], capsize=2, ms=3, **style)
-    ax_fa.axhline(FA, color="k", lw=0.8, ls=":", label="design value (1%)")
+        ax_fa.errorbar(
+            x,
+            k / n,
+            yerr=[k / n - lo, hi - k / n],
+            capsize=2,
+            ms=3,
+            lw=0.8,
+            elinewidth=0.6,
+            capthick=0.6,
+            color=color,
+            marker=marker,
+            ls=line,
+            label=label,
+        )
+    ax_fa.axhline(FA, color="black", lw=0.8, ls=":", label="1% target")
     ax_fa.set(
         yscale="log",
+        yticks=[0.01, 0.1, 1],
         xlabel="SNR [dB]",
-        ylabel="False-alarm rate, benign slots",
-        title="(a) Analytic threshold, no training data",
+        ylabel="False-alarm rate",
     )
-    ax_fa.legend(loc="upper left", fontsize=6)
+    ax_fa.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
+    ax_fa.set_title("(a) False alarms", loc="left")
+    ax_fa.legend(loc="center left", bbox_to_anchor=(0, 0.46), frameon=False)
 
-    for group, style in GROUP_STYLE.items():
-        ax_pd.plot(jnr_grid, curves[group], color=style["color"], lw=1.0)
-        for ch, mfc in (("A", style["color"]), ("C", "none")):
+    for group, (color, marker, line, label) in GROUP_STYLE.items():
+        ax_pd.plot(jnr_grid, curves[group], color=color, ls=line, lw=0.9, label=label)
+        # Marker shape identifies the PRB group; fill distinguishes the two channels.
+        for ch, mfc in (("A", color), ("C", "none")):
             sel = [r for r in pd_rows if r["group"] == group and r["channel"] == ch]
             k = np.array([r["exceed"] for r in sel])
             n = np.array([r["cells"] for r in sel])
@@ -171,19 +193,26 @@ def plot(fa_rows, pd_rows, curves, jnr_grid):
                 [r["jnr_db"] for r in sel],
                 k / n,
                 ls="none",
-                marker=style["marker"],
+                marker=marker,
                 mfc=mfc,
-                mec=style["color"],
-                label=f"{group}, TDL-{ch}",
+                mec=color,
+                ms=3,
+                mew=0.65,
             )
-    ax_pd.plot([], [], color="k", lw=1.0, label="theory (lines)")
     ax_pd.set(
-        xlabel="Jammer-to-noise ratio per RE [dB]",
-        ylabel="P(residual above 1% threshold)",
-        title="(b) Pilot jamming of 4 of 12 PRBs",
-        ylim=(0, 1.02),
+        xlabel="JNR per RE [dB]",
+        ylabel="Exceedance probability",
+        ylim=(-0.03, 1.08),
     )
-    ax_pd.legend(loc="upper left", fontsize=5.5, ncols=1)
+    ax_pd.set_title("(b) Detection and leakage", loc="left")
+    ax_pd.legend(
+        loc="upper left", frameon=False, labelspacing=0.35, handlelength=1.6, handletextpad=0.5
+    )
+    if multislot_results is not None:
+        plot_on_axis(axes[2], *multislot_results)
+        axes[2].set_title("(c) K-slot detection", loc="left")
+    for ax in axes:
+        ax.tick_params(length=2.5, width=0.6, pad=2)
     return fig
 
 
@@ -224,8 +253,13 @@ def main(argv=None):
     fa_rows = _read(out / "residual_false_alarm.csv")
     pd_rows = _read(out / "residual_detection.csv")
     jnr_grid = np.linspace(min(r["jnr_db"] for r in pd_rows), max(r["jnr_db"] for r in pd_rows), 41)
+    try:
+        multislot_results = read_results(out)
+    except FileNotFoundError as missing:
+        print(f"Skipping the K-slot panel: {missing.filename} is missing")
+        multislot_results = None
     with paper_style():
-        fig = plot(fa_rows, pd_rows, theory_curves(jnr_grid), jnr_grid)
+        fig = plot(fa_rows, pd_rows, theory_curves(jnr_grid), jnr_grid, multislot_results)
     save(fig, out / "residual_theory")
     total = {}
     for r in fa_rows:
@@ -234,7 +268,7 @@ def main(argv=None):
         total[key] = (k + r["false_alarms"], n + r["cells"])
     for (split, ch), (k, n) in total.items():
         print(f"{split} TDL-{ch}: false-alarm rate {k / n:.4f} over {int(n)} benign DMRS cells")
-    print(f"Wrote {out / 'residual_theory'}.pdf/.png and the CSVs")
+    print(f"Wrote {out / 'residual_theory'}.pdf/.png")
 
 
 if __name__ == "__main__":
