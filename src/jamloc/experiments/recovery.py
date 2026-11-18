@@ -19,6 +19,8 @@ allocation. Every simulated batch is decoded by every receiver, on exactly the s
 * ``p_e_soft``    - map from the U-Net without the DMRS residual (power + EVM), soft
 * ``p_r_e_hard``  - map from the full U-Net (power + residual + EVM), hard
 * ``p_r_e_soft``  - map from the full U-Net, soft (the proposed receiver)
+* ``p_r_e_atk_soft`` - map from the full U-Net trained on mixed attacks (``train_atk``: also
+                    hopping and pilot-comb jammers), soft; only when that model is trained
 * ``true_hard`` / ``true_soft`` - the true jamming map (where the jammer is; its strength is still
                     estimated in the soft mode)
 
@@ -56,10 +58,10 @@ from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
 from jamloc.metrics import threshold_at_fa
 from jamloc.model import select_inputs
 from jamloc.noise import estimated_snr_db
-from jamloc.paths import results_dir
+from jamloc.paths import data_dir, results_dir
 from jamloc.plotting import new_figure, paper_style, plot_bler, save, zero_error_handle
 from jamloc.recovery import MapAwareReceiver
-from jamloc.train import load_model
+from jamloc.train import checkpoint_path, load_model
 
 ALLOC = (6, 12)  # UE on PRBs 6-17
 JAM_SIZE = 4  # jammed PRBs, placed inside the allocation
@@ -74,10 +76,13 @@ RECEIVERS = {
     "p_e_soft": ("no_residual", "soft"),
     "p_r_e_hard": ("fused", "hard"),
     "p_r_e_soft": ("fused", "soft"),
+    "p_r_e_atk_soft": ("fused_atk", "soft"),
     "true_hard": ("true", "hard"),
     "true_soft": ("true", "soft"),
 }
-DETECTORS = ("power_threshold", "block_test", "no_residual", "fused")
+DETECTORS = ("power_threshold", "block_test", "no_residual", "fused", "fused_atk")
+# Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
+TRAINED_ON = {"fused_atk": ({"data": "atk"}, "val_atk")}
 # Jammers: the nominal one, or one whose support is not a block of whole PRB rows
 JAMMERS = {
     "nominal": {},
@@ -121,6 +126,12 @@ STYLE = {
     "p_r_e_soft": {"label": "Map P+R+E, soft", "color": "#0072B2", "marker": "o", "linestyle": "-"},
     "true_hard": {"label": "True map, hard", "color": "#D55E00", "marker": "<", "linestyle": ":"},
     "true_soft": {"label": "True map, soft", "color": "#009E73", "marker": "^", "linestyle": "-."},
+    "p_r_e_atk_soft": {
+        "label": "Map P+R+E (mixed attacks), soft",
+        "color": "#332288",
+        "marker": "d",
+        "linestyle": "-",
+    },
 }
 
 
@@ -143,12 +154,14 @@ def _power_scores(features: torch.Tensor) -> torch.Tensor:
 def _scores(detector: str, model, features: torch.Tensor) -> torch.Tensor:
     if detector == "power_threshold":
         return _power_scores(features)
-    return model(select_inputs(features, detector))
+    variant = "fused" if detector in TRAINED_ON else detector
+    return model(select_inputs(features, variant))
 
 
 def val_threshold(detector: str, model=None) -> float:
-    """Score threshold that flags 1% of the non-jammed validation cells."""
-    d = load("val")
+    """Score threshold that flags 1% of the non-jammed validation cells (of the validation split
+    that belongs to the detector's training data)."""
+    d = load(TRAINED_ON[detector][1] if detector in TRAINED_ON else "val")
     if detector == "block_test":
         scores = block_test_scores(d, d)
         return threshold_at_fa(scores[d["labels"] == 0], FA)
@@ -260,6 +273,13 @@ def simulate(
             model = None
         elif det == "block_test":
             model = load("val")  # its empirical nulls
+        elif det in TRAINED_ON:
+            options, val_split = TRAINED_ON[det]
+            if not checkpoint_path("fused", seed, **options).is_file():
+                continue  # not trained: its receiver is left out
+            if not (data_dir() / f"{val_split}.npz").is_file():
+                continue
+            model = load_model("fused", seed, **options)
         else:
             model = load_model(det, seed)
         detectors[det] = (model, val_threshold(det, model))
@@ -274,6 +294,9 @@ def simulate(
         cases.append(("pilot", True, ("standard", "true_hard", "true_soft")))
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]
+    # leave out receivers whose detector is not available (e.g. a model that was not trained)
+    usable = {rx for rx, (src, _) in RECEIVERS.items() if src in (None, "true") or src in detectors}
+    cases = [(a, w, tuple(rx for rx in rxs if rx in usable)) for a, w, rxs in cases]
     if only:  # re-run some receivers only
         cases = [(a, w, tuple(rx for rx in rxs if rx in only)) for a, w, rxs in cases]
         cases = [c for c in cases if c[2]]
@@ -315,7 +338,15 @@ def simulate(
 MAIN_RECEIVERS = ("standard", "dmrs_ie", "power_hard", "p_r_e_soft", "true_soft")
 ABLATION_RECEIVERS = ("standard", "p_r_e_hard", "p_r_e_soft", "p_e_soft", "true_hard", "true_soft")
 # The receiver held fixed (soft weighting), only the source of the map changes
-SOURCE_RECEIVERS = ("lmmse", "slot_ie", "dmrs_ie", "block_soft", "p_r_e_soft", "true_soft")
+SOURCE_RECEIVERS = (
+    "lmmse",
+    "slot_ie",
+    "dmrs_ie",
+    "block_soft",
+    "p_r_e_soft",
+    "p_r_e_atk_soft",
+    "true_soft",
+)
 
 
 def pool_seeds(rows) -> list[dict]:

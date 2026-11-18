@@ -107,11 +107,12 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
     assert main_rows == {
         (rx, a, j)
         for rx in recovery.RECEIVERS
+        if rx != "p_r_e_atk_soft"  # its model (trained on mixed attacks) is not trained here
         for a in ("pilot", "data", "partial")
         for j in ("-3.0", "3.0")
     }
     benign = {r["receiver"] for r in rows if r["attack"] == "none"}
-    assert benign == set(recovery.RECEIVERS)
+    assert benign == set(recovery.RECEIVERS) - {"p_r_e_atk_soft"}
     limit = [r for r in rows if r["attack"] == "pilot_whole_allocation"]
     assert {r["receiver"] for r in limit} == {"standard", "true_hard", "true_soft"}
     assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
