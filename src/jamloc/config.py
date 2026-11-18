@@ -19,6 +19,16 @@ class SimConfig:
     carrier_frequency: float = 3.5e9  # [Hz]
     delay_spread: dict = field(default_factory=lambda: {"A": 100e-9, "C": 300e-9})  # [s]
     max_speed: float = 3.0  # [m/s]
+    # True: Sionna scales every channel realization to unit energy over the carrier grid, so each
+    # slot has exactly the nominal SNR and JSR on average over the carrier (all nominal
+    # experiments). False: the TDL model's own normalization, unit power only on average over
+    # realizations, so the received SNR and JSR also vary from slot to slot.
+    normalize_channel: bool = True
+
+    # Noise power the receiver assumes (jamloc.noise). "true": the simulator's noise variance,
+    # off by the per-slot error ``noise_error_db`` of the scenario (0 unless an experiment sets
+    # it). "comb": estimated in every slot from the empty comb of the DMRS symbol.
+    noise_estimate: str = "true"
 
     # Largest channel delay assumed by the DMRS residual feature
     tau_max: float = 3e-6  # [s]

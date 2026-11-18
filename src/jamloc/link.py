@@ -21,6 +21,7 @@ from sionna.phy.nr import PUSCHTransmitter
 
 from jamloc.config import SimConfig
 from jamloc.jammer import ATTACKS, Jammer, cell_mask, pulse_mask
+from jamloc.noise import receiver_noise
 from jamloc.receiver import PUSCHReceiverChain
 from jamloc.ue import (
     UEPool,
@@ -43,6 +44,8 @@ class Scenario:
     jam_size: torch.Tensor  # number of jammed PRBs
     jsr_db: torch.Tensor  # jammer-to-signal ratio per jammed RE [dB]
     snr_db: torch.Tensor  # UE energy per data RE / noise variance [dB]
+    # error of the receiver's noise power [dB] (jamloc.noise); None: the receiver knows it
+    noise_error_db: torch.Tensor | None = None
 
     @property
     def batch_size(self) -> int:
@@ -73,11 +76,13 @@ def draw_scenario(
     jam_size=(2, 12),
     scheduling_aware: bool = False,
     alloc=None,
+    noise_error_db=0.0,
 ) -> Scenario:
     """Random scenario for one batch. Ranges are uniform; a single number fixes the value.
 
     ``alloc=(start, size)`` fixes the allocation. With ``scheduling_aware=True`` the jammer
     hits exactly the scheduled PRBs; otherwise it jams a random block anywhere on the carrier.
+    ``noise_error_db`` is the error of the noise power the receiver assumes (0: exact).
     """
     if alloc is None:
         size = int(rng.integers(cfg.min_alloc_prb, cfg.num_prb + 1))
@@ -106,6 +111,8 @@ def draw_scenario(
         jam_size=torch.as_tensor(j_size, dtype=torch.long),
         jsr_db=torch.as_tensor(_draw(rng, jsr_db, batch_size), dtype=torch.float32),
         snr_db=torch.as_tensor(_draw(rng, snr_db, batch_size), dtype=torch.float32),
+        # drawn last, so that the other draws stay the same as without it
+        noise_error_db=torch.as_tensor(_draw(rng, noise_error_db, batch_size), dtype=torch.float32),
     )
 
 
@@ -114,13 +121,14 @@ class SlotBatch:
     """Everything one simulated batch produces."""
 
     y: torch.Tensor  # received carrier grid [B, 14, 288]
-    no: torch.Tensor  # noise variance [B]
+    no: torch.Tensor  # noise variance the receiver assumes [B] (the true one unless set otherwise)
     labels: torch.Tensor  # jammed cells [B, 24, 14] (bool)
     scenario: Scenario
     y_alloc: torch.Tensor  # received allocation grid [B, 1, 1, 14, 12 n]
     rx: dict  # receiver outputs (see PUSCHReceiverChain)
     b: torch.Tensor  # transmitted information bits
     tx: PUSCHTransmitter  # transmitter used for this batch
+    no_true: torch.Tensor | None = None  # true noise variance [B]
 
 
 class JammedPUSCHLink:
@@ -145,7 +153,7 @@ class JammedPUSCHLink:
                     min_speed=0.0,
                     max_speed=cfg.max_speed,
                 )
-                channels[model] = OFDMChannel(tdl, rg, normalize_channel=True)
+                channels[model] = OFDMChannel(tdl, rg, normalize_channel=cfg.normalize_channel)
 
         self.jammer = Jammer(cfg)
         self.awgn = AWGN()
@@ -192,12 +200,22 @@ class JammedPUSCHLink:
         no = 10 ** (-sc.snr_db.to(self.device) / 10)
         y = self.awgn(y_ue + y_jam, no)
 
-        # gNB: cut out the scheduled PRBs and run the receiver chain
+        # gNB: cut out the scheduled PRBs and run the receiver chain with the noise power it
+        # assumes (the true one, one off by a set error, or an estimate: jamloc.noise)
         y_alloc = take_allocation(y, sc.alloc_start, sc.alloc_size)
-        rx = self.receiver(sc.alloc_size)(y_alloc, no, decode=decode)
+        no_rx = receiver_noise(cfg, no, sc.noise_error_db, y_alloc, tx)
+        rx = self.receiver(sc.alloc_size)(y_alloc, no_rx, decode=decode)
 
         return SlotBatch(
-            y=y[:, 0, 0], no=no, labels=labels, scenario=sc, y_alloc=y_alloc, rx=rx, b=b, tx=tx
+            y=y[:, 0, 0],
+            no=no_rx,
+            labels=labels,
+            scenario=sc,
+            y_alloc=y_alloc,
+            rx=rx,
+            b=b,
+            tx=tx,
+            no_true=no,
         )
 
 

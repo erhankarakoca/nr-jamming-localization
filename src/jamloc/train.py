@@ -13,7 +13,7 @@ from sionna.phy import config
 from torch import nn
 
 from jamloc.dataset import load
-from jamloc.model import VARIANTS, PixelMLP, TinyUNet, noise_shift, select_inputs
+from jamloc.model import ALL_VARIANTS, VARIANTS, PixelMLP, TinyUNet, noise_shift, select_inputs
 from jamloc.paths import results_dir
 
 
@@ -26,13 +26,17 @@ def _tensors(split: str, variant: str, device: str):
 
 DEFAULT_WIDTH = 12  # channels of the first U-Net level (66 553 parameters for the fused variant)
 ARCHS = ("unet", "pixel")  # the U-Net, or the per-cell MLP of the spatial-context ablation
+PIXEL_HIDDEN = 64  # hidden units of the per-cell MLP (4 801 parameters for the fused inputs)
+PIXEL_HIDDEN_MATCHED = 252  # 66 277 parameters, about as many as the U-Net (66 553)
 
 
-def build_model(arch: str, in_channels: int, width: int = DEFAULT_WIDTH):
+def build_model(
+    arch: str, in_channels: int, width: int = DEFAULT_WIDTH, hidden: int = PIXEL_HIDDEN
+):
     if arch == "unet":
         return TinyUNet(in_channels, base=width)
     if arch == "pixel":
-        return PixelMLP(in_channels)
+        return PixelMLP(in_channels, hidden)
     raise ValueError(f"unknown architecture {arch!r}")
 
 
@@ -43,13 +47,15 @@ def checkpoint_path(
     data: str = "",
     arch: str = "unet",
     jitter: float = 0.0,
+    hidden: int = PIXEL_HIDDEN,
 ):
     """``fused_seed0.pt`` for the default width, ``fused_w4_seed0.pt`` for a narrower U-Net,
     ``fused_mix_seed0.pt`` for one trained on ``train_mix`` (``data="mix"``),
     ``fused_pixel_seed0.pt`` for the per-cell MLP (``arch="pixel"``, no width),
+    ``fused_pixel_h252_seed0.pt`` for a wider one (``hidden=252``),
     ``fused_nj1_seed0.pt`` for one trained with +-1 dB noise-estimation error (``jitter=1``)."""
     if arch == "pixel":
-        tag = f"{variant}_pixel"
+        tag = f"{variant}_pixel" if hidden == PIXEL_HIDDEN else f"{variant}_pixel_h{hidden}"
     else:
         tag = variant if width == DEFAULT_WIDTH else f"{variant}_w{width}"
     tag = f"{tag}_{data}" if data else tag
@@ -67,13 +73,14 @@ def train(
     data: str = "",
     arch: str = "unet",
     jitter: float = 0.0,
+    hidden: int = PIXEL_HIDDEN,
 ):
     """Train a variant and save its best weights. Returns the checkpoint path.
 
     ``data="mix"`` trains on ``train_mix`` / ``val_mix`` instead of ``train`` / ``val``;
-    ``arch="pixel"`` trains the per-cell MLP instead of the U-Net. ``jitter > 0`` shows every
-    training slot as if the noise power had been estimated with an error drawn uniformly from
-    +-``jitter`` dB (``model.noise_shift``); validation stays exact.
+    ``arch="pixel"`` trains the per-cell MLP (``hidden`` units) instead of the U-Net.
+    ``jitter > 0`` shows every training slot as if the noise power had been estimated with an
+    error drawn uniformly from +-``jitter`` dB (``model.noise_shift``); validation stays exact.
     """
     torch.manual_seed(seed)
     device = config.device
@@ -81,14 +88,14 @@ def train(
     x_tr, y_tr = _tensors(f"train{suffix}", variant, device)
     x_va, y_va = _tensors(f"val{suffix}", variant, device)
 
-    model = build_model(arch, x_tr.shape[1], width).to(device)
+    model = build_model(arch, x_tr.shape[1], width, hidden).to(device)
     # Jammed cells are rare, so weight them up in the loss
     pos_weight = (y_tr == 0).sum() / (y_tr == 1).sum().clamp_min(1)
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
 
-    path = checkpoint_path(variant, seed, width, data, arch, jitter)
+    path = checkpoint_path(variant, seed, width, data, arch, jitter, hidden)
     path.parent.mkdir(parents=True, exist_ok=True)
     best = float("inf")
     gen = torch.Generator().manual_seed(seed)
@@ -124,6 +131,7 @@ def train(
                     "seed": seed,
                     "in_channels": x_tr.shape[1],
                     "width": width,
+                    "hidden": hidden,
                     "arch": arch,
                     "noise_jitter_db": jitter,
                     "epoch": epoch,
@@ -154,12 +162,16 @@ def load_model(
     data: str = "",
     arch: str = "unet",
     jitter: float = 0.0,
+    hidden: int = PIXEL_HIDDEN,
 ):
     """Trained model in eval mode, on ``sionna.phy.config.device``."""
-    path = checkpoint_path(variant, seed, width, data, arch, jitter)
+    path = checkpoint_path(variant, seed, width, data, arch, jitter, hidden)
     ckpt = torch.load(path, map_location=config.device)
     model = build_model(
-        ckpt.get("arch", "unet"), ckpt["in_channels"], ckpt.get("width", DEFAULT_WIDTH)
+        ckpt.get("arch", "unet"),
+        ckpt["in_channels"],
+        ckpt.get("width", DEFAULT_WIDTH),
+        ckpt.get("hidden", PIXEL_HIDDEN),
     ).to(config.device)
     model.load_state_dict(ckpt["state_dict"])
     return model.eval()
@@ -167,13 +179,15 @@ def load_model(
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Train a jamming-map detector.")
-    p.add_argument("--variant", choices=[*VARIANTS, "all"], required=True)
+    p.add_argument("--variant", choices=[*ALL_VARIANTS, "all"], required=True)
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--seeds", type=int, nargs="+", default=[0])
     p.add_argument("--width", type=int, default=DEFAULT_WIDTH, help="channels of the first level")
     p.add_argument("--arch", choices=ARCHS, default="unet", help="pixel: per-cell MLP ablation")
+    p.add_argument("--hidden", type=int, default=PIXEL_HIDDEN, help="hidden units of the MLP")
+    p.add_argument("--data", default="", help="train on train_<data> / val_<data> (e.g. nest)")
     p.add_argument(
         "--noise-jitter-db", type=float, default=0.0, help="train with +-this noise-estimate error"
     )
@@ -187,8 +201,10 @@ def main(argv=None):
                 args.lr,
                 seed,
                 args.width,
+                data=args.data,
                 arch=args.arch,
                 jitter=args.noise_jitter_db,
+                hidden=args.hidden,
             )
             print("Saved", path)
 

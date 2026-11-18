@@ -21,11 +21,23 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   channels, long delay spreads and high speeds (``MIXED_CONDITIONS``).
 * ``train_atk`` / ``val_atk`` - like ``train`` / ``val``, but the batches cycle through the
   nominal, hopping and pilot-comb jammers (``ATTACK_CONDITIONS``).
+* ``train_atk2`` / ``val_atk2`` - like ``train_atk``, plus batches with pilot spoofing over the
+  scheduled PRBs (``ATTACK_CONDITIONS_SPOOF``).
 * ``margin`` - the jammer hits exactly the scheduled PRBs, as in the BLER experiment, at a fixed
-  SNR of 15 dB and down to JSR -30 dB (``experiments/detection_margin``).
+  SNR of 15 dB and down to JSR -30 dB (``experiments/detection_margin``); ``margin_snr<x>`` the
+  same at another SNR.
+* Noise power (``experiments/calibration``): ``noise_m1``, ``noise_p0.5`` ... - test grids
+  where the receiver's noise power is off by a fixed error (minus or plus, in dB) in the whole
+  receiver chain; ``train_nest`` / ``val_nest`` / ``test_nest`` / ``sched_nest`` - the receiver
+  estimates the noise power in every slot from the empty DMRS comb (``jamloc.noise``).
 
-Each split is one ``.npz`` file in ``data_dir()``: ``features`` ``[N, 6, 24, 14]`` (stored as
-float16), ``labels`` ``[N, 24, 14]`` and one value per slot for every key in ``META_KEYS``.
+Grid splits use batches of 16 slots (8 for ``margin``), and the allocation is drawn once per
+batch, so a grid point of 500 slots mixes about 31 allocations. Each split is one ``.npz`` file
+in ``data_dir()``: ``features`` ``[N, 7, 24, 14]`` (stored as float16), ``labels``
+``[N, 24, 14]`` and one value per slot for every key in ``META_KEYS``: among them ``batch``, the
+index of the batch the slot came from (the unit that shares an allocation), ``snr_db_est``, the
+SNR the gNB estimates from the slot, and ``noise_error_db``, the error of the noise power the
+receiver used.
 
     python -m jamloc.dataset --split train
 """
@@ -36,10 +48,12 @@ import math
 import time
 
 import numpy as np
+import torch
 
 from jamloc.config import SimConfig
 from jamloc.features import extract
 from jamloc.link import JammedPUSCHLink, draw_scenario, seed_everything
+from jamloc.noise import estimated_snr_db
 from jamloc.paths import data_dir
 
 CHANNELS = ("A", "C")
@@ -54,7 +68,11 @@ META_KEYS = (
     "jam_start",
     "jam_size",
     "scheduling_aware",
+    "batch",
+    "snr_db_est",
+    "noise_error_db",
 )
+GRID_BATCH_SIZE = 16  # small batches: every grid point mixes many allocations
 
 SPLITS = {
     "train": {"seed": 1_000_000, "num_slots": 40_000},
@@ -113,6 +131,13 @@ GENERALIZATION = {
         "cfg": {"jammer_waveform": "tone", "jammer_tones": 1},
         "title": "multi-tone jammer: one tone per jammed PRB (unseen)",
     },
+    # Channels with the TDL model's own normalization (unit power on average over realizations)
+    # instead of Sionna's per-realization scaling to unit energy over the carrier
+    "unnorm": {
+        "seed": 20_000_000,
+        "cfg": {"normalize_channel": False},
+        "title": "channels without per-slot normalization (unseen)",
+    },
 }
 for _name, _spec in GENERALIZATION.items():
     SPLITS[_name] = {"per_point": 200, "benign_per_channel": 1_000, "sched": False, **_spec}
@@ -137,6 +162,41 @@ ATTACK_CONDITIONS = (
 SPLITS["train_atk"] = {"seed": 14_000_000, "num_slots": 40_000, "mix": ATTACK_CONDITIONS}
 SPLITS["val_atk"] = {"seed": 15_000_000, "num_slots": 5_000, "mix": ATTACK_CONDITIONS}
 
+# The same, plus pilot spoofing: the spoofer replays the UE's pilots, so it needs the schedule.
+# Its batches jam exactly the scheduled PRBs and contain pilot attacks and benign slots. Keys
+# starting with "_" change the batch (scenario), not SimConfig.
+ATTACK_CONDITIONS_SPOOF = (
+    *ATTACK_CONDITIONS,
+    {"jammer_waveform": "dmrs", "_scheduling_aware": True, "_attacks": (0, 1)},
+)
+SPLITS["train_atk2"] = {"seed": 25_000_000, "num_slots": 40_000, "mix": ATTACK_CONDITIONS_SPOOF}
+SPLITS["val_atk2"] = {"seed": 26_000_000, "num_slots": 5_000, "mix": ATTACK_CONDITIONS_SPOOF}
+
+# Noise power: the whole receiver chain with a fixed error of the noise power it assumes
+# (smaller test grids), and with a per-slot estimate from the empty DMRS comb
+NOISE_ERRORS_DB = (-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0)
+
+
+def noise_split(error_db: float) -> str:
+    """Name of the test grid with a fixed noise-power error, e.g. ``noise_m0.5``."""
+    return f"noise_{'m' if error_db < 0 else 'p'}{abs(error_db):g}"
+
+
+for _k, _e in enumerate(NOISE_ERRORS_DB):
+    SPLITS[noise_split(_e)] = {
+        "seed": 27_000_000 + 100_000 * _k,
+        "per_point": 100,
+        "benign_per_channel": 1_000,
+        "sched": False,
+        "noise_error_db": _e,
+        "title": f"receiver noise power off by {_e:+g} dB",
+    }
+_NEST = {"noise_estimate": "comb"}
+SPLITS["train_nest"] = {"seed": 21_000_000, "num_slots": 40_000, "cfg": _NEST}
+SPLITS["val_nest"] = {"seed": 22_000_000, "num_slots": 5_000, "cfg": _NEST}
+SPLITS["test_nest"] = {**SPLITS["test"], "seed": 23_000_000, "cfg": _NEST}
+SPLITS["sched_nest"] = {**SPLITS["sched"], "seed": 24_000_000, "cfg": _NEST}
+
 # Detection before damage: the setting of the BLER curves (jammer on the scheduled PRBs, SNR
 # 15 dB), with JSRs low enough to find where detection starts
 SPLITS["margin"] = {
@@ -144,12 +204,30 @@ SPLITS["margin"] = {
     # small batches, so every grid point mixes 25 allocations (a batch shares one allocation)
     "batch_size": 8,
     "per_point": 200,
-    "benign_per_channel": 1_000,
+    # many benign slots, so that the slot threshold can be set for 0.1% false alarm as well
+    "benign_per_channel": 5_000,
     "sched": True,
     "snr_db": 15.0,
     "jsr_grid": tuple(float(j) for j in range(-30, 1, 3)),
     "title": "jammer on the scheduled PRBs, SNR 15 dB",
 }
+# The same at lower SNRs, where MCS 5 has less margin to spare (experiments/detection_margin)
+MARGIN_SNRS_DB = (5.0, 8.0, 11.0)
+
+
+def margin_split(snr_db: float) -> str:
+    """Name of the margin grid at an SNR: ``margin`` at 15 dB, else e.g. ``margin_snr8``."""
+    return "margin" if snr_db == 15.0 else f"margin_snr{snr_db:g}"
+
+
+for _k, _snr in enumerate(MARGIN_SNRS_DB):
+    SPLITS[margin_split(_snr)] = {
+        **SPLITS["margin"],
+        "seed": 9_000_000 + 10_000 * _k,
+        "snr_db": _snr,
+        "jsr_grid": tuple(float(j) for j in range(-36, 1, 3)),
+        "title": f"jammer on the scheduled PRBs, SNR {_snr:g} dB",
+    }
 
 
 def _random_jobs(num_slots: int, batch_size: int) -> list[dict]:
@@ -194,9 +272,16 @@ def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
                     jsr_db=jsr,
                     snr_db=snr,
                     scheduling_aware=spec["sched"],
+                    noise_error_db=spec.get("noise_error_db", 0.0),
                 )
         jobs += batches(
-            benign, channel=channel, attacks=(0,), jsr_db=0.0, snr_db=snr, scheduling_aware=False
+            benign,
+            channel=channel,
+            attacks=(0,),
+            jsr_db=0.0,
+            snr_db=snr,
+            scheduling_aware=False,
+            noise_error_db=spec.get("noise_error_db", 0.0),
         )
     return jobs
 
@@ -204,19 +289,28 @@ def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
 def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
     """Simulate a split and save it to ``data_dir()/{split}.npz``. Returns the file path."""
     spec = SPLITS[split]
-    batch_size = spec.get("batch_size", batch_size)
-    if "per_point" in spec:
+    if "per_point" in spec:  # grid splits: small batches, so that allocations vary
+        batch_size = spec.get("batch_size", GRID_BATCH_SIZE)
         jobs = _grid_jobs(spec, num_slots, batch_size)
     else:
+        batch_size = spec.get("batch_size", batch_size)
         jobs = _random_jobs(num_slots or spec["num_slots"], batch_size)
 
-    # One link per channel condition; batch i uses condition i // 2 (both TDL models per condition)
+    # One link per condition; batch i uses condition i // 2 (both TDL models per condition). Keys
+    # starting with "_" change the batch (attacks, scheduling-aware jammer), the others SimConfig.
     conditions = spec.get("mix", (spec.get("cfg", {}),))
-    links = [JammedPUSCHLink(dataclasses.replace(SimConfig(), **c)) for c in conditions]
+    links = [
+        JammedPUSCHLink(
+            dataclasses.replace(SimConfig(), **{k: v for k, v in c.items() if k[0] != "_"})
+        )
+        for c in conditions
+    ]
     cfg = links[0].cfg
     features, labels, meta = [], [], {k: [] for k in META_KEYS}
     start = time.perf_counter()
     for i, job in enumerate(jobs):
+        cond = conditions[(i // 2) % len(conditions)]
+        job = {**job, **{k[1:]: v for k, v in cond.items() if k[0] == "_"}}
         rng = seed_everything(spec["seed"] + i)
         sc = draw_scenario(
             rng,
@@ -227,6 +321,7 @@ def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
             jsr_db=job["jsr_db"],
             snr_db=job["snr_db"],
             scheduling_aware=job["scheduling_aware"],
+            noise_error_db=job.get("noise_error_db", 0.0),
         )
         link = links[(i // 2) % len(links)]
         batch = link(sc)
@@ -243,6 +338,11 @@ def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
         meta["jam_start"].append(sc.jam_start.numpy())
         meta["jam_size"].append(sc.jam_size.numpy())
         meta["scheduling_aware"].append(np.full(n, job["scheduling_aware"]))
+        meta["batch"].append(np.full(n, i))
+        meta["snr_db_est"].append(estimated_snr_db(batch.y_alloc, batch.no, link.cfg).cpu().numpy())
+        meta["noise_error_db"].append(
+            (10 * torch.log10(batch.no / batch.no_true)).cpu().numpy().astype(np.float32)
+        )
 
         if (i + 1) % 50 == 0 or i + 1 == len(jobs):
             done = sum(len(f) for f in features)
