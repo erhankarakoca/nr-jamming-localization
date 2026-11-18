@@ -14,6 +14,8 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   instead of 3 m/s; ``qpskjam`` - the jammer sends random QPSK symbols instead of Gaussian noise.
 * ``train_mix`` / ``val_mix`` - like ``train`` / ``val``, but the batches cycle through the nominal
   channels, long delay spreads and high speeds (``MIXED_CONDITIONS``).
+* ``margin`` - the jammer hits exactly the scheduled PRBs, as in the BLER experiment, at a fixed
+  SNR of 15 dB and down to JSR -30 dB (``experiments/detection_margin``).
 
 Each split is one ``.npz`` file in ``data_dir()``: ``features`` ``[N, 6, 24, 14]`` (stored as
 float16), ``labels`` ``[N, 24, 14]`` and one value per slot for every key in ``META_KEYS``.
@@ -87,6 +89,18 @@ MIXED_CONDITIONS = (
 SPLITS["train_mix"] = {"seed": 10_000_000, "num_slots": 40_000, "mix": MIXED_CONDITIONS}
 SPLITS["val_mix"] = {"seed": 11_000_000, "num_slots": 5_000, "mix": MIXED_CONDITIONS}
 
+# Detection before damage: the setting of the BLER curves (jammer on the scheduled PRBs, SNR
+# 15 dB), with JSRs low enough to find where detection starts
+SPLITS["margin"] = {
+    "seed": 8_000_000,
+    "per_point": 200,
+    "benign_per_channel": 1_000,
+    "sched": True,
+    "snr_db": 15.0,
+    "jsr_grid": tuple(float(j) for j in range(-30, 1, 3)),
+    "title": "jammer on the scheduled PRBs, SNR 15 dB",
+}
+
 
 def _random_jobs(num_slots: int, batch_size: int) -> list[dict]:
     jobs = []
@@ -98,6 +112,7 @@ def _random_jobs(num_slots: int, batch_size: int) -> list[dict]:
                 "channel": CHANNELS[i % 2],
                 "attacks": (0, 1, 2, 3),
                 "jsr_db": (-15.0, 10.0),
+                "snr_db": (5.0, 25.0),
                 "scheduling_aware": False,
             }
         )
@@ -107,8 +122,10 @@ def _random_jobs(num_slots: int, batch_size: int) -> list[dict]:
 def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
     per_point, benign = spec["per_point"], spec["benign_per_channel"]
     channels = spec.get("channels", CHANNELS)
+    jsr_grid = spec.get("jsr_grid", TEST_JSR_DB)
+    snr = spec.get("snr_db", (5.0, 25.0))
     if num_slots is not None:  # smaller version of the same grid
-        scale = num_slots / (len(channels) * 3 * len(TEST_JSR_DB) * per_point)
+        scale = num_slots / (len(channels) * 3 * len(jsr_grid) * per_point)
         per_point = max(1, int(per_point * scale))
         benign = max(1, round(benign * scale)) if benign else 0
 
@@ -118,15 +135,18 @@ def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
     jobs = []
     for channel in channels:
         for attack in (1, 2, 3):
-            for jsr in TEST_JSR_DB:
+            for jsr in jsr_grid:
                 jobs += batches(
                     per_point,
                     channel=channel,
                     attacks=(attack,),
                     jsr_db=jsr,
+                    snr_db=snr,
                     scheduling_aware=spec["sched"],
                 )
-        jobs += batches(benign, channel=channel, attacks=(0,), jsr_db=0.0, scheduling_aware=False)
+        jobs += batches(
+            benign, channel=channel, attacks=(0,), jsr_db=0.0, snr_db=snr, scheduling_aware=False
+        )
     return jobs
 
 
@@ -153,6 +173,7 @@ def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
             job["channel"],
             attacks=job["attacks"],
             jsr_db=job["jsr_db"],
+            snr_db=job["snr_db"],
             scheduling_aware=job["scheduling_aware"],
         )
         link = links[(i // 2) % len(links)]
