@@ -212,7 +212,9 @@ git -C ../nr-jamming-paper push
 
 `jamloc.paper` looks for the clone in `../nr-jamming-paper`; give `--dest` or set
 `JAMLOC_PAPER_DIR` if it is elsewhere. `paper/main.tex` in this repository is a frozen copy of the
-draft from before the move; the Overleaf copy is the paper.
+draft from before the move; the Overleaf copy is the paper. `docs/writing-guide.md` collects the
+style rules (mathematics, structure, tone), exemplar papers and the references added in the
+November 2026 revision.
 
 ## Layout
 

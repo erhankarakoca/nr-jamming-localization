@@ -260,7 +260,7 @@ def system_diagram():
     ax.text(
         99,
         44,
-        "dashed: map-aware receiver\ndrops flagged pilots, erases flagged LLRs",
+        "dashed: map-aware receiver weights flagged\npilots and LLRs by the estimated jamming power",
         fontsize=6,
         ha="right",
         va="center",
@@ -273,8 +273,9 @@ def system_diagram():
         "demaps and decodes. The detector reads three results the receiver computes anyway - the "
         "received grid, the LS pilot estimates and the equalized symbols - turns them into one "
         "value per PRB x symbol (power, DMRS residual, EVM), and a small U-Net outputs the "
-        "jamming map. Dashed: the map-aware receiver feeds the map back to drop jammed pilots "
-        "and erase jammed data."
+        "jamming map. Dashed: the map-aware receiver feeds the map back, estimates the jamming "
+        "power where the map points, and uses it to weight the pilots in the channel estimate "
+        "and to scale the LLRs of the jammed data."
     )
     return fig, caption
 
