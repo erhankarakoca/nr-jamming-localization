@@ -29,7 +29,7 @@ import numpy as np
 import torch
 
 from jamloc.baselines import block_test_scores
-from jamloc.dataset import CHANNELS, SPLITS, generate, load, margin_split
+from jamloc.dataset import CHANNELS, MARGIN_SNRS_DB, SPLITS, generate, load, margin_split
 from jamloc.evaluate import FA, _logits, aggregate, available_seeds
 from jamloc.jammer import ATTACKS
 from jamloc.metrics import threshold_at_fa
@@ -307,14 +307,73 @@ def _write(rows, path):
         writer.writerows(rows)
 
 
+def benign_snr_at_bler(channel: str, target: float = TARGET_BLER) -> float:
+    """SNR at which the unjammed link reaches ``target`` BLER (``ber_bler --benign``)."""
+    path = results_dir() / "ber_bler" / f"benign_{channel}.csv"
+    with open(path, encoding="utf-8") as f:
+        rows = sorted(
+            ((float(r["snr_db"]), float(r["bler"])) for r in csv.DictReader(f)),
+            key=lambda r: r[0],
+        )
+    # BLER falls with SNR: the crossing of 1 - BLER with 1 - target
+    return crossing([s for s, _ in rows], [1 - b for _, b in rows], 1 - target)
+
+
+def plot_vs_snr(detector: str = "fused"):
+    """Margin of the smallest-margin attack against the SNR, for both channels and both slot
+    false-alarm targets, with the link's own spare margin (SNR minus the SNR of 10% BLER without
+    a jammer) on a second axis. One column, for the paper."""
+    fig, ax = new_figure(3.5, 2.6)
+    snrs = sorted((15.0, *MARGIN_SNRS_DB))
+    styles = {"C": ("#0072B2", "o"), "A": ("#E69F00", "s")}
+    for channel, (color, marker) in styles.items():
+        for alpha, ls in ((FA, "-"), (0.001, "--")):
+            ys = []
+            for snr in snrs:
+                tag = "" if snr == 15.0 else f"_snr{snr:g}"
+                path = results_dir() / "margin" / f"margin{tag}_summary.csv"
+                with open(path, encoding="utf-8") as f:
+                    margins = [
+                        float(r["margin_db"])
+                        for r in csv.DictReader(f)
+                        if r["detector"] == detector
+                        and r["channel"] == channel
+                        and float(r["slot_fa_target"]) == alpha
+                    ]
+                # an attack never reaching 90% Pd within the grid counts as the worst case
+                finite = [m for m in margins if np.isfinite(m)]
+                ys.append(min(finite) if len(finite) == len(margins) else min(finite + [np.nan]))
+            label = f"TDL-{channel}, {alpha:.1%} slot false alarm"
+            ax.plot(snrs, ys, color=color, marker=marker, ls=ls, label=label)
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set(xlabel="SNR [dB]", ylabel="smallest detection margin [dB]")
+    spare = ax.secondary_xaxis(
+        "top",
+        functions=(
+            lambda s: s - benign_snr_at_bler("C"),
+            lambda m: m + benign_snr_at_bler("C"),
+        ),
+    )
+    spare.set_xlabel("spare link margin, TDL-C [dB]")
+    fig.legend(loc="outside lower center", ncols=2, frameon=False, fontsize=6)
+    return fig
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--seeds", type=int, nargs="+", default=None, help="default: all trained")
     p.add_argument("--snr-db", type=float, default=15.0)
     p.add_argument("--plot-only", action="store_true")
+    p.add_argument("--vs-snr", action="store_true", help="only the margin-vs-SNR figure")
     args = p.parse_args(argv)
 
     out = results_dir() / "margin"
+    if args.vs_snr:
+        with paper_style():
+            fig = plot_vs_snr()
+        save(fig, out / "margin_vs_snr")
+        print(f"Wrote {out}/margin_vs_snr.pdf/.png")
+        return
     out.mkdir(parents=True, exist_ok=True)
     tag = "" if args.snr_db == 15.0 else f"_snr{args.snr_db:g}"
     text = ("detector", "channel", "attack")
