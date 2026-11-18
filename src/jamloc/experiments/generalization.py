@@ -60,7 +60,7 @@ def summary(splits) -> list[dict]:
 
 
 def plot(rows, splits):
-    fig, axes = new_figure(7.16, 2.5, ncols=3)
+    fig, axes = new_figure(7.16, 2.9, ncols=3)
     width = 0.8 / len(DETECTORS)
     style = evaluate.DETECTOR_STYLE
     for ax, (attack, key, title) in zip(
@@ -91,7 +91,7 @@ def plot(rows, splits):
     axes[0].set_ylim(0, 1)
     axes[1].set_ylim(0, 1)
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="outside lower center", ncols=6, frameon=False)
+    fig.legend(handles, labels, loc="outside lower center", ncols=4, frameon=False)
     fig.suptitle(
         "Unseen conditions: TDL-C at 1000 ns delay spread, speeds up to 30 m/s, QPSK jammer\n"
         "(thresholds from the matched validation set)"

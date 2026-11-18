@@ -87,6 +87,21 @@ DETECTOR_STYLE = {
 }
 
 
+# Detectors drawn in the Pd figures (the CSVs keep all of them). The raw residual threshold is
+# left out (it is almost identical to its exact p-value), and so are the per-cell MLP and the
+# jittered U-Net, which have their own experiments.
+PLOT_DETECTORS = (
+    "fused",
+    "no_residual",
+    "power",
+    "evm",
+    "block_test",
+    "evm_threshold",
+    "residual_cfar",
+    "power_threshold",
+)
+
+
 def available_seeds() -> list[int]:
     """Training seeds for which every U-Net variant has a checkpoint."""
     seeds = None
@@ -207,7 +222,8 @@ def aggregate(rows: list[dict], values) -> list[dict]:
 def plot_pd(pd_rows, cells: str, title: str):
     fig, axes = new_figure(7.16, 2.9, ncols=3, sharey=True)
     for ax, attack in zip(axes, ("pilot", "data", "partial"), strict=True):
-        for name, style in DETECTOR_STYLE.items():
+        for name in PLOT_DETECTORS:
+            style = DETECTOR_STYLE[name]
             rows = [
                 r
                 for r in pd_rows

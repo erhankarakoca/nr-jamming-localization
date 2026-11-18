@@ -996,6 +996,51 @@ RESULT_FIGURES = [
         ),
         "python -m jamloc.experiments.size_sweep",
     ),
+    (
+        "../margin/margin.png",
+        "Detection before damage",
+        (
+            "The jammer covers exactly the user's PRBs at 15 dB SNR, as in the BLER experiment. "
+            "Solid: share of jammed slots flagged at 1% slot false alarm; dotted: share of jammed "
+            "cells flagged at 1% cell false alarm; black: BLER of the unprotected link, which is "
+            "all a detector built on CRC failures or link KPIs can see. Every attack is flagged in "
+            "90% of slots at least 7.7 dB of JSR before it pushes the BLER to 10%, so there is no "
+            "range of jamming powers in which it hurts unseen. The residual matters most for pilot "
+            "jamming, the attacker's most efficient option (margin 15.8 dB with it, 10.1 dB "
+            "without, on TDL-A)."
+        ),
+        "python -m jamloc.experiments.detection_margin",
+    ),
+    (
+        "../calibration/calibration.png",
+        "False alarms across SNR and under noise-estimation error",
+        (
+            "Thresholds from benign validation slots, false alarms measured on benign test slots. "
+            "Left: with one threshold the U-Nets flag almost 4% of the cells at low SNR and 0.1% "
+            "at high SNR; the block test and the residual, whose nulls are exact, stay at 1%. "
+            "Middle: one threshold per 4 dB SNR bin (the gNB knows its SNR) flattens the U-Nets. "
+            "Right: every feature is divided by the estimated noise power, so an underestimate "
+            "inflates them all. The learned detectors and the block test rely on the absolute "
+            "noise floor and are very sensitive (15% false alarms at -0.5 dB for the U-Net); the "
+            "residual degrades slowly and exactly as its theory predicts (grey). Overestimating "
+            "the noise by 0.5 dB costs nothing. The fused U-Net trained with a noise estimate "
+            "jittered by up to 1 dB (dotted) stays near 1% within +-1 dB at a cost of 0.003 F1."
+        ),
+        "python -m jamloc.experiments.calibration",
+    ),
+    (
+        "../theory/multislot.png",
+        "Averaging the residual over several slots",
+        (
+            "For a jammer that stays on the same PRBs, averaging each PRB's residual over K slots "
+            "keeps the null exact (every weight divided by K and repeated K times), so the "
+            "threshold is still computed, not learned. Lines: Pd from the formula; circles: "
+            "pilot-level Monte Carlo with the jammer's fading held over the K slots. Eight slots "
+            "(4 ms) lower the JNR needed for 90% detection from 10.7 to 4.4 dB; on the benign "
+            "link-level slots the K-slot thresholds give 0.92-1.15% false alarms."
+        ),
+        "python -m jamloc.experiments.multislot",
+    ),
 ]
 
 
