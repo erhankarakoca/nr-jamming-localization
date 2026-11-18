@@ -95,3 +95,34 @@ estimated map drives pilot exclusion, uncertainty-aware channel interpolation an
 3. *Mitigation with interference knowledge:* `li2012robust`, `kumar2019sdr`, robust channel
    estimation under pilot jamming (`clancy2011efficient`, `mendonca2024adversarial`). Our recovery
    evaluates how much a better map improves this classic receiver in NR.
+
+## Second search (November 2026, for plans v3 and v4)
+
+A targeted search for the newer results (noise uncertainty, smarter jammers, novelty of the grid
+resolution). Every identifier below was resolved (Crossref, arXiv, repository page).
+
+- **Closest precedent at our resolution.** Adhikari, *Physical Layer Jamming Detection for 5G NR
+  Uplink*, MSc thesis, Tampere University, 2022 (`adhikari2022physical`): received power indexed
+  by PRB and OFDM symbol in a simulated NR uplink and thresholded, on **unallocated** resources.
+  No report of a PRB x symbol map *inside the scheduled PUSCH allocation* was found, and none that
+  fuses a calibrated DMRS residual with EVM. The contribution statement should say "inside the
+  scheduled allocation" and cite this thesis. Related dense maps: pixel-level anomaly
+  localization on LTE/5G spectrograms (Kim et al., IEEE Access 2025, `kim2025synthetic`) and radar
+  pulse localization on 5G uplink grids (BatStation, arXiv 2509.06898, not cited).
+- **Noise uncertainty.** Tandra & Sahai, SNR walls (JSTSP 2008, `tandra2008snr`): a persistent
+  noise-calibration error cannot be averaged away in energy detection; our noise-mismatch result
+  is the cell-level, learned-detector version of it. Mariani, Giorgetti & Chiani (TCOM 2011,
+  `mariani2011effects`): effect of an estimated noise power on energy detection, F-distributed
+  ratio statistics. Not found: a jamming localizer trained with a perturbed noise estimate.
+- **RE-selective pilot jamming.** Rao et al. (MILCOM 2017, `rao2017lte`): LTE CRS resource
+  elements are especially vulnerable to synchronized interference; Rao et al. (VTC 2019,
+  `rao2019analysis`): pilot vs non-pilot interference; Kazemian et al. (IEEE CL 2024,
+  `kazemian2024pbch`): jamming of the NR PBCH DMRS resource elements. Not found: jamming confined
+  to the DMRS comb of a standard-compliant PUSCH.
+- **Hopping jammers.** Kleber & Laneman (WCNC 2017, `kleber2017tracking`): tracking a
+  frequency-hopping interferer across OFDM subcarriers; Schösser et al. (arXiv 2606.02102, 2026,
+  `schoesser2026spectrum`): OFDMA anomaly benchmark with sweep, hopping and pilot-RE jammers, with
+  per-sample presence scores. Not found: a cell map over scheduled PUSCH for a per-symbol hopping
+  jammer.
+- **Sums of gamma variables** (Moschopoulos 1985): a classical reference for the K-slot null; we
+  compute it exactly with the phase-type form instead and do not cite it.

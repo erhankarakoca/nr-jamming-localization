@@ -35,11 +35,15 @@ and the same trained models; latency on the Mac):
   U-Net and at most 0.30 for the literature thresholds. The U-Net's lead is mostly on pilot
   jamming. Without spatial context (per-cell MLP) the learned detector drops to 0.694.
 - **Detection before damage (section 12):** with the jammer on the user's PRBs at 15 dB SNR,
-  every attack is flagged in 90% of slots at least 7.7 dB of JSR before it pushes the BLER of the
+  every attack is flagged in 90% of slots at least 8.2 dB of JSR before it pushes the BLER of the
   unprotected link to 10%.
 - **Calibration (section 13):** thresholds per SNR bin hold the U-Net at 0.6-1.4% false alarm at
   every SNR; an underestimated noise power is the detectors' weak point, and training with a jittered
   noise estimate addresses it. The residual degrades exactly as its theory predicts.
+- **Smarter jammers (section 15, fourth round):** a jammer on the pilot subcarriers only is
+  still seen through the residual; a jammer that hops PRBs every symbol breaks every detector
+  that learned or assumes whole-PRB blocks (U-Net F1 0.59), and retraining on mixed attacks
+  restores it (0.914) at no cost elsewhere.
 - **Several slots (section 14):** averaging the residual over K slots keeps its null exact; 8
   slots lower the JNR for 90% detection by 6.2 dB.
 
@@ -96,7 +100,7 @@ allocation, TDL-A and TDL-C together:
 | | Residual, exact p-value | 0.10 | 0.33 | 0.61 | 0.87 |
 | | Power threshold (Li et al.) | 0.01 | 0.01 | 0.04 | 0.28 |
 | | EVM threshold | 0 | 0 | 0 | 0 |
-| | Block test (no training) | 0.34 | 0.61 | 0.85 | 0.96 |
+| | Block test (no training) | 0.34 | 0.62 | 0.85 | 0.96 |
 | | Per-cell MLP, P+R+E | 0.08 ± 0.01 | 0.37 ± 0.02 | 0.73 ± 0.01 | 0.93 ± 0.00 |
 | Data | **U-Net, P+R+E** | **0.78 ± 0.01** | **0.96 ± 0.00** | 0.99 ± 0.00 | 1.00 ± 0.00 |
 | | U-Net, P+E | 0.74 ± 0.01 | 0.96 ± 0.00 | 0.99 ± 0.00 | 1.00 ± 0.00 |
@@ -105,7 +109,7 @@ allocation, TDL-A and TDL-C together:
 | | EVM threshold | 0 | 0.04 | 0.21 | 0.43 |
 | | Power threshold (Li et al.) | 0.02 | 0.01 | 0.02 | 0.13 |
 | | Residual threshold | 0 | 0 | 0 | 0 |
-| | Block test (no training) | 0.33 | 0.71 | 0.91 | 0.98 |
+| | Block test (no training) | 0.34 | 0.71 | 0.91 | 0.98 |
 | | Per-cell MLP, P+R+E | 0.01 ± 0.00 | 0.15 ± 0.01 | 0.50 ± 0.01 | 0.77 ± 0.01 |
 
 Cell-level F1 at the same thresholds:
@@ -120,7 +124,7 @@ Cell-level F1 at the same thresholds:
 | Residual threshold | 0.584 | 0 | 0.057 | 0.058 |
 | Residual, exact p-value | 0.588 | 0 | 0.058 | 0.059 |
 | Power threshold (Li et al.) | 0.209 | 0.128 | 0.106 | 0.120 |
-| Block test (no training, section 11) | 0.517 | 0.911 | 0.880 | 0.872 |
+| Block test (no training, section 11) | 0.512 | 0.912 | 0.880 | 0.872 |
 | Per-cell MLP, P+R+E (section 11) | 0.383 ± 0.002 | 0.711 ± 0.001 | 0.729 ± 0.000 | 0.694 ± 0.000 |
 | U-Net, P+R+E, noise jitter (section 13) | 0.822 | 0.956 | 0.958 | 0.948 ± 0.001 |
 
@@ -327,8 +331,8 @@ whose delays exceed `tau_max`.
   channel changes within the slot, so the EVM of the late symbols grows without any jamming and
   the networks that use EVM flag them.
 - **Power alone is robust** to both, but weaker in matched conditions.
-- **The block test (section 11) breaks harder than the networks:** F1 0.595 / 22% false alarms
-  at 1000 ns and 0.648 / 16% at 30 m/s (0.877 with the QPSK jammer). Its nulls are exact only
+- **The block test (section 11) breaks harder than the networks:** F1 0.591 / 21% false alarms
+  at 1000 ns and 0.646 / 15% at 30 m/s (0.878 with the QPSK jammer). Its nulls are exact only
   under their assumptions, and both conditions violate them (residual: delays beyond `tau_max`;
   EVM null: measured on slow, short-delay channels). The U-Net trained with noise jitter
   (section 13) behaves like the nominal one here (0.833 / 4.8%, 0.843 / 6.1%, 0.948).
@@ -377,7 +381,8 @@ every `evaluate` run):
   partial-band jamming: the DMRS cell and the data cells of a PRB share the channel, so their
   power ratio is about 1 without jamming and under partial-band jamming and above 1 when only the
   pilots are jammed; when the residual and this ratio are both significant at 1% (fixed in
-  advance, not tuned), the PRB's data cells are not flagged. In benign test slots every cell type
+  advance, not tuned), the PRB's data cells get p = 1 (they stay among the tested cells but are not
+  flagged). In benign test slots every cell type
   is flagged 0.7-1.1% of the time at p < 0.01.
 - **Per-cell MLP** (`model.PixelMLP`): the fused U-Net's six input channels, but only 1x1
   convolutions (4 801 parameters), so every cell is classified from its own features and masks
@@ -386,7 +391,7 @@ every `evaluate` run):
 | Detector | Pilot | Data | Partial | All slots | Scheduling-aware jammer |
 | --- | --- | --- | --- | --- | --- |
 | **U-Net, P+R+E** | **0.834** | **0.957** | **0.961** | **0.951** | **0.934** |
-| Block test (no training) | 0.517 | 0.911 | 0.880 | 0.872 | 0.846 |
+| Block test (no training) | 0.512 | 0.912 | 0.880 | 0.872 | 0.848 |
 | Per-cell MLP, P+R+E | 0.383 | 0.711 | 0.729 | 0.694 | 0.621 |
 | EVM threshold (best literature baseline) | 0 | 0.324 | 0.319 | 0.303 | 0.399 |
 
@@ -397,18 +402,19 @@ Pd per JSR in section 3. By SNR, block test 0.834 / 0.908 and U-Net 0.916 / 0.98
 **Reading.**
 - Covering the whole carrier and averaging over the PRB closes most of the gap to the literature
   baselines (0.30 -> 0.87). The fair comparison for the U-Net is this block test: 0.951 vs 0.872.
-- What remains is mostly pilot jamming (0.834 vs 0.517). From one PRB, the block test cannot tell
+- What remains is mostly pilot jamming (0.834 vs 0.512). From one PRB, the block test cannot tell
   whether a raised EVM comes from jammed data or from a corrupted channel estimate unless the
   pilot-to-data power contrast is significant, which fails at weak pilot jamming. It also flags
   the data cells under strong pilot jamming whenever the contrast test misses, which costs it
-  false alarms (2.6% in pilot-attack slots). The U-Net resolves this from context.
+  false alarms (2.7% in pilot-attack slots). The U-Net resolves this from context.
 - The block test's Pd for partial-band jamming levels off at 0.87 on scheduled cells (section 3
   table, +9 dB): under strong jamming the DMRS cell's power averages only 12 jammed resource
   elements, so the pilot-to-data power ratio fluctuates far more than in the benign slots its
   null comes from, and the pilot-only rule sometimes unflags jammed data cells. Requiring the
   ratio to be significant also against the equal-jamming null F(24, 312) removes this (Pd 0.99)
-  but lets more pilot-induced EVM through: pilot-attack F1 0.451 instead of 0.517, overall 0.861
-  instead of 0.872. The table keeps the rule with the higher F1.
+  but lets more pilot-induced EVM through: pilot-attack F1 0.451 instead of 0.512, overall 0.861
+  instead of 0.872. The table keeps the rule with the higher F1. (The independent code review
+  counted the cost at +9 dB: the rule unflags 702 of 5 024 jammed scheduled PRBs.)
 - Without context the learned detector falls below the block test (0.694): comparing a cell with
   the other cells of its PRB is most of what both exploit. The U-Net's value is learning that
   structure and the cross-feature rules together, from data, and adapting them when the
@@ -419,30 +425,38 @@ Pd per JSR in section 3. By SNR, block test 0.834 / 0.908 and U-Net 0.916 / 0.98
 `results/margin/margin.pdf` and `margin_compact.pdf` (`experiments/detection_margin`). Can an
 attacker damage the link and stay unseen? The `margin` split puts the jammer on exactly the
 scheduled PRBs, as in the BLER experiment of section 1, at a fixed SNR of 15 dB and JSR from -30
-to 0 dB (13 200 jammed and 2 000 benign slots). A slot is flagged when its largest cell score
-exceeds the level that 1% of benign slots exceed (half of the benign slots set it; on the other
-half the measured slot false-alarm rate is 0.7-1.4%). The BLER of the unprotected link is what a
+to 0 dB (13 200 jammed and 2 000 benign slots, simulated in batches of 8 so that every grid point
+mixes 25 allocations). A slot is flagged when its largest cell score exceeds the level that 1% of
+benign slots exceed; whole batches of benign slots alternate between setting that level and
+checking it, so the check uses allocations the threshold never saw (measured slot false-alarm
+rate 0.7-1.9%). The BLER of the unprotected link is what a
 detector based on CRC failures or link KPIs can see.
 
 | Channel | Attack | JSR at 10% BLER | Slot Pd 90%: P+R+E | P+E | Block test | Margin P+R+E |
 | --- | --- | --- | --- | --- | --- | --- |
-| TDL-A | Pilot | +0.6 dB | **-15.2 dB** | -9.6 dB | -12.9 dB | **15.8 dB** |
-| | Data | -5.5 dB | -15.8 dB | -16.0 dB | -15.1 dB | 10.3 dB |
-| | Partial | -6.7 dB | -18.1 dB | -17.9 dB | -15.9 dB | 11.4 dB |
-| TDL-C | Pilot | +0.2 dB | **-13.7 dB** | -10.9 dB | -13.1 dB | **13.9 dB** |
-| | Data | -6.5 dB | -14.2 dB | -15.4 dB | -13.8 dB | 7.7 dB |
-| | Partial | -7.3 dB | -15.9 dB | -15.7 dB | -15.3 dB | 8.6 dB |
+| TDL-A | Pilot | +0.6 dB | **-13.4 dB** | -10.0 dB | -12.3 dB | **14.0 dB** |
+| | Data | -5.5 dB | -15.2 dB | -15.4 dB | -13.8 dB | 9.7 dB |
+| | Partial | -6.7 dB | -17.5 dB | -16.0 dB | -15.1 dB | 10.8 dB |
+| TDL-C | Pilot | +0.2 dB | **-15.0 dB** | -9.8 dB | -12.6 dB | **15.2 dB** |
+| | Data | -6.5 dB | -14.7 dB | -15.3 dB | -14.8 dB | 8.2 dB |
+| | Partial | -7.3 dB | -16.2 dB | -16.1 dB | -15.7 dB | 8.9 dB |
 
 **Reading.**
-- Every attack is detected in 90% of slots at least 7.7 dB of JSR before it pushes the BLER of
+- Every attack is detected in 90% of slots at least 8.2 dB of JSR before it pushes the BLER of
   the unprotected link to 10%. There is no range of jamming powers in which an attack hurts and
   stays unseen; a KPI- or CRC-based detector sees it only once the damage is done.
 - The residual buys the most where the attacker is most efficient: for pilot jamming the margin
-  is 15.8 / 13.9 dB with it and 10.1 / 11.1 dB without (TDL-A / TDL-C).
-- Per cell (90% of the jammed cells, not of the slots) the margin is smaller: 7.8-9.2 dB for
-  pilot jamming, 1.3-1.4 dB for partial-band and 0.2-2.9 dB for data jamming. The slot is flagged
-  long before every one of its cells is.
-- The block test is 0.4-2.3 dB behind the fused network at the slot level.
+  is 14.0 / 15.2 dB with it and 10.6 / 10.0 dB without (TDL-A / TDL-C).
+- Per cell (90% of the jammed cells, not of the slots) the margin is much smaller: 7.0-8.9 dB for
+  pilot jamming, but between -1.7 and +2.4 dB for data and partial-band jamming (on TDL-C the 90%
+  cell level comes after the 10% BLER point). The slot is flagged long before every one of its
+  cells is.
+- The block test is up to 2.4 dB behind the fused network at the slot level (level with it for
+  TDL-C data jamming).
+- A first version of this split was simulated in batches of 64, so each grid point mixed only 3-4
+  allocations and the calibration and check halves shared them (found by the independent code
+  review). Regenerated as above, the margins moved by up to 1.8 dB; the minimum went from 7.7 to
+  8.2 dB.
 
 ## 13. False alarms across SNR and under noise-estimation error
 
@@ -467,16 +481,18 @@ the cells of the 4 000 benign `test` slots.
 `delta` dB shifts P, R and E by `-delta` dB inside their masks; this is applied to the stored test
 features with thresholds from the correct noise power (it leaves out the second-order effect of
 the wrong noise variance on the LMMSE weights). For the residual the exact answer is
-`P(R > t 10^(delta/10))`, averaged over the DMRS cells of the benign test slots.
+`P(R > t 10^(delta/10))`, averaged over the DMRS cells of the benign test slots, with `t` the
+threshold at the same design rate as the measured curve (the cutoff calibrated on benign
+validation cells, p = 1.04%).
 
 | Detector | -2 dB | -1 dB | -0.5 dB | 0 | +0.5 dB | +1 dB | +2 dB | F1 at -1 / 0 / +1 dB |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | U-Net, P+R+E | 54% | 37% | 15% | 1.05% | 0.11% | 0.05% | 0.04% | 0.699 / 0.948 / 0.937 |
 | U-Net, P+E | 60% | 45% | 19% | 1.06% | 0.11% | 0.06% | 0.04% | 0.637 / 0.940 / 0.931 |
 | U-Net, power only | 54% | 39% | 15% | 1.31% | 0.37% | 0.13% | 0.02% | 0.586 / 0.906 / 0.897 |
-| Block test | 56% | 28% | 8.2% | 0.86% | 0.20% | 0.09% | 0.02% | 0.522 / 0.869 / 0.859 |
+| Block test | 56% | 28% | 8.2% | 0.86% | 0.20% | 0.09% | 0.02% | 0.522 / 0.869 / 0.858 |
 | Residual, exact p-value | 14.4% | 4.75% | 2.31% | 0.95% | 0.32% | 0.11% | 0.00% | - |
-| Residual, theory | 14.1% | 4.69% | 2.30% | 1.00% | 0.38% | 0.12% | 0.01% | - |
+| Residual, theory | 14.4% | 4.83% | 2.38% | 1.04% | 0.40% | 0.13% | 0.01% | - |
 | **U-Net, P+R+E, noise jitter** | 20% | **2.0%** | **1.2%** | 1.20% | 1.09% | 0.73% | 0.21% | **0.936 / 0.946 / 0.947** |
 
 The last row is the fused U-Net trained with the noise estimate off by an error drawn uniformly
@@ -492,7 +508,7 @@ alarms are 1.2% at the correct noise power.
 - The noise power is the detectors' weak point. An underestimate of 0.5 dB raises the U-Nets'
   false alarms from 1% to 15-19%, the block test's (whose power nulls average 156 resource
   elements, so they are narrow) to 8%. The residual, with six degrees of freedom per PRB, goes
-  only to 2.3%, exactly as its theory predicts (2.30%).
+  only to 2.3%, as its theory predicts (2.4%).
 - A small overestimate is harmless: at +0.5 dB the fused detector has 0.11% false alarms and F1
   0.951; at +2 dB it starts to cost (F1 0.902, Pd 0.83 instead of 0.96). So a gNB that is unsure
   of its noise floor should bias it slightly upward. In practice the thermal noise
@@ -539,6 +555,63 @@ threshold for that is again computed, not learned. A gNB can therefore run the r
 two time scales: per slot for localization, and averaged over a few slots for persistent weak
 jammers, with the false-alarm rate fixed by design at both.
 
+## 15. Smarter jammers that use the DMRS configuration
+
+Fourth round (`docs/plan-v4.md`). The threat model lets the jammer know the DMRS positions, but
+every attack so far jammed whole PRBs on fixed symbols, a structure the block test and the U-Net
+both exploit. Two unseen jammers test that (`SimConfig`, test grids `combjam` and `hopjam`, same
+size as the other generalization grids; thresholds from the matched `val` split):
+
+- **Pilot comb** (`jammer_pilot_comb`): on the DMRS symbol only the pilot subcarriers (the even
+  comb of type-1 DMRS) are jammed. The receiver's channel estimate uses only those resource
+  elements, so the damage per jammed RE is the same as before for half the energy on the DMRS
+  symbol. RE-selective reference-signal jamming is known from LTE (Rao et al. 2017) and the NR
+  PBCH (Kazemian et al. 2024).
+- **Hopping** (`jammer_hopping`): the jammed PRB block (same size) moves to a new random position
+  on every OFDM symbol, like a fast frequency-hopping jammer (Kleber & Laneman 2017; Schösser et
+  al. 2026 include such jammers in an OFDMA anomaly benchmark).
+
+Cell-level F1 (false-alarm rate on scored cells), nominal training:
+
+| Detector | Matched | Pilot comb: all / pilot attacks | Hopping: all | Hopping: false alarms |
+| --- | --- | --- | --- | --- |
+| U-Net, P+R+E | 0.951 | 0.946 / 0.769 | 0.587 | 12.3% |
+| U-Net, P+E | 0.946 | 0.928 / 0.551 | 0.564 | 11.2% |
+| U-Net, power only | 0.913 | 0.904 / 0.738 | 0.545 | 20.6% |
+| Block test | 0.872 | 0.876 / 0.409 | 0.470 | 24.6% |
+| Per-cell MLP, P+R+E | 0.694 | 0.700 / 0.388 | **0.684** | 1.8% |
+
+Pd at -15 dB on jammed scheduled cells, pilot comb: P+R+E 0.59 (0.62 against the full pilot
+attack), P+E 0.35 (0.43), power only 0.18 (0.25), block test 0.31 (0.34).
+
+**Retraining on mixed attacks** (`experiments/attack_training`, `results/attack_training/`): the
+fused U-Net trained again on `train_atk` (batches cycling through the nominal, hopping and
+pilot-comb jammers, own seeds; thresholds from `val_atk`), 3 seeds:
+
+| Test grid | Nominal training: F1 / false alarms | Attack-mixed training: F1 / false alarms |
+| --- | --- | --- |
+| Matched | 0.951 / 1.2% (pilot attacks 0.834) | **0.953 +- 0.001 / 0.8%** (pilot attacks 0.884) |
+| Pilot comb | 0.946 / 1.3% (pilot attacks 0.769) | **0.950 / 0.9%** (pilot attacks 0.849) |
+| Hopping | 0.587 +- 0.009 / 12.3% | **0.914 +- 0.003 / 1.9%** |
+
+**Reading.**
+- **The residual matters more against the comb jammer.** It measures exactly the energy that
+  corrupts the channel estimate, so the fused detector keeps its sensitivity to weak pilot
+  jamming (Pd 0.59 at -15 dB), while every detector that relies on the power of the whole DMRS
+  cell loses some: without the residual the pilot-attack F1 falls to 0.551, and the gap between
+  the networks with and without it nearly triples (0.077 -> 0.218).
+- **The hopping jammer breaks the learned structure.** Trained on whole-PRB attacks, the U-Nets
+  paint whole PRB rows when part of a row is jammed (false alarms 11-21%); the block test, built
+  on PRB averages, fails the same way. Only the per-cell MLP, which assumes no structure, is
+  robust, and it becomes the best detector of the table.
+- **Diversity fixes it.** With the three jammers in the training mix, the fused U-Net reaches
+  0.914 on the hopping jammer with 1.9% false alarms and loses nothing elsewhere. The attack
+  types of the test grids were part of the mix (with independent draws), so, as for the mixed
+  channels of section 10, this shows that diversity suffices, not that every unseen attack
+  structure is handled. Its higher pilot-attack F1 in matched conditions (0.884) comes partly
+  from its own operating point: thresholds from `val_atk` give 0.8% false alarms instead of
+  1.2%.
+
 ## Caveats before these go into the paper
 
 - Each Pd point averages over SNR 5–25 dB; the SNR-range files give the split by SNR.
@@ -547,6 +620,10 @@ jammers, with the false-alarm rate fixed by design at both.
 - 15 training epochs per run; the validation loss is lowest well before that (training curves).
 - Only 190 different allocations exist, so test allocations repeat training ones; channel
   realizations and jammer draws do not.
+- All slots of a simulated batch share one allocation. The grid splits use batches of 64 or 128,
+  so each grid point (200-500 slots) mixes only a few allocations, and neighbouring points of a
+  Pd curve can differ in allocation mix. Averages over the grid (F1) are not affected much; the
+  `margin` split, whose curves are interpolated, uses batches of 8.
 - The reference datasets were generated on a GPU; GPU and CPU draw different random numbers, so
   results are reproducible per device, not bit-identical across devices.
 - Normalized EVM is biased upward at high SNR without jamming (issue #6); the detectors are

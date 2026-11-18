@@ -165,6 +165,14 @@ uv run python -m jamloc.experiments.calibration      # false alarms vs SNR and v
 uv run python -m jamloc.experiments.multislot        # residual averaged over K slots: theory vs checks
 ```
 
+**Fourth round** (`docs/plan-v4.md`): smarter jammers that use the DMRS configuration (pilot comb,
+symbol hopping) and retraining on a mix of attacks (about 45 min on a laptop CPU):
+
+```bash
+uv run python -m jamloc.experiments.generalization            # now also the comb and hopping grids
+uv run python -m jamloc.experiments.attack_training --seeds 0 1 2
+```
+
 **Other figures** (run locally; latency should be measured on the target CPU):
 
 ```bash

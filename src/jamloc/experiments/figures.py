@@ -1004,9 +1004,9 @@ RESULT_FIGURES = [
             "Solid: share of jammed slots flagged at 1% slot false alarm; dotted: share of jammed "
             "cells flagged at 1% cell false alarm; black: BLER of the unprotected link, which is "
             "all a detector built on CRC failures or link KPIs can see. Every attack is flagged in "
-            "90% of slots at least 7.7 dB of JSR before it pushes the BLER to 10%, so there is no "
+            "90% of slots at least 8.2 dB of JSR before it pushes the BLER to 10%, so there is no "
             "range of jamming powers in which it hurts unseen. The residual matters most for pilot "
-            "jamming, the attacker's most efficient option (margin 15.8 dB with it, 10.1 dB "
+            "jamming, the attacker's most efficient option (margin 14.0 dB with it, 10.6 dB "
             "without, on TDL-A)."
         ),
         "python -m jamloc.experiments.detection_margin",
@@ -1040,6 +1040,18 @@ RESULT_FIGURES = [
             "link-level slots the K-slot thresholds give 0.92-1.15% false alarms."
         ),
         "python -m jamloc.experiments.multislot",
+    ),
+    (
+        "../attack_training/attack_training.png",
+        "Smarter jammers and attack-mixed training",
+        (
+            "Two jammers that use their knowledge of the DMRS configuration: one jams only the "
+            "pilot subcarriers of the DMRS symbol, the other moves its PRB block on every OFDM "
+            "symbol. Trained on whole-PRB attacks, the U-Net paints whole PRB rows and fails on "
+            "the hopping jammer; retrained on batches that mix the three jammers, it recovers "
+            "without losing anything on the original attacks."
+        ),
+        "python -m jamloc.experiments.attack_training",
     ),
 ]
 

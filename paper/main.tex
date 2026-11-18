@@ -34,7 +34,7 @@ reports pilot jamming at the wrong symbols because the damage appears in unjamme
 per-cell false-alarm rate in a Sionna PUSCH simulation, against 0.87 for a training-free block
 test built on exact or calibrated null distributions of the same features, and a 7.7k-parameter version (F1
 0.94) runs in 0.43\,ms per slot on one CPU core as a frozen graph. At 15\,dB SNR, every attack
-on the user's resource blocks is flagged in 90\% of slots at least 7.7\,dB below the jamming
+on the user's resource blocks is flagged in 90\% of slots at least 8.2\,dB below the jamming
 power at which it raises the unprotected block error rate to 10\%. Used by the receiver to weight pilots and log-likelihood ratios by the estimated jamming
 power, the map restores the link under strong jamming without the penalty that hard erasure pays
 at weak jamming.
@@ -60,8 +60,10 @@ Most jamming detectors decide per slot or per block, from key performance indica
 spectrum data~\cite{kilinc2022jade,neasamonisanthi2025interfo,reusmuns2024senseoran}, or from
 the eigenstructure of multi-antenna pilot blocks~\cite{mehrabian2026robust}. Time--frequency
 resolution has been obtained from EVM per symbol and resource block~\cite{ornek2023securing,
-ornek2024advanced}, so far as images without a detection rule, and from per-tone power tests
-in robust OFDM receivers~\cite{li2012robust}. A gNB, however, needs to know \emph{which}
+ornek2024advanced}, so far as images without a detection rule, from per-tone power tests
+in robust OFDM receivers~\cite{li2012robust}, and from power thresholds per PRB and OFDM symbol
+on the unallocated uplink resources~\cite{adhikari2022physical}; dense anomaly maps of cellular
+spectrograms~\cite{kim2025synthetic} work on the spectrum rather than the receiver's grid. A gNB, however, needs to know \emph{which}
 resources were attacked: to report and react to the attack, and to decode through it. Two
 difficulties appear at this resolution. First, the place where the jammer transmits and the
 place where its effect shows up differ: under pilot jamming the EVM rises on the
@@ -71,8 +73,9 @@ SNR and channel.
 
 This paper makes the following contributions.
 \begin{itemize}
-\item We formulate jamming localization in the NR uplink as a per-slot binary map over PRBs
-  and OFDM symbols whose labels mark the \emph{attacked} cells, and show that EVM-based maps
+\item We formulate jamming localization in the NR uplink as a per-slot binary map over the
+  PRBs and OFDM symbols of the whole carrier, including the scheduled allocation, whose labels
+  mark the \emph{attacked} cells, and show that EVM-based maps
   mislocate pilot jamming.
 \item We introduce a DMRS residual for single-antenna receivers, the per-PRB energy of the
   pilot estimates outside the delay subspace, and derive its exact distribution with and
@@ -81,8 +84,9 @@ This paper makes the following contributions.
   design value at every SNR.
 \item We fuse power, residual and EVM in a small U-Net and evaluate it at 1\% per-cell false
   alarm against threshold detectors, a training-free block test that uses the attack structure
-  and exact or calibrated null distributions, and a network without spatial context, under a scheduling-aware
-  attacker, unseen channel conditions and noise-estimation error, together with network size
+  and exact or calibrated null distributions, and a network without spatial context, under a
+  scheduling-aware attacker, jammers that target only the pilot subcarriers or hop between PRBs,
+  unseen channel conditions and noise-estimation error, together with network size
   and CPU latency. Every attack is detected well before it damages the link.
 \item We show how the map should be used by the receiver: as a statement of \emph{where} to
   estimate the jamming power, which then weights pilots and log-likelihood ratios (LLRs), rather
@@ -315,7 +319,7 @@ its channel, reaches 0.913.
 
 The fair classical reference is the block test, which covers every cell and uses the attack
 structure: it reaches 0.872. The network's lead over it lies mostly in pilot jamming (0.834
-against 0.517): from one PRB the block test cannot tell whether a raised EVM comes from jammed data
+against 0.512): from one PRB the block test cannot tell whether a raised EVM comes from jammed data
 or from a corrupted channel estimate unless the pilot-to-data power contrast is significant, which
 fails at weak pilot jamming. Spatial context is what the network exploits: with the same inputs
 and no neighbouring cells, the per-cell MLP falls to 0.694, below the block test.
@@ -341,7 +345,7 @@ Residual threshold & 0.584 & 0 & 0.057 & 0.058 & 0.10 & 0 \\
 Residual, exact $p$-value & 0.588 & 0 & 0.058 & 0.059 & 0.10 & 0 \\
 Power threshold~\cite{li2012robust} & 0.209 & 0.128 & 0.106 & 0.120 & 0.01 & 0.02 \\
 \midrule
-Block test (no training) & 0.517 & 0.911 & 0.880 & 0.872 & 0.34 & 0.33 \\
+Block test (no training) & 0.512 & 0.912 & 0.880 & 0.872 & 0.34 & 0.34 \\
 Per-cell MLP, P+R+E & 0.383 & 0.711 & 0.729 & 0.694 & 0.08 & 0.01 \\
 \bottomrule
 \end{tabular}
@@ -357,15 +361,17 @@ allocation, TDL-A and TDL-C (bands: $\pm 1$ std over training seeds).}
 
 \subsection{Detection before damage}
 Can an attacker hurt the link and stay unseen? We put the jammer on exactly the scheduled PRBs,
-as in the BLER experiments, at 15\,dB SNR and JSRs down to $-30$\,dB (13\,200 slots), and flag
-a slot when its largest cell logit exceeds the level that 1\% of benign slots exceed (measured
-on held-out benign slots: 0.7--1.4\% for the detectors compared). Fig.~\ref{fig:margin} compares this slot-level $P_d$
+as in the BLER experiments, at 15\,dB SNR and JSRs down to $-30$\,dB (13\,200 slots, 25
+allocations per point), and flag a slot when its largest cell logit exceeds the level that 1\% of
+benign slots exceed (measured on benign slots with other allocations: 0.7--1.9\%). Fig.~\ref{fig:margin} compares this slot-level $P_d$
 with the BLER of the unprotected link, which is all that a detector built on CRC failures or link
 indicators~\cite{kilinc2022jade} can see. The fused detector flags 90\% of the jammed slots
-13.9, 7.7 and 8.6\,dB (TDL-C; TDL-A: 15.8, 10.3 and 11.4\,dB) below the JSR at which pilot,
+15.2, 8.2 and 8.9\,dB (TDL-C; TDL-A: 14.0, 9.7 and 10.8\,dB) below the JSR at which pilot,
 data and partial-band jamming push the BLER to 10\%: no range of jamming powers lets an attack
 hurt the link unseen. The residual matters most for pilot jamming, the attacker's most efficient
-option: without it the margin shrinks to 11.1\,dB (10.1\,dB on TDL-A).
+option: without it the margin shrinks to 10.0\,dB (10.6\,dB on TDL-A). Per cell the lead is
+smaller: for data and partial-band jamming, 90\% of the jammed cells are reached only around the
+10\% BLER point, so the slot alarm comes long before the full map.
 
 \begin{figure}[t]
 \centering
@@ -393,21 +399,34 @@ cycle through the nominal channels, long delay spreads and speeds up to 30\,m/s 
 the loss (last rows); these channel types were part of the mix, with independent realizations,
 so this shows that diversity suffices, not that arbitrary channels are handled.
 
+\emph{Smarter jammers.} A jammer that knows the DMRS configuration can hit only the pilot
+subcarriers of the DMRS symbol, which corrupts the channel estimate as much for half the
+energy~\cite{rao2017lte,kazemian2024pbch}, or move its PRB block on every OFDM
+symbol~\cite{kleber2017tracking,schoesser2026spectrum}. Against the comb jammer the residual,
+which measures exactly what corrupts the estimate, keeps the fused detector's $P_d$ at
+$-15$\,dB at 0.59 (0.62 for the full pilot attack), whereas without it the pilot-attack F1
+falls to 0.551 (fused: 0.769). The hopping jammer breaks every detector that exploits the block
+structure: the U-Nets, which learned that jamming fills PRB rows, reach F1 0.55--0.59 with
+11--21\% false alarms, the block test 0.47, and only the per-cell MLP holds (0.68). Retrained on
+batches that mix the three jammers, the fused network recovers (Table~\ref{tab:unseen}): 0.914
+on the hopping jammer, 0.950 on the comb jammer and 0.953 in matched conditions.
+
 \emph{SNR and noise power.} With thresholds set on benign validation cells, one threshold leaves
 the fused detector's per-cell false-alarm rate at 3.9\% at 6\,dB SNR and 0.1\% at 24\,dB; one
 threshold per 4\,dB SNR bin, which the gNB can apply since it knows its SNR, holds it at
 0.6--1.4\% for 0.006 F1. The residual and the block test stay near 1\% with one threshold.
 Every feature is divided by the estimated noise power, which is the learned detectors' weak
-point: an estimate 0.5\,dB too low raises the fused detector's false alarms to 15\% (1\,dB:
-37\%), the residual's only to 2.3\% (4.7\%), exactly as Proposition~\ref{prop:null} predicts.
+point, the cell-level counterpart of the SNR wall of energy detection~\cite{tandra2008snr}: an estimate 0.5\,dB too low raises the fused detector's false alarms to 15\% (1\,dB:
+37\%), the residual's only to 2.3\% (4.8\%), as Proposition~\ref{prop:null} predicts (2.4\%,
+4.8\%).
 Training with the noise estimate off by an error drawn from $\pm 1$\,dB per slot removes this
 sensitivity: within $\pm 1$\,dB the false-alarm rate stays at 0.7--2.0\% and F1 at 0.94--0.95,
 at a cost of 0.003 F1 in matched conditions ($0.948 \pm 0.001$). Overestimating the noise power
 by 0.5\,dB costs no detector anything; by 2\,dB it lowers the fused detector's F1 to 0.90. The block test breaks harder than the networks on unseen channels
-(F1 0.60 at 1000\,ns, 0.65 at 30\,m/s), since its nulls hold only under their assumptions.
+(F1 0.59 at 1000\,ns, 0.65 at 30\,m/s), since its nulls hold only under their assumptions.
 
 \begin{table}[t]
-\caption{F1 / false-alarm rate on unseen conditions (thresholds from the matched validation
+\caption{F1 / false-alarm rate on unseen channels and jammers (thresholds from the matched validation
 set; mean over three seeds)}
 \label{tab:unseen}
 \centering
@@ -420,11 +439,18 @@ Matched test & \textbf{0.951} / 1.2\% & 0.946 / 1.3\% & 0.913 / 1.2\% \\
 QPSK jammer & \textbf{0.951} / 1.1\% & 0.942 / 1.3\% & 0.905 / 1.2\% \\
 TDL-C, 1000\,ns & 0.818 / 6.1\% & 0.701 / 15.7\% & \textbf{0.923} / 1.3\% \\
 30\,m/s & 0.865 / 5.1\% & 0.835 / 6.7\% & \textbf{0.912} / 1.5\% \\
+Pilot-comb jammer & \textbf{0.946} / 1.3\% & 0.928 / 1.7\% & 0.904 / 1.2\% \\
+Hopping jammer & \textbf{0.587} / 12\% & 0.564 / 11\% & 0.545 / 21\% \\
 \midrule
 \multicolumn{4}{@{}l}{\emph{Trained on mixed channels:}} \\
 Matched test & \textbf{0.955} / 0.7\% & 0.948 / 0.7\% & 0.914 / 1.0\% \\
 TDL-C, 1000\,ns & 0.921 / 1.7\% & 0.911 / 2.1\% & \textbf{0.928} / 1.0\% \\
 30\,m/s & \textbf{0.946} / 1.0\% & 0.939 / 1.0\% & 0.917 / 1.1\% \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Trained on mixed attacks (P+R+E only):}} \\
+Matched test & 0.953 / 0.8\% & -- & -- \\
+Pilot-comb jammer & 0.950 / 0.9\% & -- & -- \\
+Hopping jammer & 0.914 / 1.9\% & -- & -- \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -485,7 +511,9 @@ jamming power, rather than what it erases, the map protects the link against str
 or false alarms.
 
 The study is limited to one receive antenna, a Gaussian jammer aligned with the slot grid and
-perfect synchronization. All features rely on the gNB's estimate of its noise power; training
+perfect synchronization. The network learns the structure of the attacks it is trained on: a
+jammer that hops between PRBs from symbol to symbol defeats a detector trained only on block
+jammers, and a training set that mixes attack structures is needed. All features rely on the gNB's estimate of its noise power; training
 with a deliberately misestimated noise power makes the fused detector tolerate errors of
 $\pm 1$\,dB. The residual generalizes naturally to multiple
 antennas (a space--frequency subspace) and to additional DMRS symbols, which would also address
