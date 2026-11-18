@@ -125,6 +125,9 @@ def test_detection_margin_small(tmp_path, monkeypatch):
     with open(out / "margin_summary.csv", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     assert {r["detector"] for r in rows} == set(detection_margin.DETECTORS)
+    assert {float(r["slot_fa_target"]) for r in rows} == set(detection_margin.SLOT_FAS)
+    with open(out / "margin_summary_per_seed.csv", encoding="utf-8", newline="") as f:
+        assert {r["seed"] for r in csv.DictReader(f)} == {"0"}
     # linear interpolation between the grid points -5 and 0 dB of the logistic BLER curve
     lo, hi = 1 / (1 + np.exp(5)), 0.5
     expected = -5 + 5 * (0.1 - lo) / (hi - lo)
@@ -145,14 +148,14 @@ def test_calibration_small(tmp_path, monkeypatch):
     _small_models(tmp_path, monkeypatch, ("fused", "no_residual", "power"))
     train("fused", epochs=1, batch_size=32, jitter=1.0)  # the U-Net trained with noise jitter
     generate("test", num_slots=60, batch_size=32)
-    calibration.main(["--seeds", "0"])
+    calibration.main(["--seeds", "0", "--num-slots", "60"])
     out = tmp_path / "results" / "calibration"
     assert (out / "calibration.png").is_file()
     with open(out / "snr_thresholds.csv", encoding="utf-8", newline="") as f:
         assert {r["detector"] for r in csv.DictReader(f)} == set(calibration.DETECTORS)
 
     # Re-running one detector replaces only its rows
-    calibration.main(["--seeds", "0", "--detectors", "residual_cfar"])
+    calibration.main(["--seeds", "0", "--detectors", "residual_cfar", "--num-slots", "60"])
     with open(out / "snr_thresholds.csv", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     assert {r["detector"] for r in rows} == set(calibration.DETECTORS)
@@ -163,11 +166,22 @@ def test_calibration_small(tmp_path, monkeypatch):
     assert 0.001 < theory_fa[0.0] < 0.1  # the design rate of the calibrated residual cutoff
     assert theory_fa[-1.0] > theory_fa[0.0] > theory_fa[1.0]  # underestimated noise: more
 
+    # Per-slot noise estimate: the estimate's error and the three ways to deploy a detector
+    generate("train_nest", num_slots=64, batch_size=32)
+    generate("val_nest", num_slots=32, batch_size=32)
+    train("fused", epochs=1, batch_size=32, data="nest")
+    calibration.main(["--seeds", "0", "--estimator", "--num-slots", "60"])
+    with open(out / "noise_estimate.csv", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert {r["deployment"] for r in rows} == set(calibration.ESTIMATOR_DEPLOYMENTS)
+    assert {r["split"] for r in rows} == {"test_nest", "sched_nest"}
+    assert (out / "noise_estimate_error.csv").is_file()
+
 
 def test_shift_noise_only_moves_defined_features():
     from jamloc.experiments.calibration import shift_noise
 
-    f = np.zeros((1, 6, 24, 14), np.float32)
+    f = np.zeros((1, len(FEATURE_NAMES), 24, 14), np.float32)
     f[0, FEATURE_NAMES.index("dmrs_mask"), 3, DMRS] = 1
     f[0, FEATURE_NAMES.index("data_mask"), 3, 5] = 1
     g = shift_noise({"features": f}, 1.0)["features"]
@@ -183,9 +197,9 @@ def test_noise_jitter_checkpoint_and_shift(tmp_path, monkeypatch):
     monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
     assert checkpoint_path("fused", 2, jitter=1.0).name == "fused_nj1_seed2.pt"
     rng = np.random.default_rng(0)
-    f = rng.normal(size=(3, 6, 24, 14)).astype(np.float32)
-    f[:, 3:] = rng.integers(0, 2, size=(3, 3, 24, 14))  # masks
-    for variant in ("fused", "power", "evm", "no_residual"):
+    f = rng.normal(size=(3, len(FEATURE_NAMES), 24, 14)).astype(np.float32)
+    f[:, 3:6] = rng.integers(0, 2, size=(3, 3, 24, 14))  # masks
+    for variant in ("fused", "power", "evm", "no_residual", "fused_comb"):
         a = noise_shift(select_inputs(torch.from_numpy(f), variant), variant, torch.full((3,), 0.7))
         b = select_inputs(torch.from_numpy(shift_noise({"features": f}, 0.7)["features"]), variant)
         assert torch.allclose(a, b, atol=1e-6)

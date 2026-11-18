@@ -4,15 +4,22 @@ A cell-level detector runs hundreds of tests per slot, so its false-alarm rate h
 design value under the conditions it meets. Thresholds here are set the CFAR way: on the cells of
 benign ``val`` slots (1% flagged), and the false-alarm rate is measured on benign ``test`` slots.
 
-1. **SNR.** One threshold for all SNRs, or one per 4 dB SNR bin (the gNB knows its SNR). The
-   residual's p-value needs neither: its distribution does not depend on the SNR.
-2. **Noise power.** Every feature is divided by the noise variance, so an estimate that is off by
-   ``delta`` dB shifts P, R and E by ``-delta`` dB (inside their masks). This is applied to the
-   stored test features, with thresholds from the correct noise power. It leaves out the second-
-   order effect of the wrong noise variance on the LMMSE weights. For the residual the exact
-   answer follows from the theory: ``P(R > t 10^(delta/10))``.
+1. **SNR.** One threshold for all SNRs, or one per 4 dB bin of the SNR the gNB estimates from
+   the slot (``snr_db_est``). The residual's p-value needs neither: its distribution does not
+   depend on the SNR.
+2. **Noise power off by a set error.** The test grids ``noise_m2`` ... ``noise_p2`` run the whole
+   receiver chain (channel estimation, equalization, features) with a noise power that is
+   ``delta`` dB off, and the thresholds stay those set with the correct noise power. For the
+   residual the exact answer follows from the theory: ``P(R > t 10^(delta/10))``.
+3. **Estimated noise power** (``--estimator``). The receiver estimates the noise power in every
+   slot from the empty DMRS comb (``jamloc.noise``; splits ``test_nest`` and ``sched_nest``).
+   Three ways to deploy a detector: as trained and calibrated with the true noise power; trained
+   with the true noise power but calibrated on ``val_nest``; trained and calibrated on
+   ``train_nest`` / ``val_nest`` (``train --data nest``). The estimate's own error is reported per
+   attack: a jammer on the whole DMRS symbol of the whole allocation biases it upward.
 
     python -m jamloc.experiments.calibration
+    python -m jamloc.experiments.calibration --estimator
 """
 
 import argparse
@@ -23,11 +30,11 @@ import torch
 
 from jamloc.baselines import block_test_scores, residual_cfar_scores
 from jamloc.config import SimConfig
-from jamloc.dataset import load
+from jamloc.dataset import NOISE_ERRORS_DB, generate, load, noise_split
 from jamloc.evaluate import DETECTOR_STYLE, FA, _logits, aggregate, available_seeds
 from jamloc.features import FEATURE_NAMES
 from jamloc.metrics import f1, threshold_at_fa
-from jamloc.paths import results_dir
+from jamloc.paths import data_dir, results_dir
 from jamloc.plotting import new_figure, paper_style, save
 from jamloc.theory import ccdf, threshold, weights
 from jamloc.train import checkpoint_path, load_model
@@ -43,19 +50,36 @@ LEARNED = {
 }
 THRESHOLD_EDGES_DB = (9.0, 13.0, 17.0, 21.0)  # SNR bins of the conditioned thresholds
 PLOT_EDGES_DB = np.arange(5.0, 25.1, 2.5)  # SNR bins of the false-alarm curves
-MISMATCH_DB = (-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0)
+MISMATCH_DB = NOISE_ERRORS_DB
 _IDX = {name: i for i, name in enumerate(FEATURE_NAMES)}
 
 
 def shift_noise(d: dict, delta_db: float) -> dict:
-    """The split as seen with a noise estimate ``delta_db`` above the true noise power."""
+    """The split as seen with a noise estimate ``delta_db`` above the true noise power, applied to
+    the stored features (first-order approximation, as in the jitter training of
+    ``model.noise_shift``; the experiment itself uses the full-chain ``noise_*`` grids)."""
     if delta_db == 0:
         return d
     f = d["features"].copy()
     f[:, _IDX["power_db"]] -= delta_db
     f[:, _IDX["residual_db"]] -= delta_db * f[:, _IDX["dmrs_mask"]]
     f[:, _IDX["evm_db"]] -= delta_db * f[:, _IDX["data_mask"]]
+    f[:, _IDX["comb_db"], :, SimConfig().dmrs_symbol] -= delta_db
     return {**d, "features": f}
+
+
+_NUM_SLOTS = None  # smaller generated grids (--num-slots, for smoke tests)
+
+
+def _split(name: str) -> dict:
+    if not (data_dir() / f"{name}.npz").is_file():
+        generate(name, _NUM_SLOTS)
+    return load(name)
+
+
+def _snr(d: dict) -> np.ndarray:
+    """SNR the thresholds are binned by: the gNB's estimate (older datasets: the true SNR)."""
+    return d.get("snr_db_est", d["snr_db"])
 
 
 def scores(name: str, d: dict, seed: int, val: dict) -> np.ndarray:
@@ -77,7 +101,7 @@ def available(name: str, seeds) -> bool:
 def _thresholds(s_val: np.ndarray, val: dict) -> tuple[float, np.ndarray]:
     """Global threshold and one per SNR bin, from the cells of benign validation slots."""
     benign = val["attack"] == 0
-    bins = np.digitize(val["snr_db"], THRESHOLD_EDGES_DB)
+    bins = np.digitize(_snr(val), THRESHOLD_EDGES_DB)
     overall = threshold_at_fa(s_val[benign], FA)
     per_bin = np.array(
         [
@@ -91,7 +115,7 @@ def _thresholds(s_val: np.ndarray, val: dict) -> tuple[float, np.ndarray]:
 def _flags(s: np.ndarray, d: dict, thr: float | np.ndarray) -> np.ndarray:
     if np.ndim(thr) == 0:
         return s > thr
-    return s > thr[np.digitize(d["snr_db"], THRESHOLD_EDGES_DB)][:, None, None]
+    return s > thr[np.digitize(_snr(d), THRESHOLD_EDGES_DB)][:, None, None]
 
 
 def run(seeds, detectors=DETECTORS) -> tuple[list[dict], list[dict], list[dict]]:
@@ -130,20 +154,93 @@ def run(seeds, detectors=DETECTORS) -> tuple[list[dict], list[dict], list[dict]]
                     }
                 )
             for delta in MISMATCH_DB:
-                s = s_test if delta == 0 else scores(name, shift_noise(test, delta), seed, val)
-                pred = s > thr_global
+                d = _split(noise_split(delta))  # the whole receiver chain with this error
+                s = scores(name, d, seed, val)
+                pred, ok = s > thr_global, d["attack"] == 0
+                lab = d["labels"].astype(bool)
                 mismatch_rows.append(
                     {
                         "detector": name,
                         "seed": seed,
                         "delta_db": delta,
-                        "fa": float(pred[benign][(s > -np.inf)[benign]].mean()),
-                        "pd": float(pred[labels].mean()),
-                        "f1": f1(pred, labels),
+                        "fa": float(pred[ok][(s > -np.inf)[ok]].mean()),
+                        "pd": float(pred[lab].mean()),
+                        "f1": f1(pred, lab),
                     }
                 )
             print(f"{name}, seed {seed} done", flush=True)
     return snr_rows, summary_rows, mismatch_rows
+
+
+ESTIMATOR_DEPLOYMENTS = {
+    # name: (detector, load options, validation split for the threshold)
+    "fused (true N0)": ("fused", {}, "val"),
+    "fused, recalibrated": ("fused", {}, "val_nest"),
+    "fused, noise jitter": ("fused_nj1", {}, "val"),
+    "fused, trained on estimate": ("fused", {"data": "nest"}, "val_nest"),
+    "block test": ("block_test", {}, "val_nest"),
+    "residual p-value": ("residual_cfar", {}, "val_nest"),
+}
+
+
+def run_estimator(seeds) -> tuple[list[dict], list[dict]]:
+    """Detection with the per-slot noise estimate, and the estimate's own error."""
+    vals = {name: _split(name) for name in ("val", "val_nest")}
+    rows, error_rows = [], []
+    for split in ("test_nest", "sched_nest"):
+        d = _split(split)
+        labels, benign = d["labels"].astype(bool), d["attack"] == 0
+        for attack in np.unique(d["attack"]):
+            e = d["noise_error_db"][d["attack"] == attack]
+            error_rows.append(
+                {
+                    "split": split,
+                    "attack": int(attack),
+                    "median_db": float(np.median(e)),
+                    "p05_db": float(np.quantile(e, 0.05)),
+                    "p95_db": float(np.quantile(e, 0.95)),
+                    "std_db": float(np.std(e)),
+                }
+            )
+        for name, (det, options, val_name) in ESTIMATOR_DEPLOYMENTS.items():
+            val = vals[val_name]
+            variant = "fused" if det == "fused_nj1" else det
+            opts = {"jitter": 1.0} if det == "fused_nj1" else options
+            if det in ("block_test", "residual_cfar"):
+                runs = [(seeds[0], scores(det, d, 0, val), scores(det, val, 0, val))]
+            else:
+                if not all(checkpoint_path(variant, s, **opts).is_file() for s in seeds):
+                    continue
+                runs = []
+                for seed in seeds:
+                    model = load_model(variant, seed, **opts)
+                    f = torch.from_numpy
+                    runs.append(
+                        (
+                            seed,
+                            _logits(model, variant, f(d["features"])),
+                            _logits(model, variant, f(val["features"])),
+                        )
+                    )
+            for seed, s, s_val in runs:
+                thr = threshold_at_fa(s_val[val["labels"] == 0], FA)
+                pred, scored = s > thr, s > -np.inf
+                neg = ~labels
+                rows.append(
+                    {
+                        "split": split,
+                        "deployment": name,
+                        "seed": seed,
+                        "fa_benign": float(pred[benign][scored[benign]].mean())
+                        if benign.any()
+                        else float("nan"),
+                        "fa": float((pred & neg).sum() / neg.sum()),
+                        "pd": float(pred[labels].mean()),
+                        "f1": f1(pred, labels),
+                    }
+                )
+            print(f"[estimator] {split} {name} done", flush=True)
+    return rows, error_rows
 
 
 def residual_theory_fa(delta_db: float, d: dict, fa: float = FA) -> float:
@@ -211,6 +308,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--seeds", type=int, nargs="+", default=None, help="default: all trained")
     p.add_argument("--plot-only", action="store_true")
+    p.add_argument("--estimator", action="store_true", help="per-slot noise estimate (part 3)")
     p.add_argument(
         "--detectors",
         nargs="+",
@@ -218,20 +316,42 @@ def main(argv=None):
         default=None,
         help="run only these and replace their rows in the existing CSVs",
     )
+    p.add_argument("--num-slots", type=int, default=None, help="generate smaller grids (testing)")
     args = p.parse_args(argv)
+    global _NUM_SLOTS
+    _NUM_SLOTS = args.num_slots
 
     out = results_dir() / "calibration"
     out.mkdir(parents=True, exist_ok=True)
+    if args.estimator:
+        rows, error_rows = run_estimator(args.seeds or available_seeds())
+        _write(error_rows, out / "noise_estimate_error.csv")
+        mean = aggregate(rows, ("fa_benign", "fa", "pd", "f1"))
+        _write(mean, out / "noise_estimate.csv")
+        for r in error_rows:
+            print(
+                f"{r['split']:10s} attack {r['attack']}: estimate error median "
+                f"{r['median_db']:+.2f} dB, 5-95% [{r['p05_db']:+.2f}, {r['p95_db']:+.2f}] dB"
+            )
+        for r in mean:
+            print(
+                f"{r['split']:10s} {r['deployment']:28s} FA benign {r['fa_benign_mean']:.4f}  "
+                f"FA {r['fa_mean']:.4f}  Pd {r['pd_mean']:.3f}  F1 {r['f1_mean']:.3f}"
+            )
+        return
     if not args.plot_only:
         snr_rows, summary_rows, mismatch_rows = run(
             args.seeds or available_seeds(), args.detectors or DETECTORS
         )
-        test, val = load("test"), load("val")
+        val = load("val")
         # The measured residual curve uses the threshold calibrated on benign validation cells
-        # (p = 10^-score), so the theory uses the same design false-alarm rate
+        # (p = 10^-score), so the theory uses the same design false-alarm rate, averaged over the
+        # allocations of each noise grid
         s_val = residual_cfar_scores(val)
         fa = 10 ** -threshold_at_fa(s_val[val["attack"] == 0], FA)
-        theory = [residual_theory_fa(delta, test, fa) for delta in MISMATCH_DB]
+        theory = [
+            residual_theory_fa(delta, _split(noise_split(delta)), fa) for delta in MISMATCH_DB
+        ]
         mismatch = aggregate(mismatch_rows, ("fa", "pd", "f1"))
         for r in mismatch:
             r["residual_theory_fa"] = theory[MISMATCH_DB.index(r["delta_db"])]

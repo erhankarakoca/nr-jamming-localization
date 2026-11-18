@@ -15,6 +15,8 @@ grids, each changing one thing (see ``jamloc.dataset.GENERALIZATION``):
   channel, so the DMRS residual is blind to it by construction.
 * ``pulsejam`` - a pulsed jammer, on about half of the OFDM symbols of a data or partial-band attack.
 * ``tonejam`` - one continuous tone per jammed PRB: the energy of a cell is 1/12 of the nominal one.
+* ``unnorm`` - channels without Sionna's per-slot normalization, so the received SNR and JSR vary
+  from slot to slot as well.
 
 Some grids contain only some attack types (``spoofjam``: pilot; ``pulsejam``: data and partial);
 missing entries are left empty in the figure.
@@ -43,6 +45,8 @@ SHORT = {
     "spoofjam": "spoofing",
     "pulsejam": "pulsed",
     "tonejam": "tone",
+    "unnorm": "no norm.",
+    "neighbor": "neighbor UE",
 }
 DETECTORS = (
     "fused",

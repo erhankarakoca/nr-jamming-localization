@@ -29,6 +29,18 @@ as in *soft*, and the interference estimated on the DMRS is assumed to last the 
 data symbols of the PRB get the extra noise variance. This is blind to data-only jamming, and it
 wrongly penalizes the clean data of a pilot-jammed PRB.
 
+Two more references without a map separate what the map adds from what the rest of the receiver
+adds:
+
+**lmmse**: the same LMMSE interpolation from all pilots, with the noise variance of the standard
+receiver, and plain demapping. It differs from the standard receiver (Sionna's LS estimate with
+linear interpolation) only in the interpolator.
+
+**slot**: an interference-aware receiver that measures noise plus interference once per slot, as
+receivers without any localization do: every pilot's noise variance is multiplied by the mean
+DMRS residual of the allocation, and the mean excess energy over all data symbols of the slot is
+added to the noise variance of every data symbol.
+
 Why LMMSE and not a least-squares fit: dropping a block of pilots leaves a gap, and a plain fit
 across the gap amplifies the noise enormously. LMMSE also gives an error variance for every
 subcarrier. Where the gap is wider than the channel's coherence bandwidth, that variance
@@ -111,6 +123,9 @@ def lmmse_interpolation(
     return h_hat, err_var.clamp(0, 1).to(device=device, dtype=torch.float32)
 
 
+MODES = ("hard", "soft", "dmrs", "lmmse", "slot")
+
+
 class MapAwareReceiver(Block):
     """Receiver for one allocation size that uses a jamming map ``cells`` ``[B, n, 14]`` (bool).
 
@@ -146,13 +161,14 @@ class MapAwareReceiver(Block):
         decode: bool = True,
         mode: str = "hard",
     ):
-        """``mode``: ``"hard"``, ``"soft"`` (both use ``cells``) or ``"dmrs"`` (no map)."""
+        """``mode``: ``"hard"``, ``"soft"`` (both use ``cells``), or ``"dmrs"``, ``"lmmse"``,
+        ``"slot"`` (no map, ``cells`` is ignored)."""
         cfg = self.cfg
         num_sc = y.shape[-1]
         num_prb = num_sc // 12
-        if mode not in ("hard", "soft", "dmrs"):
+        if mode not in MODES:
             raise ValueError(f"unknown mode {mode!r}")
-        if mode != "dmrs":
+        if mode in ("hard", "soft"):
             cells = cells.to(device=y.device, dtype=torch.bool)
             if tuple(cells.shape[1:]) != (num_prb, cfg.num_symbols):
                 raise ValueError(
@@ -164,12 +180,19 @@ class MapAwareReceiver(Block):
         h_ls, pilot_sc, pilot_power = dmrs_ls(y, self.tx)
         pilot_prb = pilot_sc // 12
         s2 = no / pilot_power  # LS noise variance per pilot without jamming
+        r, interfered = None, None
         if mode == "hard":
             clean = ~cells[:, pilot_prb, cfg.dmrs_symbol]  # pilots of unflagged PRBs only
             pilot_var = s2
+        elif mode == "lmmse":
+            clean = torch.ones_like(h_ls, dtype=torch.bool)  # every pilot, equally trusted
+            pilot_var = s2
         else:
             r = residual_per_prb(h_ls, pilot_sc, no, pilot_power, cfg).clamp_min(1)  # [B, n]
-            if mode == "dmrs":  # interfered PRBs: residual above the analytic 1% threshold
+            if mode == "slot":  # one level for the whole allocation: the mean residual
+                r = r.mean(dim=1, keepdim=True).expand_as(r)
+                interfered = torch.ones_like(r, dtype=torch.bool)
+            elif mode == "dmrs":  # interfered PRBs: residual above the analytic 1% threshold
                 thr = torch.tensor(
                     [theory.threshold(num_prb, b, 0.01, cfg) for b in range(num_prb)],
                     device=r.device,
@@ -208,6 +231,8 @@ class MapAwareReceiver(Block):
             llr = self.demapper(x_hat, no_eff)
             flagged = cells[:, data_prb, self.data_sym].repeat_interleave(bits, dim=1)
             llr = llr.masked_fill(flagged[:, None, None, :], 0.0)
+        elif mode == "lmmse":
+            llr = self.demapper(x_hat, no_eff)
         else:
             jam_var = self._jamming_variance(y, no, h_sc, err_sc, cells, r, interfered, mode)
             # For one antenna the unbiased LMMSE output is y / h_hat and its effective noise is
@@ -231,21 +256,16 @@ class MapAwareReceiver(Block):
     def _jamming_variance(self, y, no, h_sc, err_sc, cells, r, interfered, mode):
         """Estimated jamming power ``[B, num_data]`` on every data symbol (0 where none)."""
         data_prb = self.data_sc // 12
+        if mode == "slot":  # mean excess energy over all data symbols, on every data symbol
+            excess = self._excess_energy(y, no, h_sc, err_sc)
+            return excess.mean(dim=1, keepdim=True).clamp_min(0).expand_as(excess)
         if mode == "dmrs":
             # Interference measured on the DMRS, assumed to last the whole slot:
             # residual R = 1 + JNR, so the jamming power is N0 (R - 1)
             per_prb = torch.where(interfered, no[:, None] * (r - 1), torch.zeros_like(r))
             return per_prb[:, data_prb]
 
-        # Excess received energy of each data symbol over what the UE's signal (unit energy, seen
-        # through the estimated channel and its error) and the noise explain
-        y_data = y[:, 0, 0, self.data_sym, self.data_sc]
-        excess = (
-            y_data.abs() ** 2
-            - h_sc[:, self.data_sc].abs() ** 2
-            - err_sc[:, self.data_sc]
-            - no[:, None]
-        )
+        excess = self._excess_energy(y, no, h_sc, err_sc)
         flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]
         # Average over the flagged data symbols of each PRB (about 156 symbols per jammed PRB)
         num_prb = r.shape[1]
@@ -257,3 +277,14 @@ class MapAwareReceiver(Block):
         )
         per_prb = (total / count.clamp_min(1)).clamp_min(0)
         return torch.where(flagged, per_prb[:, data_prb], torch.zeros_like(excess))
+
+    def _excess_energy(self, y, no, h_sc, err_sc):
+        """``[B, num_data]``: received energy of each data symbol minus what the UE's signal (unit
+        energy, seen through the estimated channel and its error) and the noise explain."""
+        y_data = y[:, 0, 0, self.data_sym, self.data_sc]
+        return (
+            y_data.abs() ** 2
+            - h_sc[:, self.data_sc].abs() ** 2
+            - err_sc[:, self.data_sc]
+            - no[:, None]
+        )

@@ -170,7 +170,7 @@ class Jammer(Block):
         energy = (pilots.abs() ** 2).sum(-1) / (pilots.abs() > 0).sum(-1).clamp_min(1)
         replay = pilots / torch.sqrt(energy.clamp_min(1e-12))[..., None]
         bits = torch.rand(2, batch, 1, 1, num_sc, generator=self.torch_rng, device=self.device)
-        qpsk = (torch.where(bits[0] < 0.5, 1.0, -1.0) + 1j * torch.where(bits[1] < 0.5, 1.0, -1.0))
+        qpsk = torch.where(bits[0] < 0.5, 1.0, -1.0) + 1j * torch.where(bits[1] < 0.5, 1.0, -1.0)
         replay = torch.where(pilots.abs() > 0, replay, qpsk / 2**0.5)
         phase = torch.rand(batch, 1, 1, 1, generator=self.torch_rng, device=self.device)
         return replay * torch.exp(2j * torch.pi * phase)

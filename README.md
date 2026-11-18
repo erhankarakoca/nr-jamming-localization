@@ -99,9 +99,10 @@ gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper
 | `jammer.py` | Attack patterns (pilot / data / partial-band) and the Gaussian jammer |
 | `receiver.py` | Receiver chain: LS estimation, LMMSE equalization, demapping, decoding |
 | `link.py` | The whole slot: UE, channels, jammer, noise, receiver |
-| `features.py` | Power, DMRS residual and EVM maps, plus allocation masks |
-| `baselines.py` | Threshold detectors (EVM, residual, residual exact p-value, per-cell power) and the training-free block test |
+| `features.py` | Power, DMRS residual and EVM maps, allocation masks, and the empty-comb power |
+| `baselines.py` | Threshold detectors (EVM, residual, residual exact p-value, per-cell power, empty comb) and the block test (no learned parameters) |
 | `theory.py` | Exact statistics of the DMRS residual (one slot or averaged over K): threshold, Pd, leakage |
+| `noise.py` | The noise power the receiver assumes: exact, off by a set error, or estimated per slot from the empty DMRS comb |
 | `recovery.py` | Map-aware receiver: hard (drop/erase) and soft (weight by estimated jamming) |
 | `model.py`, `train.py` | U-Net detector, per-cell MLP (ablation), training (optionally with noise-estimate jitter) |
 | `dataset.py` | Train / validation / test / scheduling-aware splits with fixed seeds |
@@ -174,6 +175,30 @@ symbol hopping) and retraining on a mix of attacks (about 45 min on a laptop CPU
 uv run python -m jamloc.experiments.generalization            # now also the comb and hopping grids
 uv run python -m jamloc.experiments.attack_training --seeds 0 1 2
 ```
+
+**Fifth round** (`docs/review-v6.md`, `docs/plan-v6.md`): the datasets gain a seventh feature
+(empty-comb power) and grids of 16-slot batches, so every dataset, model and result is rebuilt in
+one resumable command, meant for a Colab GPU (stages: data, train, eval, margin, figures, zip):
+
+```bash
+uv run python -m jamloc.experiments.paper_run --seeds 0 1 2
+```
+
+The recovery experiment is CPU-bound (its LMMSE solves run on the CPU) and runs best as parallel
+processes on a multi-core machine, after `paper_run` has produced the models and `val`:
+
+```bash
+uv run python -m jamloc.experiments.recovery --channel C --seeds 0 1 2              # nominal jammer
+uv run python -m jamloc.experiments.recovery --channel C --jammer pulsed --seeds 0 1 2
+uv run python -m jamloc.experiments.recovery --channel C --jammer hopping --seeds 0 1 2
+uv run python -m jamloc.experiments.recovery --channel C --snr-db 5 --seeds 0 1 2   # little link margin
+```
+
+New in this round: `experiments.intervals` (bootstrap intervals over batches, paired differences,
+PRB-level F1), `experiments.neighbor` (a synchronized neighbor-cell UE as legitimate
+interference), `experiments.calibration --estimator` (per-slot noise estimate), `ber_bler
+--benign` (BLER against SNR without a jammer) and `detection_margin --snr-db` (margin closer to
+the MCS's working point).
 
 **Other figures** (run locally; latency should be measured on the target CPU):
 
