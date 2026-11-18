@@ -123,12 +123,12 @@ def _logits(model, variant: str, features: torch.Tensor) -> np.ndarray:
     return torch.cat(logits).numpy()
 
 
-def score_split(d: dict, seed: int = 0, null: dict | None = None) -> dict[str, np.ndarray]:
+def score_split(d: dict, seed: int, null: dict) -> dict[str, np.ndarray]:
     """Scores ``[N, 24, 14]`` of every detector on one loaded split.
 
-    ``null`` is the split whose benign slots calibrate the block test's EVM statistic (``val``;
-    ``d`` itself if omitted). The per-cell MLP and the U-Net trained with noise jitter are
-    included when their checkpoints exist.
+    ``null`` is the split whose benign slots calibrate the block test's EVM and power-ratio
+    statistics: always ``val``, also when ``d`` is a test split. The per-cell MLP and the U-Net
+    trained with noise jitter are included when their checkpoints exist.
     """
     features = torch.from_numpy(d["features"])
     scores = {
@@ -144,7 +144,7 @@ def score_split(d: dict, seed: int = 0, null: dict | None = None) -> dict[str, n
     scores["residual_threshold"] = residual_scores(d["features"])
     scores["residual_cfar"] = residual_cfar_scores(d)
     scores["power_threshold"] = power_scores(d["features"])
-    scores["block_test"] = block_test_scores(d, d if null is None else null)
+    scores["block_test"] = block_test_scores(d, null)
     return scores
 
 
@@ -283,7 +283,7 @@ def main(argv=None):
 
     pd_rows, f1_rows = [], []
     for seed in seeds:
-        s_val, s_test = score_split(val, seed), score_split(test, seed, null=val)
+        s_val, s_test = score_split(val, seed, null=val), score_split(test, seed, null=val)
         scores = {det: (s_val[det], s_test[det]) for det in s_val}
         pd_seed, f1_seed = evaluate_scores(scores, val, test)
         pd_rows += [{**r, "seed": seed} for r in pd_seed]

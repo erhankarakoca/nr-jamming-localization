@@ -45,7 +45,8 @@ could build from the same features:
   DMRS cell and the data cells of a PRB see the same channel, so their power ratio is near 1
   without jamming and under partial-band jamming, and above 1 when only the pilots are jammed.
   When the residual and this ratio are both significant at 1% (thresholds fixed in advance, not
-  tuned), the PRB's data cells are not flagged.
+  tuned), the PRB's data cells get p = 1 (score 0): they stay among the scored cells but are not
+  flagged.
 
 Scores are linear feature values (block test: ``-log10`` p-values).
 """
@@ -116,10 +117,19 @@ _RULE = 2.0  # -log10 p of both tests of the pilot-only rule (1%, fixed in advan
 
 
 def _log10_gamma_sf(x: np.ndarray, num: int) -> np.ndarray:
-    """``log10 P(X >= x)`` for X the mean of ``num`` unit exponentials (noise-only power)."""
+    """``log10 P(X >= x)`` for X the mean of ``num`` unit exponentials (noise-only power).
+
+    Far in the tail SciPy's value underflows to ``-inf``; there the leading term of the
+    asymptotic expansion, ``z^(num-1) e^-z / Gamma(num)`` with ``z = num x``, keeps the scores
+    finite and ordered.
+    """
+    from scipy.special import gammaln
     from scipy.stats import gamma
 
-    return gamma.logsf(x, a=num, scale=1.0 / num) / np.log(10)
+    out = gamma.logsf(x, a=num, scale=1.0 / num)
+    z = num * np.asarray(x, float)
+    tail = (num - 1) * np.log(np.maximum(z, 1e-300)) - z - gammaln(num)
+    return np.where(np.isfinite(out), out, tail) / np.log(10)
 
 
 def prb_data_evm(features: np.ndarray) -> np.ndarray:
@@ -205,7 +215,7 @@ def block_test_scores(d: dict, null: dict) -> np.ndarray:
     # PRB's EVM rise comes from the corrupted channel estimate, not from jammed data symbols
     ratio = _empirical_scores(d, null, lambda f: _pilot_to_data_power(f, dmrs))
     pilot_only = scheduled & (pilot > _RULE) & (ratio > _RULE)
-    data = np.where(pilot_only, -np.inf, data)
+    data = np.where(pilot_only, 0.0, data)  # p = 1: scored (counted as tested), never flagged
 
     out = np.empty(power.shape)
     out[:, :, dmrs] = pilot

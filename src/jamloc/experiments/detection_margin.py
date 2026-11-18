@@ -58,13 +58,26 @@ def crossing(x, y, target: float) -> float:
     return float(x[i - 1] + (target - y[i - 1]) * (x[i] - x[i - 1]) / (y[i] - y[i - 1]))
 
 
+def _batch_ids(d: dict) -> np.ndarray:
+    """Index of the simulated batch of every slot (consecutive slots of one batch share their
+    channel model, allocation, attack and JSR)."""
+    keys = np.stack(
+        [d[k].astype(float) for k in ("channel", "alloc_start", "alloc_size", "attack", "jsr_db")]
+    )
+    new = np.any(np.diff(keys, axis=1) != 0, axis=0)
+    return np.concatenate([[0], np.cumsum(new)])
+
+
 def run(seeds) -> list[dict]:
     if not (data_dir() / "margin.npz").is_file():
-        generate("margin", batch_size=128)
+        generate("margin")
     d, val = load("margin"), load("val")
     labels = d["labels"].astype(bool)
+    # Benign slots: whole batches (one allocation each) alternate between setting the slot
+    # threshold and checking it, so the check uses allocations the threshold never saw
     benign = np.flatnonzero(d["attack"] == 0)
-    calib, check = benign[::2], benign[1::2]
+    batch = _batch_ids(d)[benign]
+    calib, check = benign[batch % 2 == 0], benign[batch % 2 == 1]
     channels = {"both": np.ones(len(labels), bool)}
     channels.update({ch: d["channel"] == i for i, ch in enumerate(CHANNELS)})
 
@@ -99,12 +112,20 @@ def run(seeds) -> list[dict]:
 
 
 def read_bler(channel: str) -> list[dict]:
+    """BLER curves of the unprotected link at the SNR of the ``margin`` split (an error if the
+    BLER experiment was last run at another SNR)."""
+    snr = SPLITS["margin"]["snr_db"]
     with open(results_dir() / "ber_bler" / f"ber_bler_{channel}.csv", encoding="utf-8") as f:
-        return [
+        rows = [
             {"attack": r["attack"], "jsr_db": float(r["jsr_db"]), "bler": float(r["bler"])}
             for r in csv.DictReader(f)
-            if r["attack"] != "none"
+            if r["attack"] != "none" and float(r["snr_db"]) == snr
         ]
+    if not rows:
+        raise SystemExit(
+            f"No BLER rows at {snr:g} dB SNR: run experiments.ber_bler --snr-db {snr:g}"
+        )
+    return rows
 
 
 def summarize(mean_rows) -> list[dict]:

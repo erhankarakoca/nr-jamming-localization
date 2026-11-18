@@ -28,8 +28,8 @@ def test_block_test_follows_the_attack_structure(tmp_path, monkeypatch):
 
     # The 13 data cells of a PRB share one score (a whole-PRB statistic)
     data = s[:, :, DATA]
-    same = np.isclose(data, data[:, :, :1]) | (np.isinf(data) & np.isinf(data[:, :, :1]))
-    assert same.all()
+    assert np.isfinite(s).all()
+    assert np.isclose(data, data[:, :, :1]).all()
 
     benign = np.flatnonzero(val["attack"] == 0)
     sched = val["features"][:, ALLOC, :, DMRS] > 0
@@ -51,7 +51,7 @@ def test_block_test_follows_the_attack_structure(tmp_path, monkeypatch):
     d["features"][slot, E, b, DATA] += 10
     pilot_only = block_test_scores(d, val)
     assert pilot_only[slot, b, DMRS] > 5
-    assert np.isneginf(pilot_only[slot, b, DATA]).all()
+    assert (pilot_only[slot, b, DATA] == 0).all()  # p = 1: scored but never flagged
     # ... but with the data symbols' power up as well (partial-band jamming) it is
     d["features"][slot, P, b, DATA] += 10
     assert block_test_scores(d, val)[slot, b, DATA].min() > 2
@@ -114,10 +114,11 @@ def test_detection_margin_small(tmp_path, monkeypatch):
     for channel in ("A", "C"):
         with open(bler_dir / f"ber_bler_{channel}.csv", "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["attack", "jsr_db", "bler"])
+            writer.writerow(["attack", "snr_db", "jsr_db", "bler"])
             for attack in ("pilot", "data", "partial"):
                 for jsr in range(-20, 11, 5):
-                    writer.writerow([attack, jsr, 1 / (1 + np.exp(-jsr))])
+                    writer.writerow([attack, 15.0, jsr, 1 / (1 + np.exp(-jsr))])
+                    writer.writerow([attack, 5.0, jsr, 0.5])  # another SNR: must be ignored
     detection_margin.main(["--seeds", "0"])
     out = tmp_path / "results" / "margin"
     assert (out / "margin.png").is_file()
@@ -159,8 +160,8 @@ def test_calibration_small(tmp_path, monkeypatch):
     with open(out / "noise_mismatch.csv", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
     theory_fa = {float(r["delta_db"]): float(r["residual_theory_fa"]) for r in rows}
-    assert np.isclose(theory_fa[0.0], 0.01, rtol=0.02)
-    assert theory_fa[-1.0] > 0.01 > theory_fa[1.0]  # underestimated noise: more false alarms
+    assert 0.001 < theory_fa[0.0] < 0.1  # the design rate of the calibrated residual cutoff
+    assert theory_fa[-1.0] > theory_fa[0.0] > theory_fa[1.0]  # underestimated noise: more
 
 
 def test_shift_noise_only_moves_defined_features():
@@ -188,3 +189,11 @@ def test_noise_jitter_checkpoint_and_shift(tmp_path, monkeypatch):
         a = noise_shift(select_inputs(torch.from_numpy(f), variant), variant, torch.full((3,), 0.7))
         b = select_inputs(torch.from_numpy(shift_noise({"features": f}, 0.7)["features"]), variant)
         assert torch.allclose(a, b, atol=1e-6)
+
+
+def test_gamma_tail_stays_finite_and_ordered():
+    from jamloc.baselines import _log10_gamma_sf
+
+    x = np.array([1.0, 2.0, 8.0, 20.0, 100.0])
+    p = _log10_gamma_sf(x, 156)
+    assert np.isfinite(p).all() and (np.diff(p) < 0).all()

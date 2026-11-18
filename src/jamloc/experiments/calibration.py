@@ -78,13 +78,14 @@ def _thresholds(s_val: np.ndarray, val: dict) -> tuple[float, np.ndarray]:
     """Global threshold and one per SNR bin, from the cells of benign validation slots."""
     benign = val["attack"] == 0
     bins = np.digitize(val["snr_db"], THRESHOLD_EDGES_DB)
+    overall = threshold_at_fa(s_val[benign], FA)
     per_bin = np.array(
         [
-            threshold_at_fa(s_val[benign & (bins == k)], FA)
-            for k in range(len(THRESHOLD_EDGES_DB) + 1)
+            threshold_at_fa(s_val[sel], FA) if sel.any() else overall  # empty bin: global
+            for sel in (benign & (bins == k) for k in range(len(THRESHOLD_EDGES_DB) + 1))
         ]
     )
-    return threshold_at_fa(s_val[benign], FA), per_bin
+    return overall, per_bin
 
 
 def _flags(s: np.ndarray, d: dict, thr: float | np.ndarray) -> np.ndarray:
@@ -101,7 +102,7 @@ def run(seeds, detectors=DETECTORS) -> tuple[list[dict], list[dict], list[dict]]
 
     snr_rows, summary_rows, mismatch_rows = [], [], []
     for name in [n for n in detectors if available(n, seeds)]:
-        for seed in seeds if name in LEARNED else seeds[:1]:
+        for seed in seeds if name in LEARNED else seeds[:1] or [0]:
             s_val, s_test = scores(name, val, seed, val), scores(name, test, seed, val)
             scored = s_test > -np.inf
             thr_global, thr_bins = _thresholds(s_val, val)
@@ -145,9 +146,9 @@ def run(seeds, detectors=DETECTORS) -> tuple[list[dict], list[dict], list[dict]]
     return snr_rows, summary_rows, mismatch_rows
 
 
-def residual_theory_fa(delta_db: float, d: dict) -> float:
-    """Exact false-alarm rate of the 1% residual test with a noise estimate off by ``delta_db``,
-    averaged over the DMRS cells of the benign slots of ``d``."""
+def residual_theory_fa(delta_db: float, d: dict, fa: float = FA) -> float:
+    """Exact false-alarm rate of the residual test at design false-alarm rate ``fa`` with a noise
+    estimate off by ``delta_db``, averaged over the DMRS cells of the benign slots of ``d``."""
     cfg = SimConfig()
     benign = d["attack"] == 0
     total, count = 0.0, 0
@@ -155,7 +156,7 @@ def residual_theory_fa(delta_db: float, d: dict) -> float:
     for n in np.unique(sizes):
         slots = int((sizes == n).sum())
         for pos in range(int(n)):
-            t = threshold(int(n), pos, FA, cfg) * 10 ** (delta_db / 10)
+            t = threshold(int(n), pos, fa, cfg) * 10 ** (delta_db / 10)
             total += slots * float(ccdf(t, weights(int(n), pos, cfg=cfg)))
             count += slots
     return total / count
@@ -225,8 +226,12 @@ def main(argv=None):
         snr_rows, summary_rows, mismatch_rows = run(
             args.seeds or available_seeds(), args.detectors or DETECTORS
         )
-        test = load("test")
-        theory = [residual_theory_fa(delta, test) for delta in MISMATCH_DB]
+        test, val = load("test"), load("val")
+        # The measured residual curve uses the threshold calibrated on benign validation cells
+        # (p = 10^-score), so the theory uses the same design false-alarm rate
+        s_val = residual_cfar_scores(val)
+        fa = 10 ** -threshold_at_fa(s_val[val["attack"] == 0], FA)
+        theory = [residual_theory_fa(delta, test, fa) for delta in MISMATCH_DB]
         mismatch = aggregate(mismatch_rows, ("fa", "pd", "f1"))
         for r in mismatch:
             r["residual_theory_fa"] = theory[MISMATCH_DB.index(r["delta_db"])]
@@ -238,6 +243,9 @@ def main(argv=None):
             if args.detectors and (out / name).is_file():
                 new = {r["detector"] for r in rows}
                 kept = [r for r in _read(out / name) if r["detector"] not in new]
+                for r in kept:  # the theory column is the same for every detector
+                    if "residual_theory_fa" in r:
+                        r["residual_theory_fa"] = theory[MISMATCH_DB.index(r["delta_db"])]
                 rows = kept + rows
             _write(rows, out / name)
     snr_mean = _read(out / "fa_vs_snr.csv")
