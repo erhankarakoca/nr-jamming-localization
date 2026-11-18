@@ -16,7 +16,8 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   PRB block moves to a new position on every OFDM symbol; ``spoofjam`` - pilot spoofing, the
   jammer replays the UE's DMRS on the scheduled PRBs (pilot attack only); ``pulsejam`` - each OFDM
   symbol of a data or partial-band attack is jammed with probability 0.5; ``tonejam`` - one
-  continuous tone per jammed PRB instead of all 12 subcarriers.
+  continuous tone per jammed PRB instead of all 12 subcarriers; ``neighbor`` - interference
+  from a synchronized neighbor-cell UE on a partial-band block.
 * ``train_mix`` / ``val_mix`` - like ``train`` / ``val``, but the batches cycle through the nominal
   channels, long delay spreads and high speeds (``MIXED_CONDITIONS``).
 * ``train_atk`` / ``val_atk`` - like ``train`` / ``val``, but the batches cycle through the
@@ -130,6 +131,13 @@ GENERALIZATION = {
         "seed": 18_000_000,
         "cfg": {"jammer_waveform": "tone", "jammer_tones": 1},
         "title": "multi-tone jammer: one tone per jammed PRB (unseen)",
+    },
+    # Legitimate interference: a synchronized UE of a neighboring cell (experiments/neighbor)
+    "neighbor": {
+        "seed": 19_000_000,
+        "cfg": {"jammer_waveform": "ue"},
+        "attacks": (3,),
+        "title": "synchronized neighbor-cell PUSCH interference",
     },
     # Channels with the TDL model's own normalization (unit power on average over realizations)
     # instead of Sionna's per-realization scaling to unit energy over the carrier

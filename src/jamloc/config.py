@@ -39,7 +39,9 @@ class SimConfig:
     # "tone"     - a continuous tone on each jammed subcarrier (random phase, the same on every
     #              OFDM symbol), usually combined with jammer_tones below;
     # "dmrs"     - pilot spoofing: on the DMRS symbol the jammer replays the UE's pilot sequence
-    #              (scaled, one random phase per slot), elsewhere it sends Gaussian noise.
+    #              (scaled, one random phase per slot), elsewhere it sends Gaussian noise;
+    # "ue"       - synchronized neighbor-cell PUSCH (partial-band): unit-energy QPSK on data
+    #              symbols and double-energy QPSK on the even DMRS comb, with the odd comb empty.
     # All but "gaussian" are only used to test generalization.
     jammer_waveform: str = "gaussian"
 
