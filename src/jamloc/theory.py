@@ -109,24 +109,36 @@ def ccdf(t, lam) -> np.ndarray:
     return out[0] if lam_in.ndim == 1 else out
 
 
-def threshold(n_prb: int, prb: int, fa: float = 0.01, cfg: SimConfig = CFG) -> float:
-    """Threshold on ``R_b`` that is exceeded with probability ``fa`` without jamming.
+def slot_average(lam: np.ndarray, slots: int) -> np.ndarray:
+    """Weights of the residual averaged over ``slots`` slots with independent noise.
+
+    With the same allocation in every slot, ``(R_1 + ... + R_K) / K`` is again a weighted sum of
+    unit exponentials: every weight divided by K and repeated K times. Its mean stays 1 and its
+    variance shrinks by K. (Under jamming this holds when the jammer's channel stays the same over
+    the K slots; the gains of ``detection_probability`` are drawn once per K slots.)
+    """
+    return np.tile(np.asarray(lam, float) / slots, slots)
+
+
+def threshold(
+    n_prb: int, prb: int, fa: float = 0.01, cfg: SimConfig = CFG, slots: int = 1
+) -> float:
+    """Threshold on ``R_b`` (averaged over ``slots`` slots) exceeded with probability ``fa``
+    without jamming.
 
     Read from the tabulated tail probability (linear interpolation of its logarithm on a 0.05
     grid; error below 1e-4 against an exact root search).
     """
-    grid, logp = _log_ccdf_table(n_prb, prb, cfg.scs, cfg.tau_max)
+    grid, logp = _log_ccdf_table(n_prb, prb, cfg.scs, cfg.tau_max, slots)
     return float(np.interp(np.log10(fa), logp[::-1], grid[::-1]))
 
 
 @cache
-def _log_ccdf_table(n_prb: int, prb: int, scs: float, tau_max: float):
+def _log_ccdf_table(n_prb: int, prb: int, scs: float, tau_max: float, slots: int = 1):
     # On a uniform grid, expm(S t_k) = expm(S dt)^k: one matrix exponential for the whole table
     grid = np.linspace(0.0, 40.0, 801)
-    step = linalg.expm(
-        _generator(weights(n_prb, prb, cfg=SimConfig(scs=scs, tau_max=tau_max)))
-        * (grid[1] - grid[0])
-    )
+    lam = slot_average(weights(n_prb, prb, cfg=SimConfig(scs=scs, tau_max=tau_max)), slots)
+    step = linalg.expm(_generator(lam) * (grid[1] - grid[0]))
     row = np.eye(len(step))[0]
     p = np.empty_like(grid)
     for k in range(len(grid)):
@@ -161,15 +173,17 @@ def detection_probability(
     draws: int = 2000,
     seed: int = 0,
     cfg: SimConfig = CFG,
+    slots: int = 1,
 ) -> np.ndarray:
-    """Probability that ``R_b`` of PRB ``prb`` exceeds the ``fa`` threshold, per JNR.
+    """Probability that ``R_b`` of PRB ``prb`` (averaged over ``slots`` slots, see
+    ``slot_average``) exceeds the ``fa`` threshold, per JNR.
 
     ``jammed_prbs``: PRB indices (inside the allocation) whose DMRS is jammed. ``fading``:
     ``"flat"`` (jammer channel gain 1) or ``"rayleigh"`` (gain constant within a PRB, independent
     Rayleigh across PRBs; averaged over ``draws`` draws). ``prb`` need not be jammed: then this is
     the false-alarm rate caused by leakage from the block.
     """
-    t = threshold(n_prb, prb, fa, cfg)
+    t = threshold(n_prb, prb, fa, cfg, slots)
     rng = np.random.default_rng(seed)
     jammed = np.zeros(n_prb)
     jammed[list(jammed_prbs)] = 1
@@ -178,7 +192,10 @@ def detection_probability(
     out = []
     for rho in 10 ** (np.atleast_1d(np.asarray(jnr_db, float)) / 10):
         lam = np.stack(
-            [weights(n_prb, prb, np.repeat(rho * g, PILOTS_PER_PRB), cfg) for g in gains]
+            [
+                slot_average(weights(n_prb, prb, np.repeat(rho * g, PILOTS_PER_PRB), cfg), slots)
+                for g in gains
+            ]
         )
         out.append(float(ccdf(t, lam).mean()))
     return np.array(out)
