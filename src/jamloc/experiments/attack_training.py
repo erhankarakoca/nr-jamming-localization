@@ -25,7 +25,15 @@ from jamloc.paths import data_dir, results_dir
 from jamloc.plotting import new_figure, paper_style, save
 from jamloc.train import checkpoint_path, load_model, train
 
-CONDITIONS = {"test": "matched", "combjam": "pilot comb", "hopjam": "hopping"}
+# The last three jammers were in neither training mix: do the gains of mixed training carry over?
+CONDITIONS = {
+    "test": "matched",
+    "combjam": "pilot comb",
+    "hopjam": "hopping",
+    "spoofjam": "spoofing",
+    "pulsejam": "pulsed",
+    "tonejam": "tone",
+}
 TRAININGS = {"": ("nominal training", "val"), "atk": ("attack-mixed training", "val_atk")}
 VARIANT = "fused"
 
@@ -60,9 +68,10 @@ def run(seeds, epochs: int) -> list[dict]:
                         "training": training,
                         "seed": seed,
                         "f1": by["all"]["f1"],
-                        "f1_pilot": by["pilot"]["f1"],
-                        "f1_data": by["data"]["f1"],
-                        "f1_partial": by["partial"]["f1"],
+                        # attack types missing from a grid (e.g. spoofing: pilot only) are nan
+                        "f1_pilot": by.get("pilot", {}).get("f1", np.nan),
+                        "f1_data": by.get("data", {}).get("f1", np.nan),
+                        "f1_partial": by.get("partial", {}).get("f1", np.nan),
                         "fa": by["all"]["fa_scored"],
                     }
                 )
@@ -103,7 +112,7 @@ def plot(mean_rows):
     axes[1].set_yscale("log")
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="outside lower center", ncols=2, frameon=False)
-    fig.suptitle("Smarter jammers: nominal vs attack-mixed training (bars: std over seeds)")
+    fig.suptitle("Unseen jammers: nominal vs attack-mixed training (bars: std over seeds)")
     return fig
 
 

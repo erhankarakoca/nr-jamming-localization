@@ -23,8 +23,14 @@ class SimConfig:
     # Largest channel delay assumed by the DMRS residual feature
     tau_max: float = 3e-6  # [s]
 
-    # Jamming waveform per resource element: "gaussian" (the threat model) or "qpsk" (random
-    # constant-envelope symbols, only used to test generalization)
+    # Jamming waveform per resource element (see jamloc.jammer):
+    # "gaussian" - complex Gaussian noise, the threat model of the paper;
+    # "qpsk"     - random constant-envelope QPSK symbols;
+    # "tone"     - a continuous tone on each jammed subcarrier (random phase, the same on every
+    #              OFDM symbol), usually combined with jammer_tones below;
+    # "dmrs"     - pilot spoofing: on the DMRS symbol the jammer replays the UE's pilot sequence
+    #              (scaled, one random phase per slot), elsewhere it sends Gaussian noise.
+    # All but "gaussian" are only used to test generalization.
     jammer_waveform: str = "gaussian"
 
     # Smarter jammers, only used to test generalization (both off in the threat model):
@@ -33,6 +39,12 @@ class SimConfig:
     jammer_pilot_comb: bool = False
     # draw a new block of PRBs (same size) for every OFDM symbol: hopping from symbol to symbol
     jammer_hopping: bool = False
+    # pulsed (partial-time) jammer: each OFDM symbol of the attack pattern is jammed with this
+    # probability, drawn per slot (at least one symbol stays jammed); 1.0 = always on
+    jammer_duty: float = 1.0
+    # sparse (multi-tone) jammer: jam only this many subcarriers of every jammed PRB, at random
+    # positions drawn per slot and PRB and kept for the whole slot; 0 = all 12 subcarriers
+    jammer_tones: int = 0
 
     @property
     def num_subcarriers(self) -> int:

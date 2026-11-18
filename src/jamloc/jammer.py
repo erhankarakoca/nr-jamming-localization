@@ -11,10 +11,26 @@ waveform can be chosen in ``SimConfig`` to test generalization):
 
 A *cell* is one PRB x one OFDM symbol. The jammed cells are also the labels the detector learns.
 
-Two smarter variants test generalization (``SimConfig``): ``jammer_pilot_comb`` jams only the
-pilot subcarriers of the DMRS symbol (half its resource elements; the empty comb stays clean, so
-the same damage to the channel estimate costs half the energy), and ``jammer_hopping`` moves the
-jammed PRB block to a new random position on every OFDM symbol.
+Other jammers test generalization (all set in ``SimConfig``, all off in the threat model). Each
+changes one thing: the waveform, the time-frequency support, or what the attacker knows.
+
+* ``jammer_pilot_comb`` jams only the pilot subcarriers of the DMRS symbol (half its resource
+  elements; the empty comb stays clean, so the same damage to the channel estimate costs half the
+  energy).
+* ``jammer_hopping`` moves the jammed PRB block to a new random position on every OFDM symbol.
+* ``jammer_duty`` < 1 gives a pulsed (partial-time) jammer: each OFDM symbol of the attack pattern
+  is jammed only with that probability (``pulse_mask``).
+* ``jammer_tones`` > 0 jams only that many subcarriers of every jammed PRB (a sparse, multi-tone
+  jammer); with ``jammer_waveform="tone"`` each of them carries a continuous tone.
+* ``jammer_waveform="dmrs"`` is pilot spoofing. The DMRS sequence follows from parameters the
+  network broadcasts, so a jammer can compute it and send it (scaled, with one random phase per
+  slot) on the pilot subcarriers. The gNB's least-squares estimate at pilot p then becomes
+  ``h_p + a g_p`` (``a``: the jammer's scale and phase, ``g``: its channel). That is again a
+  physically possible channel, so it lies in the delay subspace and the DMRS residual cannot see
+  it by construction; only power and EVM can. The jammer does not know the pilot values outside
+  the UE's allocation, so it sends random QPSK symbols of the same energy there.
+
+Labels never change: a cell is jammed when the jammer transmits on any of its resource elements.
 """
 
 import torch
@@ -61,12 +77,35 @@ def cell_mask(
     return in_block & jammed_symbols[:, None, :]
 
 
-class Jammer(Block):
-    """Gaussian jamming signal on the resource grid of the carrier.
+def pulse_mask(
+    cells: torch.Tensor, duty: float, generator: torch.Generator | None = None
+) -> torch.Tensor:
+    """Pulsed jammer: keep each jammed OFDM symbol of a slot only with probability ``duty``.
 
-    Input: jammed cells ``[B, num_prb, num_symbols]`` (bool) and the jammer-to-signal ratio per
-    jammed resource element ``jsr_db`` ``[B]``. The UE sends unit energy per data resource
-    element, so the jammer energy per jammed resource element is ``10**(jsr_db/10)``.
+    ``cells`` ``[B, num_prb, num_symbols]`` are the cells of the continuous attack. Every symbol
+    the attack uses is switched on independently; if a slot would end up with no symbol at all, one
+    of its symbols is switched back on, so a jammed slot stays jammed (a pilot attack, which uses
+    a single symbol, is therefore unchanged).
+    """
+    used = cells.any(dim=1)  # [B, num_symbols]: symbols the continuous attack would jam
+    draw = torch.rand(used.shape, generator=generator, device=cells.device)
+    on = used & (draw < duty)
+    # Slots left without any jammed symbol: switch on the used symbol with the smallest draw
+    empty = used.any(dim=1) & ~on.any(dim=1)
+    if empty.any():
+        first = torch.where(used, draw, torch.full_like(draw, 2.0)).argmin(dim=1)
+        on[empty, first[empty]] = True
+    return cells & on[:, None, :]
+
+
+class Jammer(Block):
+    """Jamming signal on the resource grid of the carrier.
+
+    Input: jammed cells ``[B, num_prb, num_symbols]`` (bool), the jammer-to-signal ratio per
+    jammed resource element ``jsr_db`` ``[B]``, and (only for the ``"dmrs"`` waveform) the UE's
+    transmitted carrier grid ``x`` ``[B, 1, 1, num_symbols, 12 * num_prb]``, whose pilots the
+    jammer replays. The UE sends unit energy per data resource element, so the jammer energy per
+    jammed resource element is ``10**(jsr_db/10)``.
 
     Output: jamming grid ``[B, 1, 1, num_symbols, 12 * num_prb]`` (before the jammer's channel).
     """
@@ -75,25 +114,63 @@ class Jammer(Block):
         super().__init__(**kwargs)
         self.cfg = cfg
 
-    def call(self, cells: torch.Tensor, jsr_db: torch.Tensor) -> torch.Tensor:
+    def call(
+        self, cells: torch.Tensor, jsr_db: torch.Tensor, x: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        cfg = self.cfg
         cells, jsr_db = cells.to(self.device), jsr_db.to(self.device)
+        batch = cells.shape[0]
+        num_sc = 12 * cfg.num_prb
 
         # Cells -> resource elements: every subcarrier of a jammed PRB is jammed
         re_mask = cells.repeat_interleave(12, dim=1)  # [B, 288, 14]
         re_mask = re_mask.transpose(1, 2)[:, None, None]  # [B, 1, 1, 14, 288]
-        if self.cfg.jammer_pilot_comb:  # leave the empty DMRS comb (odd subcarriers) alone
+        if cfg.jammer_pilot_comb or cfg.jammer_waveform == "dmrs":
+            # Leave the empty DMRS comb (odd subcarriers) alone: only the pilots are hit
             keep = torch.ones(re_mask.shape[-2:], dtype=torch.bool, device=self.device)
-            keep[self.cfg.dmrs_symbol, 1::2] = False
+            keep[cfg.dmrs_symbol, 1::2] = False
             re_mask = re_mask & keep
+        if cfg.jammer_tones:
+            # Sparse jammer: in every PRB keep only `jammer_tones` random subcarriers, the same
+            # ones on all OFDM symbols of the slot (ranks of random numbers give a random subset)
+            draw = torch.rand(batch, cfg.num_prb, 12, generator=self.torch_rng, device=self.device)
+            tones = draw.argsort(dim=-1).argsort(dim=-1) < cfg.jammer_tones  # [B, num_prb, 12]
+            re_mask = re_mask & tones.reshape(batch, 1, 1, 1, num_sc)
 
-        # Unit-variance complex Gaussian noise (or random QPSK symbols, also of unit energy),
-        # scaled to the jammer energy per RE
+        # Unit-energy waveform on every resource element, then scaled to the jammer energy
         z = complex_normal(
             re_mask.shape, precision=self.precision, device=self.device, generator=self.torch_rng
         )
-        if self.cfg.jammer_waveform == "qpsk":
+        if cfg.jammer_waveform == "qpsk":
             z = (torch.sgn(z.real) + 1j * torch.sgn(z.imag)) / 2**0.5
-        elif self.cfg.jammer_waveform != "gaussian":
-            raise ValueError(f"unknown jammer waveform {self.cfg.jammer_waveform!r}")
+        elif cfg.jammer_waveform == "tone":
+            # A continuous tone per subcarrier: random phase, constant over the OFDM symbols
+            phase = torch.rand(batch, num_sc, generator=self.torch_rng, device=self.device)
+            tone = torch.exp(2j * torch.pi * phase).to(z.dtype)
+            z = tone[:, None, None, None, :].expand_as(z)
+        elif cfg.jammer_waveform == "dmrs":
+            z = z.clone()
+            z[..., cfg.dmrs_symbol, :] = self._spoofed_pilots(x, batch, num_sc).to(z.dtype)
+        elif cfg.jammer_waveform != "gaussian":
+            raise ValueError(f"unknown jammer waveform {cfg.jammer_waveform!r}")
         amplitude = torch.sqrt(10 ** (jsr_db.to(self.dtype) / 10))
         return z * amplitude[:, None, None, None, None] * re_mask
+
+    def _spoofed_pilots(self, x: torch.Tensor | None, batch: int, num_sc: int) -> torch.Tensor:
+        """Unit-energy pilot replay on the DMRS symbol ``[B, 1, 1, num_sc]``.
+
+        Inside the UE's allocation the jammer sends the UE's own pilots, normalized to unit energy
+        and rotated by one random phase per slot; elsewhere random QPSK symbols. Received through
+        the jammer's channel ``g``, this adds ``a g_k`` to the gNB's LS estimate at every jammed
+        pilot: a smooth, channel-like term that the delay-subspace projection removes.
+        """
+        if x is None:
+            raise ValueError('jammer_waveform="dmrs" needs the UE grid x to replay its pilots')
+        pilots = x[..., self.cfg.dmrs_symbol, :].to(self.device)  # [B, 1, 1, num_sc]
+        energy = (pilots.abs() ** 2).sum(-1) / (pilots.abs() > 0).sum(-1).clamp_min(1)
+        replay = pilots / torch.sqrt(energy.clamp_min(1e-12))[..., None]
+        bits = torch.rand(2, batch, 1, 1, num_sc, generator=self.torch_rng, device=self.device)
+        qpsk = (torch.where(bits[0] < 0.5, 1.0, -1.0) + 1j * torch.where(bits[1] < 0.5, 1.0, -1.0))
+        replay = torch.where(pilots.abs() > 0, replay, qpsk / 2**0.5)
+        phase = torch.rand(batch, 1, 1, 1, generator=self.torch_rng, device=self.device)
+        return replay * torch.exp(2j * torch.pi * phase)

@@ -13,7 +13,10 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   ``tau_max`` = 3 us the DMRS residual assumes; ``fast`` - UE and jammer moving at up to 30 m/s
   instead of 3 m/s; ``qpskjam`` - the jammer sends random QPSK symbols instead of Gaussian noise;
   ``combjam`` - on the DMRS symbol only the pilot subcarriers are jammed; ``hopjam`` - the jammed
-  PRB block moves to a new position on every OFDM symbol.
+  PRB block moves to a new position on every OFDM symbol; ``spoofjam`` - pilot spoofing, the
+  jammer replays the UE's DMRS on the scheduled PRBs (pilot attack only); ``pulsejam`` - each OFDM
+  symbol of a data or partial-band attack is jammed with probability 0.5; ``tonejam`` - one
+  continuous tone per jammed PRB instead of all 12 subcarriers.
 * ``train_mix`` / ``val_mix`` - like ``train`` / ``val``, but the batches cycle through the nominal
   channels, long delay spreads and high speeds (``MIXED_CONDITIONS``).
 * ``train_atk`` / ``val_atk`` - like ``train`` / ``val``, but the batches cycle through the
@@ -89,6 +92,27 @@ GENERALIZATION = {
         "cfg": {"jammer_hopping": True},
         "title": "jammer hops to a new PRB block every OFDM symbol (unseen)",
     },
+    # Pilot spoofing needs the allocation (the jammer replays the UE's pilots on its PRBs), so it
+    # is scheduling-aware, and only the pilot attack is of interest
+    "spoofjam": {
+        "seed": 16_000_000,
+        "cfg": {"jammer_waveform": "dmrs"},
+        "sched": True,
+        "attacks": (1,),
+        "title": "pilot spoofing: the jammer replays the UE's DMRS on its PRBs (unseen)",
+    },
+    # A pulsed pilot attack would be the plain pilot attack (one symbol), so data and partial only
+    "pulsejam": {
+        "seed": 17_000_000,
+        "cfg": {"jammer_duty": 0.5},
+        "attacks": (2, 3),
+        "title": "pulsed jammer: each OFDM symbol jammed with probability 0.5 (unseen)",
+    },
+    "tonejam": {
+        "seed": 18_000_000,
+        "cfg": {"jammer_waveform": "tone", "jammer_tones": 1},
+        "title": "multi-tone jammer: one tone per jammed PRB (unseen)",
+    },
 }
 for _name, _spec in GENERALIZATION.items():
     SPLITS[_name] = {"per_point": 200, "benign_per_channel": 1_000, "sched": False, **_spec}
@@ -148,10 +172,11 @@ def _random_jobs(num_slots: int, batch_size: int) -> list[dict]:
 def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
     per_point, benign = spec["per_point"], spec["benign_per_channel"]
     channels = spec.get("channels", CHANNELS)
+    attacks = spec.get("attacks", (1, 2, 3))
     jsr_grid = spec.get("jsr_grid", TEST_JSR_DB)
     snr = spec.get("snr_db", (5.0, 25.0))
     if num_slots is not None:  # smaller version of the same grid
-        scale = num_slots / (len(channels) * 3 * len(jsr_grid) * per_point)
+        scale = num_slots / (len(channels) * len(attacks) * len(jsr_grid) * per_point)
         per_point = max(1, int(per_point * scale))
         benign = max(1, round(benign * scale)) if benign else 0
 
@@ -160,7 +185,7 @@ def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
 
     jobs = []
     for channel in channels:
-        for attack in (1, 2, 3):
+        for attack in attacks:
             for jsr in jsr_grid:
                 jobs += batches(
                     per_point,

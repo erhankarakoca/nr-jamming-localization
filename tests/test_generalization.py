@@ -18,7 +18,7 @@ def test_qpsk_jammer_has_constant_envelope_and_same_energy():
 
 
 def test_unknown_waveform_is_rejected():
-    cfg = dataclasses.replace(SimConfig(), jammer_waveform="tone")
+    cfg = dataclasses.replace(SimConfig(), jammer_waveform="chirp")
     cells = cell_mask(torch.tensor([1]), torch.tensor([0]), torch.tensor([2]), cfg)
     with pytest.raises(ValueError, match="waveform"):
         Jammer(cfg)(cells, torch.tensor([0.0]))
@@ -101,7 +101,7 @@ def test_attack_training_small(tmp_path, monkeypatch):
     out = tmp_path / "results" / "attack_training"
     with open(out / "attack_training.csv", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-    assert len(rows) == 3 * 2  # conditions x trainings
-    assert {r["condition"] for r in rows} == {"matched", "pilot comb", "hopping"}
+    assert len(rows) == len(attack_training.CONDITIONS) * 2  # conditions x trainings
+    assert {r["condition"] for r in rows} == set(attack_training.CONDITIONS.values())
     assert (out / "attack_training.png").is_file()
     assert (tmp_path / "results" / "models" / "fused_atk_seed0.pt").is_file()

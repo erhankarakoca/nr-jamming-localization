@@ -89,3 +89,91 @@ def test_hopping_jammer_in_the_link():
     assert (labels.sum(1) == 5).all()  # 5 contiguous PRBs on every symbol
     starts = labels.float().argmax(1)  # first jammed PRB per symbol
     assert (starts.max(1).values > starts.min(1).values).all()  # the block moves
+
+
+def test_pulsed_jammer_keeps_a_random_subset_of_symbols():
+    from jamloc.jammer import pulse_mask
+
+    batch = 200
+    attack = torch.tensor([3] * (batch - 1) + [1])  # partial-band, and one pilot attack
+    cells = cell_mask(attack, torch.full((batch,), 4), torch.full((batch,), 5), cfg)
+    gen = torch.Generator().manual_seed(0)
+    pulsed = pulse_mask(cells, 0.5, gen)
+    assert not (pulsed & ~cells).any()  # only cells of the continuous attack
+    per_slot = pulsed.any(1).sum(1)  # jammed symbols per slot
+    assert (per_slot >= 1).all()  # a jammed slot stays jammed
+    assert 5 < per_slot[:-1].float().mean() < 9  # about half of the 14 symbols
+    assert torch.equal(pulsed[-1], cells[-1])  # a pilot attack (one symbol) is unchanged
+    jammed = pulsed[:, 4:9]  # whole PRB block on the symbols that are on
+    assert torch.equal(jammed.all(1), jammed.any(1))
+
+
+def test_tone_jammer_has_one_constant_tone_per_prb():
+    import dataclasses
+
+    tone = dataclasses.replace(cfg, jammer_waveform="tone", jammer_tones=1)
+    cells = cell_mask(torch.tensor([3]), torch.tensor([6]), torch.tensor([4]), tone)
+    z = Jammer(tone)(cells, torch.tensor([3.0]))[0, 0, 0]  # [14, 288]
+    on = z.abs() > 0
+    for prb in range(24):
+        used = on[:, 12 * prb : 12 * prb + 12]
+        if 6 <= prb < 10:
+            assert used.sum(1).eq(1).all()  # one subcarrier on every symbol ...
+            assert used.any(0).sum() == 1  # ... and always the same one
+        else:
+            assert not used.any()
+    values = z[:, on.any(0)]  # [14, 4]: a continuous tone keeps its value over the symbols
+    assert torch.allclose(values, values[:1].expand_as(values))
+    assert torch.allclose(values.abs() ** 2, torch.full_like(values.real, 10**0.3), rtol=1e-5)
+
+
+def test_spoofing_jammer_replays_the_pilots():
+    import dataclasses
+
+    spoof = dataclasses.replace(cfg, jammer_waveform="dmrs")
+    # UE grid: QPSK pilots of energy 2 on the even subcarriers of PRBs 4-9 (DMRS symbol only)
+    x = torch.zeros(1, 1, 1, 14, 288, dtype=torch.complex64)
+    pilots = (torch.randint(0, 2, (36,)) * 2 - 1) + 1j * (torch.randint(0, 2, (36,)) * 2 - 1)
+    x[0, 0, 0, spoof.dmrs_symbol, 48:120:2] = pilots.to(torch.complex64)
+    cells = cell_mask(torch.tensor([3]), torch.tensor([2]), torch.tensor([10]), spoof)
+    z = Jammer(spoof)(cells, torch.tensor([0.0]), x)[0, 0, 0]
+    dmrs = z[spoof.dmrs_symbol]
+    # Inside the allocation: the UE's pilots (unit energy) times one common phase
+    ratio = dmrs[48:120:2] / (x[0, 0, 0, spoof.dmrs_symbol, 48:120:2] / 2**0.5)
+    assert torch.allclose(ratio, ratio[:1].expand_as(ratio), atol=1e-5)
+    assert torch.allclose(ratio.abs(), torch.ones(36), atol=1e-5)
+    # Outside the allocation (PRBs 2-3, 10-11): unit-energy symbols; the empty comb stays clean
+    assert torch.allclose(dmrs[24:48:2].abs(), torch.ones(12), atol=1e-5)
+    assert (dmrs[25:144:2] == 0).all()
+    assert (z[5, 24:144] != 0).all()  # partial-band: data symbols get Gaussian noise
+
+
+def test_spoofing_is_invisible_to_the_residual():
+    """A replayed DMRS adds a channel-like term to the LS estimates, which the projection removes
+    (the residual's blind spot) - but only if it covers the whole allocation: a spoofed block
+    inside it leaves a step at its edges, which the residual sees. Gaussian jamming always shows."""
+    from jamloc.features import residual_per_prb
+
+    n = 12
+    pilot_sc = torch.arange(0, 12 * n, 2)
+    f = pilot_sc.double() * cfg.scs
+    ue = torch.exp(-2j * torch.pi * f * 0.4e-6).to(torch.complex64)
+    jammer = (0.8 * torch.exp(-2j * torch.pi * f * 1.7e-6 + 0.3j)).to(torch.complex64)
+    no = torch.tensor([0.01])  # no noise is added below, so an unjammed residual is about 0
+
+    def residual(h_ls):
+        return residual_per_prb(h_ls[None], pilot_sc, no, 2.0, cfg)[0]
+
+    whole = residual(ue + jammer)  # spoofing on every scheduled PRB
+    assert whole.max() < 0.05
+
+    block = ue.clone()
+    block[24:48] += jammer[24:48]  # spoofing only PRBs 4-7 of the allocation
+    r_block = residual(block)
+    assert r_block[[3, 4, 7, 8]].min() > 3  # the steps at the block edges show
+
+    gen = torch.Generator().manual_seed(1)
+    noise = torch.complex(torch.randn(24, generator=gen), torch.randn(24, generator=gen)) * 0.57
+    gaussian = ue.clone()
+    gaussian[24:48] += noise  # Gaussian jamming of PRBs 4-7 with the same energy
+    assert residual(gaussian)[4:8].min() > 10

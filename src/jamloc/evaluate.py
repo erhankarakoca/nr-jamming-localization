@@ -183,6 +183,8 @@ def evaluate_scores(scores: dict, val: dict, test: dict, fa: float = FA):
         groups = {ATTACKS[a]: test["attack"] == a for a in (1, 2, 3)}
         groups["all"] = np.ones(len(labels), bool)
         for group, sel in groups.items():
+            if not sel.any():  # some test grids contain only some attack types
+                continue
             neg = ~labels[sel]
             f1_rows.append(
                 {

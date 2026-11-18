@@ -9,6 +9,15 @@ grids, each changing one thing (see ``jamloc.dataset.GENERALIZATION``):
 * ``fast`` - speeds up to 30 m/s. The channel changes within the slot, the single front-loaded DMRS
   no longer describes the last symbols well, and the EVM grows without jamming.
 * ``qpskjam`` - a constant-envelope QPSK jammer instead of Gaussian noise (same energy).
+* ``combjam``, ``hopjam`` - jammers that use the DMRS configuration: only the pilot subcarriers,
+  or a PRB block that moves on every OFDM symbol.
+* ``spoofjam`` - pilot spoofing: the jammer replays the UE's DMRS, which looks like a physical
+  channel, so the DMRS residual is blind to it by construction.
+* ``pulsejam`` - a pulsed jammer, on about half of the OFDM symbols of a data or partial-band attack.
+* ``tonejam`` - one continuous tone per jammed PRB: the energy of a cell is 1/12 of the nominal one.
+
+Some grids contain only some attack types (``spoofjam``: pilot; ``pulsejam``: data and partial);
+missing entries are left empty in the figure.
 
     python -m jamloc.experiments.generalization
 """
@@ -31,6 +40,9 @@ SHORT = {
     "qpskjam": "QPSK",
     "combjam": "comb",
     "hopjam": "hopping",
+    "spoofjam": "spoofing",
+    "pulsejam": "pulsed",
+    "tonejam": "tone",
 }
 DETECTORS = (
     "fused",
@@ -82,12 +94,12 @@ def plot(rows, splits):
         for i, det in enumerate(DETECTORS):
             vals = []
             for split in splits:
-                (r,) = [
+                match = [
                     r
                     for r in rows
                     if r["condition"] == split and r["detector"] == det and r["attack"] == attack
                 ]
-                vals.append(r[key])
+                vals.append(match[0][key] if match else np.nan)  # attack not in this grid
             x = np.arange(len(splits)) + (i - (len(DETECTORS) - 1) / 2) * width
             ax.bar(x, vals, width, color=style[det]["color"], label=style[det]["label"])
         ax.set_xticks(np.arange(len(splits)), [SHORT[s] for s in splits], rotation=30, ha="right")
@@ -99,10 +111,7 @@ def plot(rows, splits):
     axes[1].set_ylim(0, 1)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="outside lower center", ncols=4, frameon=False)
-    fig.suptitle(
-        "Unseen conditions: 1000 ns delay spread, 30 m/s, QPSK jammer, pilot-comb jammer, "
-        "hopping jammer\n(thresholds from the matched validation set)"
-    )
+    fig.suptitle("Unseen channels and jammers (thresholds from the matched validation set)")
     return fig
 
 

@@ -612,6 +612,58 @@ pilot-comb jammers, own seeds; thresholds from `val_atk`), 3 seeds:
   from its own operating point: thresholds from `val_atk` give 0.8% false alarms instead of
   1.2%.
 
+## 16. Pulsed, multi-tone and spoofing jammers
+
+`results/generalization/`, `results/attack_training/`, `results/eval/{pulsejam,tonejam,spoofjam}_*`
+(`experiments/generalization --splits spoofjam pulsejam tonejam`, `experiments/attack_training`).
+Three more jammers that no detector saw in training, each changing one attribute
+(`jamloc.jammer`, plan v5):
+
+- `pulsejam` - time support: each OFDM symbol of a data or partial-band attack is jammed with
+  probability 0.5 (`jammer_duty`); pilot attacks would be unchanged and are left out.
+- `tonejam` - waveform and frequency support: one continuous tone per jammed PRB
+  (`jammer_waveform="tone"`, `jammer_tones=1`), a twelfth of the nominal energy per cell.
+- `spoofjam` - knowledge: the jammer replays the UE's DMRS on the scheduled PRBs, scaled, with one
+  random phase per slot (`jammer_waveform="dmrs"`, pilot attack, scheduling-aware). Its
+  contribution to the LS estimates is `a g_k`, a physically possible channel, so the delay-subspace
+  projection removes it: the residual is blind by construction (`tests/test_jammer.py` checks this,
+  and also that spoofing only part of the allocation leaves visible steps at the block edges).
+
+F1 / false-alarm rate (scored cells), thresholds from `val` (mixed attacks: `val_atk`), 3 seeds:
+
+| Detector | Pulsed | Multi-tone | Spoofing |
+| --- | --- | --- | --- |
+| U-Net P+R+E | 0.629 / 10.9% | **0.760** / 1.5% | 0.029 / 27.3% |
+| U-Net P+E | 0.625 / 10.1% | 0.752 / 1.6% | 0.249 / 10.7% |
+| U-Net P | 0.612 / 11.3% | 0.710 / 1.5% | 0.399 / 3.3% |
+| U-Net E | 0.545 / 9.5% | 0.505 / 0.5% | **0.574** / 0.5% |
+| Per-cell MLP | **0.711** / 0.5% | 0.321 / 0.2% | 0.000 / 7.6% |
+| Block test | 0.595 / 8.6% | 0.627 / 0.8% | 0.001 / 26.1% |
+| U-Net P+R+E, attack-mixed training | 0.846 / 3.0% | 0.746 / 1.0% | 0.014 / 28.0% |
+
+**Reading.**
+- **Pulsed** jamming breaks the row structure like hopping does: the U-Nets paint whole rows (10-11%
+  false alarms), the per-cell MLP is best. The attack-mixed network, which never saw a pulsed
+  jammer, reaches 0.85: what it learned from the hopping jammer carries over.
+- **Multi-tone**: 0.76 for the fused network; pilot attacks drop to F1 0.54 because half the tones
+  fall on the empty DMRS comb (no effect on the channel estimate, 1/12 of the power).
+- **Spoofing** is the residual's blind spot, and the detectors that trust the residual fail worst:
+  with clean-looking pilots, the raised EVM of the data (wrong channel estimate) is read as data
+  jamming, so the data symbols are flagged (27% false alarms) instead of the DMRS cells. The
+  EVM-only network, which learned the pilot-jamming signature from EVM alone, localizes it best.
+- **The attack is noticed, though.** Slot alarm (largest logit above the level 1% of the benign
+  slots of `spoofjam` exceed; calibrated on every other benign slot, checked on the rest, slot
+  false alarms 1.0-1.6%): 43-58% of spoofed slots flagged at -15 dB, 81-86% at -12 dB, 91-95% at
+  -9 dB, 98-99% at -3 to 0 dB; seed 2 drops again above +3 dB (0.63 at +9 dB). Flags fall on 27-94%
+  of the data cells but only 5-56% of the attacked DMRS cells.
+- **Spoofing is also more harmful.** Unprotected BLER, TDL-C, 15 dB SNR, jammer on all 12 scheduled
+  PRBs, 512 slots per point:
+
+  | JSR | -15 dB | -9 dB | -3 dB | +3 dB |
+  | --- | --- | --- | --- | --- |
+  | Gaussian pilot jamming (whole DMRS symbol) | 0 | 0.002 | 0.014 | 0.379 |
+  | Spoofing (pilot comb only, half the energy) | 0 | 0.008 | 0.170 | 0.701 |
+
 ## Caveats before these go into the paper
 
 - Each Pd point averages over SNR 5–25 dB; the SNR-range files give the split by SNR.

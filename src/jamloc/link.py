@@ -20,7 +20,7 @@ from sionna.phy.channel.tr38901 import TDL
 from sionna.phy.nr import PUSCHTransmitter
 
 from jamloc.config import SimConfig
-from jamloc.jammer import ATTACKS, Jammer, cell_mask
+from jamloc.jammer import ATTACKS, Jammer, cell_mask, pulse_mask
 from jamloc.receiver import PUSCHReceiverChain
 from jamloc.ue import (
     UEPool,
@@ -182,7 +182,10 @@ class JammedPUSCHLink:
             cfg,
             hop_start,
         )
-        z = self.jammer(labels, sc.jsr_db)
+        if cfg.jammer_duty < 1.0:  # pulsed jammer: only some of the OFDM symbols
+            labels = pulse_mask(labels, cfg.jammer_duty, self.jammer.torch_rng)
+        # (the pilot-spoofing waveform replays the UE's pilots, so the jammer gets the UE grid)
+        z = self.jammer(labels, sc.jsr_db, x)
         y_jam = self.jammer_channel[sc.channel](z)
 
         # Receiver noise (UE data REs have unit energy, so no = 10^(-SNR/10))
