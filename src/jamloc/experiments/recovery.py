@@ -404,14 +404,25 @@ def plot(rows, channel, receivers=MAIN_RECEIVERS, shade=True):
 
 def _read_rows(path) -> list[dict]:
     with open(path, encoding="utf-8", newline="") as f:
-        text = ("receiver", "attack", "jammer")
+        text, counts = ("receiver", "attack", "jammer", "seed"), ("block_errors", "blocks")
         return [
-            {k: (v if k in text else float(v)) for k, v in r.items()} for r in csv.DictReader(f)
+            {
+                k: v if k in text else int(float(v)) if k in counts else float(v)
+                for k, v in r.items()
+            }
+            for r in csv.DictReader(f)
         ]
 
 
 def rows_rx(rows) -> set:
     return {r["receiver"] for r in rows}
+
+
+def _write_rows(rows, path):
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def main(argv=None):
@@ -442,12 +453,15 @@ def main(argv=None):
         stem = stem.with_name(f"{stem.name}_{args.jammer}")
     if args.snr_db != 15.0:
         stem = stem.with_name(f"{stem.name}_snr{args.snr_db:g}")
-    if args.plot_only:
-        rows = _read_rows(stem.with_suffix(".csv"))
-    else:
-        rows = []
+
+    # Every seed has its own CSV, so seeds can run as parallel processes; the combined CSV and
+    # the figures pool whatever seed files exist
+    def seed_path(seed):
+        return stem.with_name(f"{stem.name}_seed{seed}.csv")
+
+    if not args.plot_only:
         for seed in args.seeds:
-            rows += simulate(
+            rows = simulate(
                 args.channel,
                 args.snr_db,
                 args.jsr_db,
@@ -458,17 +472,17 @@ def main(argv=None):
                 args.receivers,
                 args.jammer,
             )
-        if args.receivers and stem.with_suffix(".csv").is_file():
-            kept = [
-                r
-                for r in _read_rows(stem.with_suffix(".csv"))
-                if r["receiver"] not in rows_rx(rows)
-            ]
-            rows = kept + rows
-        with open(stem.with_suffix(".csv"), "w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(rows[0]))
-            writer.writeheader()
-            writer.writerows(rows)
+            path = seed_path(seed)
+            if args.receivers and path.is_file():  # keep the other receivers' rows
+                new = rows_rx(rows)
+                rows = [r for r in _read_rows(path) if r["receiver"] not in new] + rows
+            _write_rows(rows, path)
+    seed_files = sorted(stem.parent.glob(f"{stem.name}_seed*.csv"))
+    if seed_files:
+        rows = [r for path in seed_files for r in _read_rows(path)]
+        _write_rows(rows, stem.with_suffix(".csv"))
+    else:  # a CSV from before the per-seed files
+        rows = _read_rows(stem.with_suffix(".csv"))
     pooled = pool_seeds(rows)
     with paper_style():
         main_fig = plot(pooled, args.channel)  # the message: no protection vs map vs true map
