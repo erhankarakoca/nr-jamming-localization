@@ -27,6 +27,13 @@ class SimConfig:
     # constant-envelope symbols, only used to test generalization)
     jammer_waveform: str = "gaussian"
 
+    # Smarter jammers, only used to test generalization (both off in the threat model):
+    # on the DMRS symbol, jam only the comb of subcarriers that carries the pilots (type-1 DMRS,
+    # port 0: the even subcarriers), not the empty comb next to it
+    jammer_pilot_comb: bool = False
+    # draw a new block of PRBs (same size) for every OFDM symbol: hopping from symbol to symbol
+    jammer_hopping: bool = False
+
     @property
     def num_subcarriers(self) -> int:
         return 12 * self.num_prb

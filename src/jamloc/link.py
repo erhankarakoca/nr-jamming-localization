@@ -165,11 +165,22 @@ class JammedPUSCHLink:
         y_ue = self.ue_channel[sc.channel](x)
 
         # Jammer: Gaussian noise on the attacked cells, through its own channel
+        hop_start = None
+        if cfg.jammer_hopping:  # a new block position for every OFDM symbol
+            u = torch.rand(
+                sc.batch_size,
+                cfg.num_symbols,
+                generator=self.jammer.torch_rng,
+                device=self.device,
+            )
+            positions = (cfg.num_prb - sc.jam_size.to(self.device) + 1)[:, None]
+            hop_start = (u * positions).long()
         labels = cell_mask(
             sc.attack.to(self.device),
             sc.jam_start.to(self.device),
             sc.jam_size.to(self.device),
             cfg,
+            hop_start,
         )
         z = self.jammer(labels, sc.jsr_db)
         y_jam = self.jammer_channel[sc.channel](z)

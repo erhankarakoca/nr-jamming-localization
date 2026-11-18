@@ -25,7 +25,7 @@ def test_unknown_waveform_is_rejected():
 
 
 def test_size_sweep_and_generalization_small(tmp_path, monkeypatch):
-    from jamloc.dataset import generate, load
+    from jamloc.dataset import GENERALIZATION, generate, load
     from jamloc.experiments import generalization, size_sweep
     from jamloc.model import VARIANTS
     from jamloc.train import train
@@ -45,7 +45,8 @@ def test_size_sweep_and_generalization_small(tmp_path, monkeypatch):
         tmp_path / "results" / "generalization" / "generalization.csv", encoding="utf-8"
     ) as f:
         rows = list(csv.DictReader(f))
-    assert {r["condition"] for r in rows} == {"test", "longdelay", "fast", "qpskjam"}
+    assert {r["condition"] for r in rows} == {"test", *GENERALIZATION}
+    assert {"combjam", "hopjam"} <= set(GENERALIZATION)
     assert (tmp_path / "results" / "generalization" / "generalization.png").is_file()
 
     size_sweep.main(["--widths", "4", "12", "--seeds", "0", "--epochs", "1"])
@@ -81,3 +82,26 @@ def test_robust_training_small(tmp_path, monkeypatch):
     assert (out / "robust_training.png").is_file()
     assert (tmp_path / "results" / "models" / "fused_mix_seed0.pt").is_file()
     assert len(load("train_mix")["labels"]) == 96
+
+
+def test_attack_training_small(tmp_path, monkeypatch):
+    from jamloc.dataset import generate
+    from jamloc.experiments import attack_training
+    from jamloc.train import train
+
+    monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
+    sizes = {"train": 64, "val": 32, "train_atk": 96, "val_atk": 32}
+    sizes.update(test=60, combjam=60, hopjam=60)
+    for split, n in sizes.items():
+        generate(split, num_slots=n, batch_size=16)
+    train("fused", epochs=1, batch_size=32)
+
+    attack_training.main(["--seeds", "0", "--epochs", "1"])
+    out = tmp_path / "results" / "attack_training"
+    with open(out / "attack_training.csv", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 3 * 2  # conditions x trainings
+    assert {r["condition"] for r in rows} == {"matched", "pilot comb", "hopping"}
+    assert (out / "attack_training.png").is_file()
+    assert (tmp_path / "results" / "models" / "fused_atk_seed0.pt").is_file()

@@ -24,7 +24,14 @@ from jamloc.paths import data_dir, results_dir
 from jamloc.plotting import new_figure, paper_style, save
 
 CONDITIONS = {"test": "matched (test)", **{k: v["title"] for k, v in GENERALIZATION.items()}}
-SHORT = {"test": "matched", "longdelay": "1000 ns", "fast": "30 m/s", "qpskjam": "QPSK"}
+SHORT = {
+    "test": "matched",
+    "longdelay": "1000 ns",
+    "fast": "30 m/s",
+    "qpskjam": "QPSK",
+    "combjam": "comb",
+    "hopjam": "hopping",
+}
 DETECTORS = (
     "fused",
     "no_residual",
@@ -60,7 +67,7 @@ def summary(splits) -> list[dict]:
 
 
 def plot(rows, splits):
-    fig, axes = new_figure(7.16, 2.9, ncols=3)
+    fig, axes = new_figure(7.16, 3.1, ncols=3)
     width = 0.8 / len(DETECTORS)
     style = evaluate.DETECTOR_STYLE
     for ax, (attack, key, title) in zip(
@@ -83,7 +90,7 @@ def plot(rows, splits):
                 vals.append(r[key])
             x = np.arange(len(splits)) + (i - (len(DETECTORS) - 1) / 2) * width
             ax.bar(x, vals, width, color=style[det]["color"], label=style[det]["label"])
-        ax.set_xticks(np.arange(len(splits)), [SHORT[s] for s in splits])
+        ax.set_xticks(np.arange(len(splits)), [SHORT[s] for s in splits], rotation=30, ha="right")
         ax.set_title(title)
         if key == "fa_scored":
             ax.axhline(evaluate.FA, color="k", lw=0.8, ls=":")
@@ -93,8 +100,8 @@ def plot(rows, splits):
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="outside lower center", ncols=4, frameon=False)
     fig.suptitle(
-        "Unseen conditions: TDL-C at 1000 ns delay spread, speeds up to 30 m/s, QPSK jammer\n"
-        "(thresholds from the matched validation set)"
+        "Unseen conditions: 1000 ns delay spread, 30 m/s, QPSK jammer, pilot-comb jammer, "
+        "hopping jammer\n(thresholds from the matched validation set)"
     )
     return fig
 

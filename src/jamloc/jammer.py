@@ -10,6 +10,11 @@ waveform can be chosen in ``SimConfig`` to test generalization):
 * ``partial`` - all 14 symbols (partial-band jamming)
 
 A *cell* is one PRB x one OFDM symbol. The jammed cells are also the labels the detector learns.
+
+Two smarter variants test generalization (``SimConfig``): ``jammer_pilot_comb`` jams only the
+pilot subcarriers of the DMRS symbol (half its resource elements; the empty comb stays clean, so
+the same damage to the channel estimate costs half the energy), and ``jammer_hopping`` moves the
+jammed PRB block to a new random position on every OFDM symbol.
 """
 
 import torch
@@ -22,19 +27,29 @@ ATTACKS = ("none", "pilot", "data", "partial")
 
 
 def cell_mask(
-    attack: torch.Tensor, jam_start: torch.Tensor, jam_size: torch.Tensor, cfg: SimConfig
+    attack: torch.Tensor,
+    jam_start: torch.Tensor,
+    jam_size: torch.Tensor,
+    cfg: SimConfig,
+    hop_start: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Jammed cells ``[B, num_prb, num_symbols]`` for each slot of the batch.
 
     ``attack`` holds indices into ``ATTACKS``; the jammed PRBs are
-    ``jam_start .. jam_start + jam_size - 1``.
+    ``jam_start .. jam_start + jam_size - 1``. A hopping jammer gives one start per OFDM symbol in
+    ``hop_start`` ``[B, num_symbols]``, which then replaces ``jam_start``.
     """
     device = attack.device
     prb = torch.arange(cfg.num_prb, device=device)
     sym = torch.arange(cfg.num_symbols, device=device)
 
-    # Which PRBs are jammed: [B, num_prb]
-    in_block = (prb >= jam_start[:, None]) & (prb < (jam_start + jam_size)[:, None])
+    # Which PRBs are jammed on each symbol: [B, num_prb, 1] (or [B, num_prb, num_symbols])
+    if hop_start is None:
+        start = jam_start[:, None, None]
+    else:
+        start = hop_start[:, None, :]
+    stop = start + jam_size[:, None, None]
+    in_block = (prb[None, :, None] >= start) & (prb[None, :, None] < stop)
 
     # Which OFDM symbols are jammed for each attack: [num_attacks, num_symbols]
     is_dmrs = sym == cfg.dmrs_symbol
@@ -43,7 +58,7 @@ def cell_mask(
     )
     jammed_symbols = symbols_per_attack[attack]  # [B, num_symbols]
 
-    return in_block[:, :, None] & jammed_symbols[:, None, :]
+    return in_block & jammed_symbols[:, None, :]
 
 
 class Jammer(Block):
@@ -66,6 +81,10 @@ class Jammer(Block):
         # Cells -> resource elements: every subcarrier of a jammed PRB is jammed
         re_mask = cells.repeat_interleave(12, dim=1)  # [B, 288, 14]
         re_mask = re_mask.transpose(1, 2)[:, None, None]  # [B, 1, 1, 14, 288]
+        if self.cfg.jammer_pilot_comb:  # leave the empty DMRS comb (odd subcarriers) alone
+            keep = torch.ones(re_mask.shape[-2:], dtype=torch.bool, device=self.device)
+            keep[self.cfg.dmrs_symbol, 1::2] = False
+            re_mask = re_mask & keep
 
         # Unit-variance complex Gaussian noise (or random QPSK symbols, also of unit energy),
         # scaled to the jammer energy per RE

@@ -11,9 +11,13 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
 * Generalization (same grid, conditions never seen in training, see ``GENERALIZATION``):
   ``longdelay`` - TDL-C with 1000 ns delay spread, so channel delays reach 8.7 us, far beyond the
   ``tau_max`` = 3 us the DMRS residual assumes; ``fast`` - UE and jammer moving at up to 30 m/s
-  instead of 3 m/s; ``qpskjam`` - the jammer sends random QPSK symbols instead of Gaussian noise.
+  instead of 3 m/s; ``qpskjam`` - the jammer sends random QPSK symbols instead of Gaussian noise;
+  ``combjam`` - on the DMRS symbol only the pilot subcarriers are jammed; ``hopjam`` - the jammed
+  PRB block moves to a new position on every OFDM symbol.
 * ``train_mix`` / ``val_mix`` - like ``train`` / ``val``, but the batches cycle through the nominal
   channels, long delay spreads and high speeds (``MIXED_CONDITIONS``).
+* ``train_atk`` / ``val_atk`` - like ``train`` / ``val``, but the batches cycle through the
+  nominal, hopping and pilot-comb jammers (``ATTACK_CONDITIONS``).
 * ``margin`` - the jammer hits exactly the scheduled PRBs, as in the BLER experiment, at a fixed
   SNR of 15 dB and down to JSR -30 dB (``experiments/detection_margin``).
 
@@ -75,6 +79,16 @@ GENERALIZATION = {
         "cfg": {"jammer_waveform": "qpsk"},
         "title": "QPSK jamming waveform (unseen)",
     },
+    "combjam": {
+        "seed": 12_000_000,
+        "cfg": {"jammer_pilot_comb": True},
+        "title": "jammer only on the pilot subcarriers of the DMRS symbol (unseen)",
+    },
+    "hopjam": {
+        "seed": 13_000_000,
+        "cfg": {"jammer_hopping": True},
+        "title": "jammer hops to a new PRB block every OFDM symbol (unseen)",
+    },
 }
 for _name, _spec in GENERALIZATION.items():
     SPLITS[_name] = {"per_point": 200, "benign_per_channel": 1_000, "sched": False, **_spec}
@@ -89,10 +103,22 @@ MIXED_CONDITIONS = (
 SPLITS["train_mix"] = {"seed": 10_000_000, "num_slots": 40_000, "mix": MIXED_CONDITIONS}
 SPLITS["val_mix"] = {"seed": 11_000_000, "num_slots": 5_000, "mix": MIXED_CONDITIONS}
 
+# Training on mixed attacks: batches cycle through the nominal jammer, the hopping jammer and the
+# pilot-comb jammer (``experiments/attack_training``). Seeds differ from every other split.
+ATTACK_CONDITIONS = (
+    {},
+    {"jammer_hopping": True},
+    {"jammer_pilot_comb": True},
+)
+SPLITS["train_atk"] = {"seed": 14_000_000, "num_slots": 40_000, "mix": ATTACK_CONDITIONS}
+SPLITS["val_atk"] = {"seed": 15_000_000, "num_slots": 5_000, "mix": ATTACK_CONDITIONS}
+
 # Detection before damage: the setting of the BLER curves (jammer on the scheduled PRBs, SNR
 # 15 dB), with JSRs low enough to find where detection starts
 SPLITS["margin"] = {
     "seed": 8_000_000,
+    # small batches, so every grid point mixes 25 allocations (a batch shares one allocation)
+    "batch_size": 8,
     "per_point": 200,
     "benign_per_channel": 1_000,
     "sched": True,
@@ -153,6 +179,7 @@ def _grid_jobs(spec: dict, num_slots, batch_size: int) -> list[dict]:
 def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
     """Simulate a split and save it to ``data_dir()/{split}.npz``. Returns the file path."""
     spec = SPLITS[split]
+    batch_size = spec.get("batch_size", batch_size)
     if "per_point" in spec:
         jobs = _grid_jobs(spec, num_slots, batch_size)
     else:
