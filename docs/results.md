@@ -614,8 +614,9 @@ pilot-comb jammers, own seeds; thresholds from `val_atk`), 3 seeds:
 
 ## 16. Pulsed, multi-tone and spoofing jammers
 
-`results/generalization/`, `results/attack_training/`, `results/eval/{pulsejam,tonejam,spoofjam}_*`
-(`experiments/generalization --splits spoofjam pulsejam tonejam`, `experiments/attack_training`).
+`results/generalization/`, `results/attack_training/`, `results/eval/{pulsejam,tonejam,spoofjam}_*`,
+`results/spoofing/` (`experiments/generalization --splits spoofjam pulsejam tonejam`,
+`experiments/attack_training`, `experiments/spoofing`).
 Three more jammers that no detector saw in training, each changing one attribute
 (`jamloc.jammer`, plan v5):
 
@@ -647,7 +648,9 @@ F1 / false-alarm rate (scored cells), thresholds from `val` (mixed attacks: `val
   jammer, reaches 0.85: what it learned from the hopping jammer carries over.
 - **Multi-tone**: 0.76 for the fused network; pilot attacks drop to F1 0.54 because half the tones
   fall on the empty DMRS comb (no effect on the channel estimate, 1/12 of the power).
-- **Spoofing** is the residual's blind spot, and the detectors that trust the residual fail worst:
+- **Spoofing** is the residual's blind spot (when the jammer's channel stays within the delay
+  subspace): at the analytic 1% threshold, 0.96% of the spoofed DMRS cells and 1.00% of the
+  benign ones exceed it, so the residual cannot tell them apart; and the detectors that trust the residual fail worst:
   with clean-looking pilots, the raised EVM of the data (wrong channel estimate) is read as data
   jamming, so the data symbols are flagged (27% false alarms) instead of the DMRS cells. The
   EVM-only network, which learned the pilot-jamming signature from EVM alone, localizes it best.

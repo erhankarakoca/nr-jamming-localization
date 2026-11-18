@@ -105,3 +105,24 @@ def test_attack_training_small(tmp_path, monkeypatch):
     assert {r["condition"] for r in rows} == set(attack_training.CONDITIONS.values())
     assert (out / "attack_training.png").is_file()
     assert (tmp_path / "results" / "models" / "fused_atk_seed0.pt").is_file()
+
+
+def test_spoofing_small(tmp_path, monkeypatch):
+    from jamloc.dataset import generate
+    from jamloc.experiments import spoofing
+    from jamloc.train import train
+
+    monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path / "results"))
+    generate("train", num_slots=64, batch_size=32)
+    generate("val", num_slots=32, batch_size=32)
+    generate("spoofjam", num_slots=40, batch_size=32)
+    train("fused", epochs=1, batch_size=32)
+
+    rows = spoofing.slot_alarms([0])
+    assert {r["jsr_db"] for r in rows} <= set(float(j) for j in range(-15, 10, 3))
+    assert all(0 <= r[k] <= 1 for r in rows for k in ("slot_pd", "dmrs_flagged", "data_flagged"))
+    monkeypatch.setattr(spoofing, "BLER_JSR_DB", (3.0,))
+    bler = spoofing.bler(batches=1, batch_size=8)
+    assert [r["jammer"] for r in bler] == ["gaussian", "spoofing"]
+    assert all(r["blocks"] == 8 for r in bler)

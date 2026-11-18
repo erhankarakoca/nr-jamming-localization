@@ -107,6 +107,7 @@ gNB: take scheduled PRBs -> LS channel estimation -> LMMSE equalizer -> demapper
 | `dataset.py` | Train / validation / test / scheduling-aware splits with fixed seeds |
 | `evaluate.py`, `metrics.py` | Pd at 1% per-cell false alarm vs JSR, cell-level F1 |
 | `paper.py` | Copies the paper's figures into the local clone of its Overleaf project |
+| `diagrams.py` | Exports the draw.io diagrams in `diagrams/` (e.g. the system diagram) to PDF and PNG |
 | `experiments/` | One script per experiment and figure (see below) |
 
 ### Reproducing the results
@@ -204,13 +205,16 @@ git clone https://git.overleaf.com/<project-id> nr-jamming-paper
 
 ```bash
 git -C ../nr-jamming-paper pull                               # latest text from Overleaf
+uv run python -m jamloc.diagrams                              # draw.io diagrams -> results/figures
 uv run python -m jamloc.paper                                 # copy the current figures
 git -C ../nr-jamming-paper add -A
 git -C ../nr-jamming-paper commit -m "Update figures"
 git -C ../nr-jamming-paper push
 ```
 
-`jamloc.paper` looks for the clone in `../nr-jamming-paper`; give `--dest` or set
+Block diagrams are drawn in draw.io (`diagrams/*.drawio`; edit them in the desktop app or at
+app.diagrams.net). `jamloc.diagrams` needs the draw.io desktop app for the export
+(macOS: `brew install --cask drawio`). `jamloc.paper` looks for the clone in `../nr-jamming-paper`; give `--dest` or set
 `JAMLOC_PAPER_DIR` if it is elsewhere. `paper/main.tex` in this repository is a frozen copy of the
 draft from before the move; the Overleaf copy is the paper. `docs/writing-guide.md` collects the
 style rules (mathematics, structure, tone), exemplar papers and the references added in the

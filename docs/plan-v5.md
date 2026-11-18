@@ -87,9 +87,18 @@ of asynchronous off-tone jamming attacks against OFDM", IEEE ICC 2013, 10.1109/I
 4. Independent review of the new text and code, numbers checked against the CSVs, push to
    Overleaf and GitHub.
 
-## Status
+## Status (18 November 2026)
 
-- [ ] 1. Propositions
-- [ ] 2. Figures
-- [ ] 3. Jammer models (E1, E2, E3 to be decided)
-- [ ] 4. Review and push
+- [x] 1. Propositions: motivation (three questions), Proposition 1 with a three-step proof and an
+  interpretation via the effective number of noise directions (table), Corollary 1 (threshold),
+  Proposition 2 with an interpretation (detection, leakage, mean), Corollary 2 (K slots), tail
+  computation in an appendix.
+- [x] 2. Figures: Fig. 1 and the residual example in one column (matplotlib), Fig. 2 as a draw.io
+  diagram (`diagrams/system_diagram.drawio`, `python -m jamloc.diagrams`), K-slot panel added to
+  the theory figure.
+- [x] 3. Jammer models: E1 spoofing, E2 pulsed, E3 multi-tone implemented, tested and evaluated
+  (results section 16); "Other jammers" paragraph and limitations in the paper.
+- [x] 4. Independent review of the paper text (spoofing claim scoped to jammer channels within the
+  delay subspace, Corollary 2 assumptions, Proposition 2 mean as a weighted average, several
+  wording and rounding fixes); spoofing slot alarms and BLER now reproducible with
+  `experiments/spoofing`; pushed to Overleaf.
