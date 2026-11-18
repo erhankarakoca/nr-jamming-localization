@@ -20,7 +20,13 @@ import numpy as np
 import torch
 from sionna.phy import config
 
-from jamloc.baselines import evm_scores, power_scores, residual_cfar_scores, residual_scores
+from jamloc.baselines import (
+    block_test_scores,
+    evm_scores,
+    power_scores,
+    residual_cfar_scores,
+    residual_scores,
+)
 from jamloc.dataset import CHANNELS, SPLITS, load
 from jamloc.features import FEATURE_NAMES
 from jamloc.jammer import ATTACKS
@@ -28,7 +34,7 @@ from jamloc.metrics import detection_rate, f1, threshold_at_fa
 from jamloc.model import VARIANTS, select_inputs
 from jamloc.paths import results_dir
 from jamloc.plotting import new_figure, paper_style, save
-from jamloc.train import load_model
+from jamloc.train import checkpoint_path, load_model
 
 FA = 0.01
 DETECTOR_STYLE = {
@@ -60,6 +66,24 @@ DETECTOR_STYLE = {
         "marker": "+",
         "linestyle": "-.",
     },
+    "block_test": {
+        "label": "Block test (no training)",
+        "color": "#882255",
+        "marker": "P",
+        "linestyle": "-",
+    },
+    "fused_nj1": {
+        "label": "U-Net, P+R+E, noise jitter",
+        "color": "#332288",
+        "marker": "d",
+        "linestyle": ":",
+    },
+    "fused_pixel": {
+        "label": "Per-cell MLP, P+R+E",
+        "color": "#44AA99",
+        "marker": "h",
+        "linestyle": "--",
+    },
 }
 
 
@@ -75,22 +99,37 @@ def available_seeds() -> list[int]:
     return sorted(seeds or [])
 
 
-def score_split(d: dict, seed: int = 0) -> dict[str, np.ndarray]:
-    """Scores ``[N, 24, 14]`` of every detector on one loaded split."""
+def _logits(model, variant: str, features: torch.Tensor) -> np.ndarray:
+    with torch.no_grad():
+        logits = [
+            model(select_inputs(features[i].to(config.device), variant)).cpu()
+            for i in torch.arange(len(features)).split(2048)
+        ]
+    return torch.cat(logits).numpy()
+
+
+def score_split(d: dict, seed: int = 0, null: dict | None = None) -> dict[str, np.ndarray]:
+    """Scores ``[N, 24, 14]`` of every detector on one loaded split.
+
+    ``null`` is the split whose benign slots calibrate the block test's EVM statistic (``val``;
+    ``d`` itself if omitted). The per-cell MLP and the U-Net trained with noise jitter are
+    included when their checkpoints exist.
+    """
     features = torch.from_numpy(d["features"])
-    scores = {}
-    for variant in VARIANTS:
-        model = load_model(variant, seed)
-        with torch.no_grad():
-            logits = [
-                model(select_inputs(features[i].to(config.device), variant)).cpu()
-                for i in torch.arange(len(features)).split(2048)
-            ]
-        scores[variant] = torch.cat(logits).numpy()
+    scores = {
+        variant: _logits(load_model(variant, seed), variant, features) for variant in VARIANTS
+    }
+    if checkpoint_path("fused", seed, arch="pixel").is_file():
+        model = load_model("fused", seed, arch="pixel")
+        scores["fused_pixel"] = _logits(model, "fused", features)
+    if checkpoint_path("fused", seed, jitter=1.0).is_file():
+        model = load_model("fused", seed, jitter=1.0)
+        scores["fused_nj1"] = _logits(model, "fused", features)
     scores["evm_threshold"] = evm_scores(d["features"])
     scores["residual_threshold"] = residual_scores(d["features"])
     scores["residual_cfar"] = residual_cfar_scores(d)
     scores["power_threshold"] = power_scores(d["features"])
+    scores["block_test"] = block_test_scores(d, d if null is None else null)
     return scores
 
 
@@ -228,7 +267,7 @@ def main(argv=None):
 
     pd_rows, f1_rows = [], []
     for seed in seeds:
-        s_val, s_test = score_split(val, seed), score_split(test, seed)
+        s_val, s_test = score_split(val, seed), score_split(test, seed, null=val)
         scores = {det: (s_val[det], s_test[det]) for det in s_val}
         pd_seed, f1_seed = evaluate_scores(scores, val, test)
         pd_rows += [{**r, "seed": seed} for r in pd_seed]

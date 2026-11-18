@@ -31,6 +31,27 @@ def select_inputs(features: torch.Tensor, variant: str) -> torch.Tensor:
     return features[:, idx] * scale[None, :, None, None]
 
 
+def noise_shift(x: torch.Tensor, variant: str, delta_db: torch.Tensor) -> torch.Tensor:
+    """Inputs (from ``select_inputs``) as seen with a noise estimate ``delta_db`` ``[B]`` dB above
+    the true noise power.
+
+    Every feature is divided by the estimated noise variance, so P, R and E move by ``-delta_db``
+    (``-delta_db / 10`` after the input scaling) where they are defined: P everywhere, R on the
+    DMRS cells, E on the data cells. Used to train detectors that tolerate noise-estimation error.
+    """
+    idx = VARIANTS[variant]
+    shift = -delta_db.to(x.dtype)[:, None, None] / 10
+    out = x.clone()
+    for pos, ch in enumerate(idx):
+        if ch == _P:
+            out[:, pos] += shift
+        elif ch == _R:
+            out[:, pos] += shift * x[:, idx.index(_DMRS)]
+        elif ch == _E:
+            out[:, pos] += shift * x[:, idx.index(_DATA)]
+    return out
+
+
 def _conv_block(c_in: int, c_out: int) -> nn.Sequential:
     return nn.Sequential(
         nn.Conv2d(c_in, c_out, 3, padding=1, bias=False),
@@ -40,6 +61,30 @@ def _conv_block(c_in: int, c_out: int) -> nn.Sequential:
         nn.BatchNorm2d(c_out),
         nn.ReLU(inplace=True),
     )
+
+
+class PixelMLP(nn.Module):
+    """Per-cell classifier for the ablation of spatial context.
+
+    The same inputs as the U-Net, but only 1 x 1 convolutions: every cell is classified from its
+    own features and masks, without seeing its neighbours (4 801 parameters for the fused
+    variant with ``hidden=64``).
+    """
+
+    def __init__(self, in_channels: int, hidden: int = 64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_channels, hidden, 1, bias=False),
+            nn.BatchNorm2d(hidden),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden, hidden, 1, bias=False),
+            nn.BatchNorm2d(hidden),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden, 1, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)[:, 0]
 
 
 class TinyUNet(nn.Module):

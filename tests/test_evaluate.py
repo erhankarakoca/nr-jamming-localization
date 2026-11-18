@@ -45,6 +45,8 @@ def test_main_runs_end_to_end(tmp_path, monkeypatch):
     for variant in VARIANTS:
         for seed in (0, 1):
             train(variant, epochs=1, batch_size=32, seed=seed)
+    for seed in (0, 1):
+        train("fused", epochs=1, batch_size=32, seed=seed, arch="pixel")
 
     main(["--split", "test"])
     out = tmp_path / "results" / "eval"
@@ -56,6 +58,8 @@ def test_main_runs_end_to_end(tmp_path, monkeypatch):
         "residual_threshold",
         "residual_cfar",
         "power_threshold",
+        "block_test",
+        "fused_pixel",
     }
     assert {"pd_mean", "pd_std", "n_seeds"} <= set(rows[0])
     assert {r["n_seeds"] for r in rows} == {"2"}

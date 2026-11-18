@@ -25,7 +25,15 @@ from jamloc.plotting import new_figure, paper_style, save
 
 CONDITIONS = {"test": "matched (test)", **{k: v["title"] for k, v in GENERALIZATION.items()}}
 SHORT = {"test": "matched", "longdelay": "1000 ns", "fast": "30 m/s", "qpskjam": "QPSK"}
-DETECTORS = ("fused", "no_residual", "power", "evm", "evm_threshold", "residual_threshold")
+DETECTORS = (
+    "fused",
+    "no_residual",
+    "power",
+    "evm",
+    "block_test",
+    "evm_threshold",
+    "residual_threshold",
+)
 
 
 def _f1_rows(split: str) -> list[dict]:
