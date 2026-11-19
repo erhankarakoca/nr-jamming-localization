@@ -160,6 +160,17 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
         assert float(r["delta_lo"]) <= float(r["delta"]) <= float(r["delta_hi"])
         assert int(r["slots"]) == 2 * 8  # both seeds, one batch of 8 slots each
 
+    # A replay of the nominal run decodes only the quoted points, on the same slots
+    earlier = tmp_path / "earlier"
+    earlier.mkdir()
+    (out / "recovery_A_seed0.csv").rename(earlier / "recovery_A_seed0.csv")
+    recovery.main([*args, "--replay", str(earlier)])
+    replayed = recovery._read_rows(out / "recovery_A_replay_seed0.csv")
+    assert {(r["attack"], r["jsr_db"]) for r in replayed} == {
+        ("none", r["jsr_db"]) for r in replayed if r["attack"] == "none"
+    } | {("partial", 3.0)}
+    assert not recovery.check_replay(replayed, earlier / "recovery_A_seed0.csv")
+
     # The noise power estimated per slot: only the detectors trained or calibrated on it
     generate("train_nest", num_slots=64, batch_size=32)
     generate("val_nest", num_slots=32, batch_size=32)

@@ -163,7 +163,9 @@ class JammedPUSCHLink:
             self._receivers[num_prb] = PUSCHReceiverChain(self.ue.transmitter(num_prb))
         return self._receivers[num_prb]
 
-    def __call__(self, scenario: Scenario, decode: bool = False) -> SlotBatch:
+    def __call__(self, scenario: Scenario, decode: bool = False, receive: bool = True) -> SlotBatch:
+        """One batch of slots. ``receive=False`` skips the receiver chain (``rx`` is then empty):
+        the random draws are the same, so a run can be replayed while decoding only some of it."""
         cfg, sc = self.cfg, scenario
         tx = self.ue.transmitter(sc.alloc_size)
 
@@ -204,7 +206,7 @@ class JammedPUSCHLink:
         # assumes (the true one, one off by a set error, or an estimate: jamloc.noise)
         y_alloc = take_allocation(y, sc.alloc_start, sc.alloc_size)
         no_rx = receiver_noise(cfg, no, sc.noise_error_db, y_alloc, tx)
-        rx = self.receiver(sc.alloc_size)(y_alloc, no_rx, decode=decode)
+        rx = self.receiver(sc.alloc_size)(y_alloc, no_rx, decode=decode) if receive else {}
 
         return SlotBatch(
             y=y[:, 0, 0],
