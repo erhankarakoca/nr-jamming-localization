@@ -96,6 +96,68 @@ def test_detector_samples_include_benign_slots_and_use_scheduled_cells_for_pd():
     np.testing.assert_array_equal(samples["pd", "pilot", -15.0], np.full(11, 0.5))
 
 
+def test_matched_predictions_spend_whole_cell_budget_through_ties():
+    scores = np.array([9, 8, 8, 8, *([0] * 197), *([-np.inf] * 100), 10, 8, -np.inf])
+    scored_neg = scores > -np.inf
+    scored_neg[-3:] = False
+
+    pred = intervals.matched_predictions(scores, scored_neg)
+
+    assert scored_neg.sum() == 201
+    assert (pred & scored_neg).sum() == 2
+    assert pred[0] and pred[-3]
+    assert not pred[scores == -np.inf].any()
+    np.testing.assert_array_equal(pred, intervals.matched_predictions(scores, scored_neg))
+
+
+def test_matched_variants_hold_predictions_fixed_and_pool_weakest_scheduled_pd():
+    split = _grid([0, 1, 1, 1, 2, 3])
+    split["jsr_db"] = np.array([0, -15, -15, -9, -12, -9])
+    split["batch"] = np.arange(6)
+    scores = np.empty((6, 1, 102))
+    scores[:, 0, :100] = np.arange(100) + np.array([0, 100, 105, 101, 200, 300])[:, None]
+    scores[:, 0, 100] = [-np.inf, 205, 198, 450, 300, 390]
+    scores[:, 0, 101] = [-np.inf, 450, 450, 450, 450, 450]
+    labels = np.zeros_like(scores, dtype=bool)
+    labels[1:, 0, 100:] = True
+    scheduled = labels.copy()
+    scheduled[:, 0, 101] = False
+
+    bootstrap = intervals.BatchBootstrap(split, 50)
+    pooled, by_attack = intervals.matched_detector_samples(
+        scores, labels, scheduled, split["attack"], bootstrap
+    )
+    assert pooled["fa_scored", "all", None][0] == 0.01
+    assert pooled["fa_scored", "pilot", None][0] == 0
+    assert pooled["fa_scored", "partial", None][0] == 0.06
+    for group in ("all", "pilot", "data", "partial"):
+        assert by_attack["fa_scored", group, None][0] == 0.01
+    assert set(by_attack["fa_scored", "pilot", None][1:]) == {0, 0.01, 0.02}
+    assert set(by_attack["pd", "pilot", -15.0]) == {0, 0.5, 1.0}
+    assert by_attack["pd", "all", None][0] == 0.5
+    assert ("pd", "pilot", -9.0) not in by_attack
+    assert by_attack["f1", "all", None][0] == 16 / 24
+    paired = intervals.paired_rows({"a": {0: by_attack}}, [("a", "a")])
+    assert any(row["metric"] == "pd" and row["attack"] == "all" for row in paired)
+
+
+def test_matched_groups_without_scored_negatives_use_split_wide_predictions():
+    split = _grid([1, 2])
+    scores = np.full((2, 1, 101), -np.inf)
+    scores[0, 0, -1] = 100
+    scores[1, 0, :100] = np.arange(100)
+    labels = np.zeros_like(scores, dtype=bool)
+    labels[:, 0, -1] = True
+
+    bootstrap = intervals.BatchBootstrap(split, 5)
+    pooled, by_attack = intervals.matched_detector_samples(
+        scores, labels, labels, split["attack"], bootstrap
+    )
+    for samples in (pooled, by_attack):
+        assert np.isnan(samples["fa_scored", "pilot", None]).all()
+        assert (samples["pd", "pilot", -15.0] == 1).all()
+
+
 def test_seed_mean_averages_within_each_paired_replicate():
     key = ("f1", "all", None)
     results = {
