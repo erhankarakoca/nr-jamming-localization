@@ -75,5 +75,7 @@ def paired_difference_interval(both, only_first, only_second, neither, z: float 
     phi = (a * d - b * c) / np.sqrt(margins) if margins > 0 else 0.0
     delta = p1 - p2
     low = delta - np.sqrt(max((p1 - l1) ** 2 - 2 * phi * (p1 - l1) * (u2 - p2) + (u2 - p2) ** 2, 0))
-    high = delta + np.sqrt(max((p2 - l2) ** 2 - 2 * phi * (p2 - l2) * (u1 - p1) + (u1 - p1) ** 2, 0))
+    high = delta + np.sqrt(
+        max((p2 - l2) ** 2 - 2 * phi * (p2 - l2) * (u1 - p1) + (u1 - p1) ** 2, 0)
+    )
     return delta, float(low), float(high)

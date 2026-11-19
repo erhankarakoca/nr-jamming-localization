@@ -63,7 +63,7 @@ def test_paired_difference_interval():
 
     # No discordant slot: no difference, but the interval still allows a small one either way
     delta, lo, hi = paired_difference_interval(0, 0, 0, 4800)
-    assert delta == 0 and lo < 0 < hi and hi < 0.001
+    assert delta == 0 and lo < 0 < hi < 0.001
     # Swapping the receivers mirrors the interval
     d1, lo1, hi1 = paired_difference_interval(10, 40, 5, 945)
     d2, lo2, hi2 = paired_difference_interval(10, 5, 40, 945)
