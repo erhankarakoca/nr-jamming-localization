@@ -54,11 +54,21 @@ stopped early (100 block errors) is compared on the slots both receivers decoded
     python -m jamloc.experiments.recovery --channel A
     python -m jamloc.experiments.recovery --channel C --jammer pulsed --seeds 0 1 2
     python -m jamloc.experiments.recovery --channel C --noise-estimate comb --seeds 0 1 2
+
+``--replay DIR`` repeats an earlier run whose per-seed CSVs are in ``DIR`` on exactly the same
+slots, but decodes only the points and receivers the paper quotes (``QUOTED``), so that their
+per-slot outcomes, and hence paired intervals, are available without decoding everything again.
+Every point is simulated in the original order and with the original number of batches (the
+random draws do not depend on which receivers decode); its counts must reproduce the earlier
+CSV, which ``check_replay`` verifies.
+
+    python -m jamloc.experiments.recovery --channel C --seeds 0 1 2 --replay results/recovery_pr9
 """
 
 import argparse
 import csv
 import dataclasses
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -248,13 +258,16 @@ def _scenario(rng, n, channel, attack, jsr_db, snr_db, whole_allocation=False) -
     )
 
 
-def simulate_point(link, detectors, scenario_fn, receivers, max_mc_iter, target_block_errors):
+def simulate_point(
+    link, detectors, scenario_fn, receivers, max_mc_iter, target_block_errors, fixed=False
+):
     """Bit and block errors of each receiver, all decoding the same simulated batches, and per
     receiver which of the slots it decoded failed.
 
     A receiver stops once it has ``target_block_errors`` block errors (its estimate is precise
     enough); the others keep decoding further batches. So receivers that rarely fail get many
-    slots without making the frequent failures expensive.
+    slots without making the frequent failures expensive. With ``fixed``, exactly
+    ``max_mc_iter`` batches are simulated even when no receiver is left (a replay).
     """
     cfg = link.cfg
     alloc = slice(ALLOC[0], ALLOC[0] + ALLOC[1])
@@ -263,9 +276,11 @@ def simulate_point(link, detectors, scenario_fn, receivers, max_mc_iter, target_
     active = list(receivers)
     map_aware = None
     for _ in range(max_mc_iter):
-        if not active:
+        if not active and not fixed:
             break
-        out = link(scenario_fn(), decode="standard" in active)
+        out = link(scenario_fn(), decode="standard" in active, receive=bool(active))
+        if not active:
+            continue
         map_aware = map_aware or MapAwareReceiver(out.tx, cfg)
         maps = {"true": out.labels[:, alloc]}
         maps["true_prb"] = coarsen_to_prb(maps["true"], cfg.dmrs_symbol)
@@ -306,9 +321,11 @@ def simulate(
     only=None,
     jammer="nominal",
     noise_estimate="true",
+    replay=None,
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
-    ``slot_key``."""
+    ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
+    batches, decoding only the receivers ``decode[point]``."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
     link = JammedPUSCHLink(cfg)
     nest = noise_estimate != "true"
@@ -350,7 +367,7 @@ def simulate(
     always = (None, "true", "true_prb")
     usable = {rx for rx, (src, _) in RECEIVERS.items() if src in always or src in detectors}
     cases = [(a, w, tuple(rx for rx in rxs if rx in usable)) for a, w, rxs in cases]
-    if only:  # re-run some receivers only
+    if only and replay is None:  # re-run some receivers only
         cases = [(a, w, tuple(rx for rx in rxs if rx in only)) for a, w, rxs in cases]
         cases = [c for c in cases if c[2]]
     rows, slots = [], {}
@@ -361,9 +378,23 @@ def simulate(
             def scenario_fn(attack=attack, jsr=jsr, whole=whole):
                 return _scenario(rng, batch_size, channel, attack, jsr, snr_db, whole)
 
-            counts, failed = simulate_point(
-                link, detectors, scenario_fn, receivers, max_mc_iter, target_block_errors
-            )
+            if replay is None:
+                counts, failed = simulate_point(
+                    link, detectors, scenario_fn, receivers, max_mc_iter, target_block_errors
+                )
+            else:
+                point = tuple(slot_key(name, jsr, "").split(";")[:2])
+                batches, decode = replay
+                receivers = tuple(rx for rx in decode.get(point, ()) if rx in usable)
+                counts, failed = simulate_point(
+                    link,
+                    detectors,
+                    scenario_fn,
+                    receivers,
+                    batches[point],
+                    target_block_errors,
+                    fixed=True,
+                )
             for rx, f in failed.items():
                 slots[slot_key(name, jsr, rx)] = f
             for rx in receivers:
@@ -383,11 +414,13 @@ def simulate(
                         "blocks": int(blocks),
                     }
                 )
-            print(
-                f"[{channel} {jammer} {noise_estimate} seed {seed}] {name:22s} JSR {jsr:+5.1f} dB: "
-                + "  ".join(f"{rx} {counts[rx][2] / counts[rx][3]:.3f}" for rx in receivers),
-                flush=True,
-            )
+            if receivers:
+                print(
+                    f"[{channel} {jammer} {noise_estimate} seed {seed}] {name:22s} "
+                    f"JSR {jsr:+5.1f} dB: "
+                    + "  ".join(f"{rx} {counts[rx][2] / counts[rx][3]:.3f}" for rx in receivers),
+                    flush=True,
+                )
     return rows, slots
 
 
@@ -443,6 +476,66 @@ def paired_rows(slot_files) -> list[dict]:
                     }
                 )
     return rows
+
+
+# Receivers of the paper's BLER table, and the points (attack, JSR) and receivers it quotes
+TABLE_RECEIVERS = (
+    "standard",
+    "lmmse",
+    "slot_ie",
+    "dmrs_ie",
+    "power_hard",
+    "block_soft",
+    "p_r_e_hard",
+    "p_r_e_soft",
+    "p_r_e_atk_soft",
+    "true_prb_soft",
+    "true_soft",
+)
+_WEAK = ("p_r_e_hard", "p_r_e_soft", "true_soft")  # what using the map costs at weak jamming
+QUOTED = {
+    ("nominal", 15.0): {
+        ("none", "none"): ("standard", *_WEAK),
+        **{(a, "-15"): _WEAK for a in ("pilot", "data", "partial")},
+        ("partial", "3"): ("p_r_e_soft", "true_prb_soft", "true_soft"),
+        **{(a, "9"): TABLE_RECEIVERS for a in ("pilot", "data", "partial")},
+    },
+    ("pulsed", 15.0): {(a, "9"): TABLE_RECEIVERS for a in ("data", "partial")},
+    ("hopping", 15.0): {(a, "9"): TABLE_RECEIVERS for a in ("data", "partial")},
+    ("nominal", 8.0): {
+        ("none", "none"): ("standard", "lmmse", "p_r_e_soft", "true_soft"),
+        **{
+            (a, "3"): ("standard", "p_r_e_soft", "true_prb_soft", "true_soft")
+            for a in ("data", "partial")
+        },
+    },
+}
+
+
+def batches_per_point(path, batch_size: int) -> dict:
+    """Number of batches each point of an earlier per-seed CSV simulated: the receiver that
+    decoded longest decoded every batch."""
+    out = {}
+    for r in _read_rows(path):
+        key = tuple(slot_key(r["attack"], r["jsr_db"], "").split(";")[:2])
+        out[key] = max(out.get(key, 0), r["blocks"] // batch_size)
+    return out
+
+
+def check_replay(rows, path) -> list[str]:
+    """Rows of a replay whose counts differ from the earlier run (empty if it reproduced)."""
+    old = {
+        (r["receiver"], r["attack"], slot_key(r["attack"], r["jsr_db"], "")): r
+        for r in _read_rows(path)
+    }
+    bad = []
+    for r in rows:
+        o = old.get((r["receiver"], r["attack"], slot_key(r["attack"], r["jsr_db"], "")))
+        if o is None or (o["block_errors"], o["blocks"]) != (r["block_errors"], r["blocks"]):
+            got = (r["block_errors"], r["blocks"])
+            was = None if o is None else (o["block_errors"], o["blocks"])
+            bad.append(f"{r['receiver']} {r['attack']} {r['jsr_db']}: {got} vs {was}")
+    return bad
 
 
 MAIN_RECEIVERS = ("standard", "dmrs_ie", "power_hard", "p_r_e_soft", "true_soft")
@@ -588,6 +681,11 @@ def main(argv=None):
     )
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     p.add_argument(
+        "--replay",
+        metavar="DIR",
+        help="repeat the run whose per-seed CSVs are in DIR, decoding only the quoted points",
+    )
+    p.add_argument(
         "--receivers",
         nargs="+",
         choices=list(RECEIVERS),
@@ -604,6 +702,9 @@ def main(argv=None):
         stem = stem.with_name(f"{stem.name}_snr{args.snr_db:g}")
     if args.noise_estimate != "true":
         stem = stem.with_name(f"{stem.name}_nest")
+    original = stem  # the name of the run a replay repeats
+    if args.replay:
+        stem = stem.with_name(f"{stem.name}_replay")
 
     # Every seed has its own CSV, so seeds can run as parallel processes; the combined CSV and
     # the figures pool whatever seed files exist
@@ -615,6 +716,17 @@ def main(argv=None):
 
     if not args.plot_only:
         for seed in args.seeds:
+            replay = None
+            if args.replay:
+                before = Path(args.replay) / f"{original.name}_seed{seed}.csv"
+                replay = (
+                    batches_per_point(before, args.batch_size),
+                    QUOTED[args.jammer, args.snr_db],
+                )
+                # the JSR grid of the earlier run
+                args.jsr_db = sorted(
+                    {r["jsr_db"] for r in _read_rows(before) if r["jsr_db"] == r["jsr_db"]}
+                )
             rows, slots = simulate(
                 args.channel,
                 args.snr_db,
@@ -626,7 +738,11 @@ def main(argv=None):
                 args.receivers,
                 args.jammer,
                 args.noise_estimate,
+                replay,
             )
+            if args.replay:
+                bad = check_replay(rows, before)
+                print(f"replay of seed {seed}: " + ("; ".join(bad) or "all counts reproduced"))
             path = seed_path(seed)
             if args.receivers and path.is_file():  # keep the other receivers' rows
                 new = rows_rx(rows)
