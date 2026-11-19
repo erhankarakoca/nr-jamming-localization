@@ -2,9 +2,15 @@
 
 The jammer hits every scheduled PRB (worst-case overlap), so the curves show how much damage each
 attack pattern does. Panel (b) re-plots BLER against the jammer's total energy in the slot,
-relative to the UE's data energy, which shows how much more efficient pilot jamming is.
+relative to the UE's data energy, which shows how much more efficient pilot jamming is. Results
+at 15 dB SNR go to ``ber_bler_{channel}.csv``, at other SNRs to ``ber_bler_{channel}_snr{x}.csv``.
+
+``--benign`` instead sweeps the SNR without a jammer (``benign_{channel}.csv``): the SNR at which
+MCS 5 reaches 10% BLER, the usual target of link adaptation, tells how much margin the link has
+left at the SNR of the jamming experiments.
 
     python -m jamloc.experiments.ber_bler --channel A --snr-db 15
+    python -m jamloc.experiments.ber_bler --channel C --benign
 """
 
 import argparse
@@ -107,6 +113,31 @@ def simulate(channel, snr_db, jsr_dbs, batch_size, max_mc_iter, target_block_err
     return rows
 
 
+def simulate_benign(channel, snr_dbs, batch_size, max_mc_iter, target_block_errors, seed):
+    """BLER without a jammer, versus SNR (random allocations)."""
+    cfg = SimConfig()
+    link = JammedPUSCHLink(cfg)
+    rng = seed_everything(seed)
+    rows = []
+    for snr in snr_dbs:
+
+        def mc_fun(snr=snr):
+            sc = draw_scenario(rng, batch_size, cfg, channel, attacks=(0,), snr_db=float(snr))
+            out = link(sc, decode=True)
+            return out.b, out.rx["b_hat"]
+
+        c = count_errors(mc_fun, max_mc_iter, target_block_errors)
+        rows.append({"snr_db": float(snr), **c, "bler": c["block_errors"] / c["blocks"]})
+        print(f"[{channel}] no jammer, SNR {snr:+5.1f} dB: BLER {rows[-1]['bler']:.4f}", flush=True)
+    return rows
+
+
+def path_for(channel: str, snr_db: float = 15.0):
+    """CSV of the sweep at one SNR (15 dB keeps the original name)."""
+    name = f"ber_bler_{channel}" if snr_db == 15.0 else f"ber_bler_{channel}_snr{snr_db:g}"
+    return results_dir() / "ber_bler" / f"{name}.csv"
+
+
 def read_rows(path, default_snr_db: float = 15.0) -> list[dict]:
     """Rows of a saved sweep. Older CSVs have no ``snr_db`` column; they get ``default_snr_db``."""
     with open(path, encoding="utf-8", newline="") as f:
@@ -152,11 +183,29 @@ def main(argv=None):
     p.add_argument("--target-block-errors", type=int, default=100)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
+    p.add_argument("--benign", action="store_true", help="BLER vs SNR without a jammer")
+    p.add_argument("--snr-sweep", type=float, nargs="+", default=[float(s) for s in range(-2, 17)])
     args = p.parse_args(argv)
 
     out_dir = results_dir() / "ber_bler"
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = out_dir / f"ber_bler_{args.channel}"
+    if args.benign:
+        rows = simulate_benign(
+            args.channel,
+            args.snr_sweep,
+            args.batch_size,
+            args.max_mc_iter,
+            args.target_block_errors,
+            args.seed,
+        )
+        path = out_dir / f"benign_{args.channel}.csv"
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"Wrote {path}")
+        return
+    stem = path_for(args.channel, args.snr_db).with_suffix("")
 
     if args.plot_only:
         rows = read_rows(stem.with_suffix(".csv"), args.snr_db)

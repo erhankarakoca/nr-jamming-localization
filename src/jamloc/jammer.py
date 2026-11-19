@@ -29,6 +29,11 @@ changes one thing: the waveform, the time-frequency support, or what the attacke
   physically possible channel, so it lies in the delay subspace and the DMRS residual cannot see
   it by construction; only power and EVM can. The jammer does not know the pilot values outside
   the UE's allocation, so it sends random QPSK symbols of the same energy there.
+* ``jammer_waveform="ue"`` models a legitimate, synchronized neighbor-cell PUSCH on a
+  partial-band block (all 14 symbols). It sends unit-energy random QPSK on the data symbols and
+  independent QPSK of energy 2 on the even subcarriers of the DMRS symbol, as for a different
+  scrambling identity. The other comb stays empty. Mean energy per cell is the same on DMRS and
+  data, and JSR controls the interference-to-signal ratio.
 
 Labels never change: a cell is jammed when the jammer transmits on any of its resource elements.
 """
@@ -105,7 +110,8 @@ class Jammer(Block):
     jammed resource element ``jsr_db`` ``[B]``, and (only for the ``"dmrs"`` waveform) the UE's
     transmitted carrier grid ``x`` ``[B, 1, 1, num_symbols, 12 * num_prb]``, whose pilots the
     jammer replays. The UE sends unit energy per data resource element, so the jammer energy per
-    jammed resource element is ``10**(jsr_db/10)``.
+    jammed resource element is ``10**(jsr_db/10)`` on average for the Gaussian waveform. For
+    the neighbor UE the same scale sets the data energy, and its pilots carry twice that energy.
 
     Output: jamming grid ``[B, 1, 1, num_symbols, 12 * num_prb]`` (before the jammer's channel).
     """
@@ -125,7 +131,7 @@ class Jammer(Block):
         # Cells -> resource elements: every subcarrier of a jammed PRB is jammed
         re_mask = cells.repeat_interleave(12, dim=1)  # [B, 288, 14]
         re_mask = re_mask.transpose(1, 2)[:, None, None]  # [B, 1, 1, 14, 288]
-        if cfg.jammer_pilot_comb or cfg.jammer_waveform == "dmrs":
+        if cfg.jammer_pilot_comb or cfg.jammer_waveform in ("dmrs", "ue"):
             # Leave the empty DMRS comb (odd subcarriers) alone: only the pilots are hit
             keep = torch.ones(re_mask.shape[-2:], dtype=torch.bool, device=self.device)
             keep[cfg.dmrs_symbol, 1::2] = False
@@ -137,12 +143,16 @@ class Jammer(Block):
             tones = draw.argsort(dim=-1).argsort(dim=-1) < cfg.jammer_tones  # [B, num_prb, 12]
             re_mask = re_mask & tones.reshape(batch, 1, 1, 1, num_sc)
 
-        # Unit-energy waveform on every resource element, then scaled to the jammer energy
+        # Draw the waveform before applying the JSR scale and the resource mask.
         z = complex_normal(
             re_mask.shape, precision=self.precision, device=self.device, generator=self.torch_rng
         )
-        if cfg.jammer_waveform == "qpsk":
-            z = (torch.sgn(z.real) + 1j * torch.sgn(z.imag)) / 2**0.5
+        if cfg.jammer_waveform in ("qpsk", "ue"):
+            one = torch.ones_like(z.real)
+            z = torch.complex(torch.copysign(one, z.real), torch.copysign(one, z.imag)) / 2**0.5
+            if cfg.jammer_waveform == "ue":
+                # Type-1 DMRS puts the cell's energy on half of its subcarriers.
+                z[..., cfg.dmrs_symbol, :] *= 2**0.5
         elif cfg.jammer_waveform == "tone":
             # A continuous tone per subcarrier: random phase, constant over the OFDM symbols
             phase = torch.rand(batch, num_sc, generator=self.torch_rng, device=self.device)
@@ -170,7 +180,7 @@ class Jammer(Block):
         energy = (pilots.abs() ** 2).sum(-1) / (pilots.abs() > 0).sum(-1).clamp_min(1)
         replay = pilots / torch.sqrt(energy.clamp_min(1e-12))[..., None]
         bits = torch.rand(2, batch, 1, 1, num_sc, generator=self.torch_rng, device=self.device)
-        qpsk = (torch.where(bits[0] < 0.5, 1.0, -1.0) + 1j * torch.where(bits[1] < 0.5, 1.0, -1.0))
+        qpsk = torch.where(bits[0] < 0.5, 1.0, -1.0) + 1j * torch.where(bits[1] < 0.5, 1.0, -1.0)
         replay = torch.where(pilots.abs() > 0, replay, qpsk / 2**0.5)
         phase = torch.rand(batch, 1, 1, 1, generator=self.torch_rng, device=self.device)
         return replay * torch.exp(2j * torch.pi * phase)

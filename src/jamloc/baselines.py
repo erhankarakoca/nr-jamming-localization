@@ -17,9 +17,15 @@
   relative to the slot's typical scheduled cell, the classic per-tone power test. Fading of the
   UE's own signal makes it insensitive to weak jamming.
 
-These four score only the cells where their feature is defined (``-inf`` elsewhere), so none of
-them can see jamming outside the allocation. The fifth is the strongest classical detector we
-could build from the same features:
+* Empty-comb test: type-1 DMRS leaves every second subcarrier of the DMRS symbol empty. Without
+  jamming the received energy there, divided by the noise power, is the mean of 6 unit
+  exponentials on every PRB, inside the allocation too, at any SNR and on any channel. A jammer on
+  the whole DMRS symbol raises it; a jammer on the pilot comb only, or a spoofer, does not. Scored
+  by ``-log10`` of that exact tail on the scheduled DMRS cells.
+
+These five score only the cells where their feature is defined (``-inf`` elsewhere), so none of
+them can see jamming outside the allocation. The block test is the strongest classical detector
+we could build from the same features:
 
 * Block test (training-free): every cell of the carrier gets the ``-log10`` p-value of the
   statistic that matches the attack structure. Jammers hit whole PRBs on the DMRS symbol, on the
@@ -36,9 +42,12 @@ could build from the same features:
   ===============  ==========================================  =====================================
 
   The EVM needs an empirical null because its level without jamming grows with the SNR
-  (``jamloc.features``) and is higher at the allocation edges; the gNB knows its SNR and its
-  allocation, so the null is taken per 4 dB SNR bin, separately for edge PRBs, and its tail is
-  extrapolated as exponential beyond the 95th percentile (so is the power ratio's below).
+  (``jamloc.features``) and is higher at the allocation edges. The null is taken from benign
+  ``val`` PRBs per 4 dB bin of the SNR the gNB estimates from the slot (``snr_db_est``,
+  ``jamloc.noise``; jamming on the data raises that estimate, as in a real receiver), separately
+  for edge PRBs, and its tail is extrapolated as exponential beyond the 95th percentile (so is
+  the power ratio's below). The test has no learned parameters, but it does need these benign
+  validation slots.
 
   Pilot jamming raises the EVM of the scheduled data symbols through the corrupted channel
   estimate. A rule separates it from partial-band jamming, which also raises the residual: the
@@ -47,6 +56,10 @@ could build from the same features:
   When the residual and this ratio are both significant at 1% (thresholds fixed in advance, not
   tuned), the PRB's data cells get p = 1 (score 0): they stay among the scored cells but are not
   flagged.
+
+* Block test with the empty comb: the same, but a scheduled DMRS cell is scored by the smaller of
+  the residual's and the empty comb's p-values (Bonferroni-corrected for the two tests), and the
+  pilot-only rule also fires when the empty comb is significant.
 
 Scores are linear feature values (block test: ``-log10`` p-values).
 """
@@ -86,6 +99,12 @@ def power_scores(features: np.ndarray) -> np.ndarray:
 def residual_scores(features: np.ndarray) -> np.ndarray:
     """``[N, 24, 14]``: linear DMRS residual on DMRS cells, ``-inf`` elsewhere."""
     return _masked_linear(features, "residual_db", "dmrs_mask")
+
+
+def comb_scores(features: np.ndarray) -> np.ndarray:
+    """``[N, 24, 14]``: ``-log10`` p-value of the empty-comb power on scheduled DMRS cells."""
+    comb = 10 ** (features[:, _IDX["comb_db"]] / 10)
+    return np.where(features[:, _IDX["dmrs_mask"]] > 0, -_log10_gamma_sf(comb, 6), -np.inf)
 
 
 def residual_cfar_scores(d: dict) -> np.ndarray:
@@ -145,7 +164,8 @@ def _evm_groups(d: dict) -> np.ndarray:
     (the edge PRBs' channel estimates are extrapolated, so their EVM has a heavier tail)."""
     pos = np.arange(d["features"].shape[2])[None] - d["alloc_start"][:, None]
     edge = (pos == 0) | (pos == d["alloc_size"][:, None] - 1)
-    return 2 * np.digitize(d["snr_db"], EVM_SNR_EDGES_DB)[:, None] + edge
+    snr = d.get("snr_db_est", d["snr_db"])  # older datasets have only the true SNR
+    return 2 * np.digitize(snr, EVM_SNR_EDGES_DB)[:, None] + edge
 
 
 def _pilot_to_data_power(features: np.ndarray, dmrs: int) -> np.ndarray:
@@ -185,11 +205,11 @@ def _empirical_scores(d: dict, null: dict, statistic) -> np.ndarray:
     return np.nan_to_num(out, nan=0.0)
 
 
-def block_test_scores(d: dict, null: dict) -> np.ndarray:
+def block_test_scores(d: dict, null: dict, use_comb: bool = False) -> np.ndarray:
     """``[N, 24, 14]``: ``-log10`` p-value of every cell under the block test (see above).
 
     ``d`` is a loaded split; ``null`` the split whose benign slots give the EVM and power-ratio
-    nulls (``val``).
+    nulls (``val``). ``use_comb`` adds the empty-comb test to the scheduled DMRS cells.
     """
     from jamloc.config import SimConfig
 
@@ -200,11 +220,11 @@ def block_test_scores(d: dict, null: dict) -> np.ndarray:
     power = 10 ** (features[:, _IDX["power_db"]] / 10)
 
     # One score for the DMRS cell and one for the data cells of every PRB: [N, 24] each
-    pilot = np.where(
-        scheduled,
-        residual_cfar_scores(d)[:, :, dmrs],
-        -_log10_gamma_sf(power[:, :, dmrs], 12),
-    )
+    pilot_scheduled = residual_cfar_scores(d)[:, :, dmrs]
+    if use_comb:  # smaller of the two p-values, times 2 (Bonferroni)
+        comb = comb_scores(features)[:, :, dmrs]
+        pilot_scheduled = np.maximum(pilot_scheduled, comb) - np.log10(2)
+    pilot = np.where(scheduled, pilot_scheduled, -_log10_gamma_sf(power[:, :, dmrs], 12))
     data = np.where(
         scheduled,
         _empirical_scores(d, null, prb_data_evm),

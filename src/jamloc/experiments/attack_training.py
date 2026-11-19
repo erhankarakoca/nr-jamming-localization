@@ -8,7 +8,10 @@ the whole-PRB structure the U-Net learned from the training attacks.
 Here the fused U-Net is trained again on ``train_atk`` (batches cycling through the nominal,
 hopping and pilot-comb jammers; thresholds from ``val_atk``) and compared with the nominally
 trained one (thresholds from ``val``) on the matched test grid and on both new grids. The training
-data uses its own seeds, but the attack types of the test grids are part of the mix.
+data uses its own seeds, but the attack types of the test grids are part of the mix. A third
+version is trained on ``train_atk2``, the same mix plus pilot spoofing over the scheduled PRBs:
+can a network learn to place a spoofer on the DMRS from power and EVM, where the residual sees
+nothing?
 
     python -m jamloc.experiments.attack_training --seeds 0 1 2
 """
@@ -31,23 +34,29 @@ CONDITIONS = {
     "combjam": "pilot comb",
     "hopjam": "hopping",
     "spoofjam": "spoofing",
+    "spoofpart": "partial spoofing",
     "pulsejam": "pulsed",
     "tonejam": "tone",
 }
-TRAININGS = {"": ("nominal training", "val"), "atk": ("attack-mixed training", "val_atk")}
+TRAININGS = {
+    "": ("nominal training", "val"),
+    "atk": ("attack-mixed training", "val_atk"),
+    "atk2": ("attack-mixed training with spoofing", "val_atk2"),
+}
 VARIANT = "fused"
 
 
 def run(seeds, epochs: int) -> list[dict]:
-    for split in ("train_atk", "val_atk", *CONDITIONS):
+    for split in ("train_atk", "val_atk", "train_atk2", "val_atk2", *CONDITIONS):
         if not (data_dir() / f"{split}.npz").is_file():
             generate(split, batch_size=128)
     for seed in seeds:
-        if not checkpoint_path(VARIANT, seed, data="atk").is_file():
-            train(VARIANT, epochs=epochs, seed=seed, data="atk")
+        for data in ("atk", "atk2"):
+            if not checkpoint_path(VARIANT, seed, data=data).is_file():
+                train(VARIANT, epochs=epochs, seed=seed, data=data)
 
     rows = []
-    vals = {name: load(name) for name in ("val", "val_atk")}
+    vals = {name: load(name) for name in ("val", "val_atk", "val_atk2")}
     for split, condition in CONDITIONS.items():
         test = load(split)
         for data, (training, val_split) in TRAININGS.items():
@@ -81,9 +90,14 @@ def run(seeds, epochs: int) -> list[dict]:
 
 def plot(mean_rows):
     fig, axes = new_figure(7.16, 2.5, ncols=2)
-    bars = (("nominal training", None), ("attack-mixed training", "///"))
+    bars = (
+        ("nominal training", None),
+        ("attack-mixed training", "///"),
+        ("attack-mixed training with spoofing", "..."),
+    )
+    bars = tuple(b for b in bars if any(r["training"] == b[0] for r in mean_rows))
     conditions = list(CONDITIONS.values())
-    width = 0.35
+    width = 0.8 / len(bars)
     for ax, key, title in ((axes[0], "f1", "F1, all slots"), (axes[1], "fa", "False-alarm rate")):
         for i, (training, hatch) in enumerate(bars):
             vals, errs = [], []
@@ -93,7 +107,7 @@ def plot(mean_rows):
                 ]
                 vals.append(r[f"{key}_mean"])
                 errs.append(r[f"{key}_std"])
-            x = np.arange(len(conditions)) + (i - 0.5) * width
+            x = np.arange(len(conditions)) + (i - (len(bars) - 1) / 2) * width
             ax.bar(
                 x,
                 vals,
@@ -141,7 +155,7 @@ def main(argv=None):
     save(fig, out / "attack_training")
     for r in rows:
         print(
-            f"{r['condition']:12s} {r['training']:23s} F1 {r['f1_mean']:.3f} "
+            f"{r['condition']:12s} {r['training']:36s} F1 {r['f1_mean']:.3f} "
             f"(pilot {r['f1_pilot_mean']:.3f}, data {r['f1_data_mean']:.3f}, "
             f"partial {r['f1_partial_mean']:.3f})  FA {r['fa_mean']:.4f}"
         )

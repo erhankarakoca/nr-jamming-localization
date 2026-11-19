@@ -1,6 +1,7 @@
 import numpy as np
 
 from jamloc.dataset import META_KEYS, TEST_JSR_DB, generate, load
+from jamloc.features import FEATURE_NAMES
 
 
 def test_generate_small(tmp_path, monkeypatch):
@@ -9,7 +10,10 @@ def test_generate_small(tmp_path, monkeypatch):
     assert path == tmp_path / "train.npz" and path.is_file()
 
     d = load("train")
-    assert d["features"].shape == (128, 6, 24, 14) and d["features"].dtype == np.float32
+    assert (
+        d["features"].shape == (128, len(FEATURE_NAMES), 24, 14)
+        and d["features"].dtype == np.float32
+    )
     assert d["labels"].shape == (128, 24, 14) and d["labels"].dtype == np.uint8
     for key in META_KEYS:
         assert d[key].shape == (128,)

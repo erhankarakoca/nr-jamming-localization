@@ -1,6 +1,6 @@
 """Conditions the detectors never saw in training: where does the method break, and why?
 
-The trained detectors (thresholds unchanged, from the ``val`` split) are evaluated on three test
+The trained detectors (thresholds unchanged, from the ``val`` split) are evaluated on test
 grids, each changing one thing (see ``jamloc.dataset.GENERALIZATION``):
 
 * ``longdelay`` - TDL-C with 1000 ns delay spread. Channel delays reach 8.7 us, beyond the
@@ -15,9 +15,12 @@ grids, each changing one thing (see ``jamloc.dataset.GENERALIZATION``):
   channel, so the DMRS residual is blind to it by construction.
 * ``pulsejam`` - a pulsed jammer, on about half of the OFDM symbols of a data or partial-band attack.
 * ``tonejam`` - one continuous tone per jammed PRB: the energy of a cell is 1/12 of the nominal one.
+* ``unnorm`` - channels without Sionna's per-slot normalization, so the received SNR and JSR vary
+  from slot to slot as well.
+* ``neighbor`` - synchronized neighbor-cell PUSCH interference on a partial-band block
+  (legitimate interference, not an attack; see ``experiments/neighbor``).
 
-Some grids contain only some attack types (``spoofjam``: pilot; ``pulsejam``: data and partial);
-missing entries are left empty in the figure.
+Some grids use a subset of the patterns. The figure leaves missing entries empty.
 
     python -m jamloc.experiments.generalization
 """
@@ -41,8 +44,11 @@ SHORT = {
     "combjam": "comb",
     "hopjam": "hopping",
     "spoofjam": "spoofing",
+    "spoofpart": "part. spoof",
     "pulsejam": "pulsed",
     "tonejam": "tone",
+    "unnorm": "no norm.",
+    "neighbor": "neighbor UE",
 }
 DETECTORS = (
     "fused",

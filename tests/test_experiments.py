@@ -54,7 +54,7 @@ def test_ber_bler_title_uses_snr_from_csv(tmp_path, monkeypatch):
     monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
     args = ["--channel", "A", "--snr-db", "12", "--batch-size", "8", "--max-mc-iter", "1"]
     ber_bler.main([*args, "--jsr-db", "0"])
-    rows = ber_bler.read_rows(tmp_path / "ber_bler" / "ber_bler_A.csv")
+    rows = ber_bler.read_rows(tmp_path / "ber_bler" / "ber_bler_A_snr12.csv")
     assert all(r["snr_db"] == 12.0 for r in rows)
     assert "SNR 12 dB" in ber_bler.plot(rows, "A").axes[0].get_title()
 
@@ -107,15 +107,17 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
     assert main_rows == {
         (rx, a, j)
         for rx in recovery.RECEIVERS
+        if rx != "p_r_e_atk_soft"  # its model (trained on mixed attacks) is not trained here
         for a in ("pilot", "data", "partial")
         for j in ("-3.0", "3.0")
     }
     benign = {r["receiver"] for r in rows if r["attack"] == "none"}
-    assert benign == set(recovery.RECEIVERS)
+    assert benign == set(recovery.RECEIVERS) - {"p_r_e_atk_soft"}
     limit = [r for r in rows if r["attack"] == "pilot_whole_allocation"]
     assert {r["receiver"] for r in limit} == {"standard", "true_hard", "true_soft"}
     assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
     assert (out / "recovery_A_ablation.png").is_file()
+    assert (out / "recovery_A_sources.png").is_file()  # receiver fixed, map source varied
 
     # Redraw from the saved CSV without simulating again
     (out / "recovery_A.png").unlink()
@@ -129,3 +131,51 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
         merged = list(csv.DictReader(f))
     assert len(merged) == len(rows)
     assert {r["receiver"] for r in merged} == {r["receiver"] for r in rows}
+
+    # A pulsed jammer, two detector seeds: only data and partial-band attacks, pooled figures
+    train("fused", epochs=1, batch_size=32, seed=1)
+    train("no_residual", epochs=1, batch_size=32, seed=1)
+    recovery.main([*args[:-2], "3", "--jammer", "pulsed", "--seeds", "0", "1"])
+    with open(out / "recovery_A_pulsed.csv", encoding="utf-8", newline="") as f:
+        pulsed = list(csv.DictReader(f))
+    assert {r["attack"] for r in pulsed} == {"data", "partial"}
+    assert {r["seed"] for r in pulsed} == {"0", "1"} and {r["jammer"] for r in pulsed} == {"pulsed"}
+    pooled = recovery.pool_seeds(recovery._read_rows(out / "recovery_A_pulsed.csv"))
+    assert len(pooled) == len(pulsed) // 2
+    assert (out / "recovery_A_pulsed_sources.png").is_file()
+
+
+def test_paper_run_plans_every_split_and_model(tmp_path, monkeypatch):
+    from jamloc.experiments import paper_run
+
+    splits = paper_run.all_splits()
+    for name in ("train", "test", "unnorm", "train_atk2", "test_nest", "margin_snr8", "noise_m1"):
+        assert name in splits
+    assert len(splits) == len(set(splits))
+
+    # Training: every checkpoint the later stages load, and nothing twice
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(tmp_path))
+    trained = []
+    monkeypatch.setattr(paper_run, "train", lambda v, **kw: trained.append((v, kw)))
+    paper_run.stage_train([0, 1], epochs=1, small=True)
+    names = {
+        paper_run.checkpoint_path(
+            v,
+            kw["seed"],
+            **{k: x for k, x in kw.items() if k in ("width", "data", "arch", "jitter", "hidden")},
+        ).name
+        for v, kw in trained
+    }
+    assert len(names) == len(trained)
+    for name in (
+        "fused_seed1.pt",
+        "fused_comb_seed0.pt",
+        "fused_pixel_h252_seed1.pt",
+        "fused_atk2_seed0.pt",
+        "fused_nest_seed1.pt",
+        "evm_mix_seed0.pt",
+        "fused_w4_seed1.pt",
+        "fused_nj1_seed0.pt",
+        "fused_pixel_seed0.pt",
+    ):
+        assert name in names

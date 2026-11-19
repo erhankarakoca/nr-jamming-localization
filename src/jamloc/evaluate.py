@@ -22,6 +22,7 @@ from sionna.phy import config
 
 from jamloc.baselines import (
     block_test_scores,
+    comb_scores,
     evm_scores,
     power_scores,
     residual_cfar_scores,
@@ -31,10 +32,10 @@ from jamloc.dataset import CHANNELS, SPLITS, load
 from jamloc.features import FEATURE_NAMES
 from jamloc.jammer import ATTACKS
 from jamloc.metrics import detection_rate, f1, threshold_at_fa
-from jamloc.model import VARIANTS, select_inputs
+from jamloc.model import EXTRA_VARIANTS, VARIANTS, select_inputs
 from jamloc.paths import results_dir
 from jamloc.plotting import new_figure, paper_style, save
-from jamloc.train import checkpoint_path, load_model
+from jamloc.train import PIXEL_HIDDEN_MATCHED, checkpoint_path, load_model
 
 FA = 0.01
 DETECTOR_STYLE = {
@@ -84,6 +85,30 @@ DETECTOR_STYLE = {
         "marker": "h",
         "linestyle": "--",
     },
+    "fused_pixel_wide": {
+        "label": "Per-cell MLP (U-Net size), P+R+E",
+        "color": "#117733",
+        "marker": "H",
+        "linestyle": "--",
+    },
+    "fused_comb": {
+        "label": "U-Net, P+R+E+C",
+        "color": "#AA4499",
+        "marker": "p",
+        "linestyle": "-",
+    },
+    "comb_threshold": {
+        "label": "Empty-comb test",
+        "color": "#DDCC77",
+        "marker": "1",
+        "linestyle": "--",
+    },
+    "block_test_comb": {
+        "label": "Block test + empty comb",
+        "color": "#661100",
+        "marker": "X",
+        "linestyle": "-.",
+    },
 }
 
 
@@ -127,24 +152,32 @@ def score_split(d: dict, seed: int, null: dict) -> dict[str, np.ndarray]:
     """Scores ``[N, 24, 14]`` of every detector on one loaded split.
 
     ``null`` is the split whose benign slots calibrate the block test's EVM and power-ratio
-    statistics: always ``val``, also when ``d`` is a test split. The per-cell MLP and the U-Net
-    trained with noise jitter are included when their checkpoints exist.
+    statistics: always ``val``, also when ``d`` is a test split. The per-cell MLPs, the U-Net
+    trained with noise jitter and the extra U-Net variants are included when their checkpoints
+    exist.
     """
     features = torch.from_numpy(d["features"])
     scores = {
         variant: _logits(load_model(variant, seed), variant, features) for variant in VARIANTS
     }
-    if checkpoint_path("fused", seed, arch="pixel").is_file():
-        model = load_model("fused", seed, arch="pixel")
-        scores["fused_pixel"] = _logits(model, "fused", features)
-    if checkpoint_path("fused", seed, jitter=1.0).is_file():
-        model = load_model("fused", seed, jitter=1.0)
-        scores["fused_nj1"] = _logits(model, "fused", features)
+    for variant in EXTRA_VARIANTS:
+        if checkpoint_path(variant, seed).is_file():
+            scores[variant] = _logits(load_model(variant, seed), variant, features)
+    optional = {
+        "fused_pixel": {"arch": "pixel"},
+        "fused_pixel_wide": {"arch": "pixel", "hidden": PIXEL_HIDDEN_MATCHED},
+        "fused_nj1": {"jitter": 1.0},
+    }
+    for name, kw in optional.items():
+        if checkpoint_path("fused", seed, **kw).is_file():
+            scores[name] = _logits(load_model("fused", seed, **kw), "fused", features)
     scores["evm_threshold"] = evm_scores(d["features"])
     scores["residual_threshold"] = residual_scores(d["features"])
     scores["residual_cfar"] = residual_cfar_scores(d)
     scores["power_threshold"] = power_scores(d["features"])
+    scores["comb_threshold"] = comb_scores(d["features"])
     scores["block_test"] = block_test_scores(d, null)
+    scores["block_test_comb"] = block_test_scores(d, null, use_comb=True)
     return scores
 
 

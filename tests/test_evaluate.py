@@ -58,7 +58,9 @@ def test_main_runs_end_to_end(tmp_path, monkeypatch):
         "residual_threshold",
         "residual_cfar",
         "power_threshold",
+        "comb_threshold",
         "block_test",
+        "block_test_comb",
         "fused_pixel",
     }
     assert {"pd_mean", "pd_std", "n_seeds"} <= set(rows[0])

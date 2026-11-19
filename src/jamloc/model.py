@@ -14,19 +14,25 @@ from torch import nn
 from jamloc.features import FEATURE_NAMES
 
 # Which feature channels each detector variant sees (all variants get the masks)
-_P, _R, _E, _ALLOC, _DMRS, _DATA = range(len(FEATURE_NAMES))
+_P, _R, _E, _ALLOC, _DMRS, _DATA, _COMB = range(len(FEATURE_NAMES))
 VARIANTS = {
     "fused": [_P, _R, _E, _ALLOC, _DMRS, _DATA],
     "power": [_P, _ALLOC, _DMRS, _DATA],
     "evm": [_E, _ALLOC, _DMRS, _DATA],
     "no_residual": [_P, _E, _ALLOC, _DMRS, _DATA],
 }
-_DB_CHANNELS = (_P, _R, _E)
+# Ablations trained on their own (not part of ``--variant all``): the fused inputs plus the power
+# on the empty DMRS comb
+EXTRA_VARIANTS = {
+    "fused_comb": [_P, _R, _E, _COMB, _ALLOC, _DMRS, _DATA],
+}
+ALL_VARIANTS = {**VARIANTS, **EXTRA_VARIANTS}
+_DB_CHANNELS = (_P, _R, _E, _COMB)
 
 
 def select_inputs(features: torch.Tensor, variant: str) -> torch.Tensor:
     """Pick the variant's channels; dB features are divided by 10 to keep inputs near [-1, 4]."""
-    idx = VARIANTS[variant]
+    idx = ALL_VARIANTS[variant]
     scale = torch.tensor([0.1 if i in _DB_CHANNELS else 1.0 for i in idx], device=features.device)
     return features[:, idx] * scale[None, :, None, None]
 
@@ -37,9 +43,12 @@ def noise_shift(x: torch.Tensor, variant: str, delta_db: torch.Tensor) -> torch.
 
     Every feature is divided by the estimated noise variance, so P, R and E move by ``-delta_db``
     (``-delta_db / 10`` after the input scaling) where they are defined: P everywhere, R on the
-    DMRS cells, E on the data cells. Used to train detectors that tolerate noise-estimation error.
+    DMRS cells, E on the data cells, C on the DMRS symbol. Used to train detectors that tolerate
+    noise-estimation error.
     """
-    idx = VARIANTS[variant]
+    from jamloc.config import SimConfig
+
+    idx = ALL_VARIANTS[variant]
     shift = -delta_db.to(x.dtype)[:, None, None] / 10
     out = x.clone()
     for pos, ch in enumerate(idx):
@@ -49,6 +58,8 @@ def noise_shift(x: torch.Tensor, variant: str, delta_db: torch.Tensor) -> torch.
             out[:, pos] += shift * x[:, idx.index(_DMRS)]
         elif ch == _E:
             out[:, pos] += shift * x[:, idx.index(_DATA)]
+        elif ch == _COMB:
+            out[:, pos, :, SimConfig().dmrs_symbol] += shift[:, :, 0]
     return out
 
 
@@ -68,7 +79,7 @@ class PixelMLP(nn.Module):
 
     The same inputs as the U-Net, but only 1 x 1 convolutions: every cell is classified from its
     own features and masks, without seeing its neighbours (4 801 parameters for the fused
-    variant with ``hidden=64``).
+    variant with ``hidden=64``, 66 277 with ``hidden=252``, about as many as the U-Net).
     """
 
     def __init__(self, in_channels: int, hidden: int = 64):

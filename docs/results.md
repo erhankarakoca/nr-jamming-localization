@@ -667,6 +667,255 @@ F1 / false-alarm rate (scored cells), thresholds from `val` (mixed attacks: `val
   | Gaussian pilot jamming (whole DMRS symbol) | 0 | 0.002 | 0.014 | 0.379 |
   | Spoofing (pilot comb only, half the energy) | 0 | 0.008 | 0.170 | 0.701 |
 
+## 17. Review v6: every result rebuilt, and what the review asked for
+
+`docs/review-v6.md`, `docs/plan-v6.md`. All datasets, models and results were rebuilt with
+`experiments.paper_run --seeds 0 1 2` on a Colab T4 (data 14 min, 54 trainings 31 min, evaluation
+86 min, BLER sweeps and margins 44 min; about 3 compute units). What changed in the data: a
+seventh stored feature (power on the empty DMRS comb), the gNB's own SNR estimate (`snr_db_est`,
+now used by the block test's SNR bins and the SNR-binned thresholds), and grid splits in batches
+of 16 slots, so a 500-slot grid point mixes about 31 allocations instead of 4. Every number in
+sections 3-16 that is quoted again below supersedes the older one.
+
+### 17.1 Detection (test split, 3 seeds, thresholds from `val`)
+
+F1 / achieved false-alarm rate per attack (all cells), and Pd of jammed scheduled cells at
+-15 dB JSR:
+
+| Detector | pilot | data | partial | all | Pd pilot -15 | Pd data -15 |
+| --- | --- | --- | --- | --- | --- | --- |
+| U-Net P+R+E | 0.824 / 0.60% | 0.958 / 1.65% | 0.962 / 1.57% | **0.952** / 1.15% | 0.57 | 0.78 |
+| U-Net P+R+E+C (empty comb) | 0.836 / 0.60% | 0.957 / 1.78% | 0.963 / 1.64% | 0.952 / 1.20% | **0.68** | 0.78 |
+| U-Net P+E | 0.750 / 0.93% | 0.952 / 1.92% | 0.960 / 1.40% | 0.945 / 1.26% | 0.39 | 0.76 |
+| U-Net P | 0.808 / 0.32% | 0.923 / 1.95% | 0.919 / 1.94% | 0.914 / 1.19% | 0.24 | 0.56 |
+| U-Net E | 0.436 / 1.41% | 0.785 / 1.32% | 0.776 / 0.83% | 0.765 / 1.04% | 0.11 | 0.48 |
+| U-Net P+R+E, noise jitter | 0.826 | 0.956 | 0.960 | 0.949 | 0.57 | 0.77 |
+| Per-cell MLP (4 801 param.) | 0.394 | 0.722 | 0.740 | 0.706 / 1.32% | 0.07 | 0.01 |
+| Per-cell MLP (66 277 param.) | 0.393 | 0.723 | 0.741 | 0.707 / 1.32% | 0.06 | 0.01 |
+| Block test | 0.515 / 2.65% | 0.911 / 0.33% | 0.871 / 0.72% | 0.868 / 1.22% | 0.29 | 0.32 |
+| Block test + empty comb | 0.531 | 0.911 | 0.873 | 0.869 | 0.36 | 0.32 |
+| Empty-comb test | 0.721 | 0 | 0.079 | 0.079 | 0.37 | 0 |
+| Residual, exact p-value | 0.575 | 0 | 0.059 | 0.059 | 0.08 | 0 |
+| EVM threshold | 0 | 0.332 | 0.331 | 0.314 | 0 | 0 |
+| Power threshold | 0.194 | 0.135 | 0.125 | 0.132 | 0.01 | 0.02 |
+
+Uncertainty (`experiments.intervals`, 1000 bootstrap draws of batches within each channel x
+attack x JSR point, the same draws for every detector and seed; seed std is training
+variability only). Fused F1 0.952 [0.950, 0.953], pilot 0.824 [0.812, 0.835]. Paired
+differences, seed mean:
+
+| Difference | F1 all | F1 pilot | Pd pilot -15 dB |
+| --- | --- | --- | --- |
+| P+R+E minus P+E (what the residual adds) | +0.006 [0.006, 0.007] | +0.074 [0.065, 0.085] | +0.179 [0.153, 0.203] |
+| P+R+E minus block test | +0.084 [0.082, 0.086] | +0.309 [0.297, 0.320] | +0.283 [0.262, 0.303] |
+| P+R+E minus per-cell MLP of the same size | +0.245 [0.240, 0.249] | +0.431 [0.417, 0.446] | +0.515 [0.490, 0.537] |
+| P+R+E+C minus P+R+E (what the empty comb adds) | +0.000 [0.000, 0.001] | +0.012 [0.006, 0.019] | +0.101 [0.083, 0.119] |
+| block test + comb minus block test | +0.002 | +0.016 | +0.073 |
+
+PRB-level F1 (a PRB is flagged when its largest cell score exceeds the threshold for 1% PRB false
+alarm): U-Net P+R+E 0.943 (pilot 0.909), P+E 0.934 (0.878), block test 0.833 (0.789), EVM
+threshold 0.615 (0.463), residual p-value 0.425 (0.567), empty comb 0.551 (0.721).
+
+**Reading.**
+- The residual's gain is a weak-pilot-jamming gain (+0.18 Pd at -15 dB, consistent in every
+  seed and bootstrap draw); overall F1 moves by 0.006.
+- Spatial context, not capacity: a per-cell MLP with as many parameters as the U-Net is exactly as
+  good as the small one (0.707 vs 0.706).
+- The empty comb, the baseline the review asked for, beats the residual on the nominal pilot
+  attack (pilot F1 0.72 vs 0.58 alone). Added to the U-Net it helps weak pilot jamming (+0.10 Pd)
+  and the scheduling-aware jammer (F1 0.947 vs 0.937), but a jammer that leaves the empty comb
+  clean defeats it: on `combjam` the comb network's pilot F1 is 0.23 (fused 0.78) with 4.6% false
+  alarms, and with long delays 0.70 / 15% (fused 0.80 / 6.7%). It stays an ablation.
+- At PRB level the EVM threshold doubles its F1 (0.31 -> 0.62): part of its cell-level failure is
+  the label definition. It still trails every detector that sees the DMRS.
+
+### 17.2 Unseen conditions (F1 / false alarms, all cells)
+
+| Condition | P+R+E | P+R+E+C | P+E | P | Block test | Per-cell MLP |
+| --- | --- | --- | --- | --- | --- | --- |
+| matched test | 0.952 / 1.2% | 0.952 / 1.2% | 0.945 / 1.3% | 0.914 / 1.2% | 0.868 / 1.2% | 0.706 / 1.3% |
+| scheduling-aware | 0.937 / 0.5% | 0.947 / 0.5% | 0.938 / 1.1% | 0.891 / 0.2% | 0.837 / 3.6% | 0.629 / 6.0% |
+| QPSK jammer | 0.952 / 1.1% | 0.954 / 1.1% | 0.947 / 1.2% | 0.909 / 1.2% | 0.879 / 1.2% | 0.718 / 1.2% |
+| channels not normalized per slot | 0.936 / 1.2% | 0.937 / 1.3% | 0.929 / 1.3% | 0.899 / 1.2% | 0.851 / 1.1% | 0.680 / 1.0% |
+| TDL-C 1000 ns | 0.795 / 6.7% | 0.702 / 15.2% | 0.695 / 15.7% | 0.915 / 1.2% | 0.595 / 20.1% | 0.660 / 3.8% |
+| up to 30 m/s | 0.857 / 5.5% | 0.865 / 5.2% | 0.837 / 6.4% | 0.909 / 1.4% | 0.639 / 15.0% | 0.666 / 3.8% |
+| pilot comb | 0.950 / 1.2% | 0.864 / 4.6% | 0.932 / 1.6% | 0.908 / 1.2% | 0.875 / 1.6% | 0.703 / 1.2% |
+| hopping | 0.595 / 12.9% | 0.583 / 14.3% | 0.565 / 11.7% | 0.558 / 19.7% | 0.474 / 24.2% | 0.688 / 1.9% |
+| pulsed | 0.636 / 10.8% | 0.630 / 10.7% | 0.628 / 9.9% | 0.617 / 10.9% | 0.599 / 8.3% | 0.714 / 0.4% |
+| multi-tone | 0.763 / 1.5% | 0.769 / 1.9% | 0.750 / 1.6% | 0.715 / 1.4% | 0.626 / 0.9% | 0.346 / 0.2% |
+| spoofing | 0.028 / 28.5% | 0.004 / 29.6% | 0.254 / 10.5% | 0.390 / 3.5% | 0.001 / 26.3% | 0.000 / 7.7% |
+| neighbor-cell UE (labels: its cells) | 0.953 / 1.1% | 0.947 / 1.3% | 0.957 / 1.0% | 0.905 / 1.4% | 0.876 / 0.7% | 0.756 / 0.1% |
+
+Scheduling-aware jammer: pilot F1 0.870 (P+E 0.784), Pd pilot at -15 dB 0.58 (P+E 0.34).
+
+Mixed channel training (`train_mix`, thresholds from `val_mix`): matched 0.956 / 0.7%, 1000 ns
+0.918 / 1.6%, 30 m/s 0.947 / 1.0% (P+E: 0.948, 0.903, 0.941; P: 0.915, 0.919, 0.913).
+
+Mixed attack training (F1 / false alarms):
+
+| Condition | nominal | mixed attacks (`train_atk`) | mixed attacks + spoofing (`train_atk2`) |
+| --- | --- | --- | --- |
+| matched | 0.952 / 1.2% | 0.953 / 0.9% | 0.946 / 1.0% |
+| pilot comb | 0.950 / 1.2% | 0.953 / 0.9% | 0.947 / 1.0% |
+| hopping | 0.595 / 12.9% | 0.918 / 1.7% | 0.908 / 2.2% |
+| pulsed (in neither mix) | 0.636 / 10.8% | 0.857 / 2.6% | 0.839 / 3.2% |
+| multi-tone (in neither mix) | 0.763 / 1.5% | 0.750 / 1.1% | 0.738 / 1.2% |
+| spoofing | 0.028 / 28.5% | 0.015 / 28.7% | **0.871 / 0.7%** |
+
+### 17.3 Pilot spoofing
+
+Slot alarm (largest logit above the level that 1% of the benign batches of `spoofjam` exceed,
+calibrated on every other benign batch; slot false alarms about 1%) and placement, range over 3
+seeds:
+
+| JSR | training | slot Pd | DMRS cells flagged | data cells flagged | F1 (slots at this JSR) | false alarms |
+| --- | --- | --- | --- | --- | --- | --- |
+| -12 dB | nominal | 0.77-0.84 | 0.09-0.13 | 0.55-0.60 | 0.02-0.03 | 35-38% |
+| -12 dB | with spoofing | 0.83-0.89 | 0.87-0.90 | 0.04-0.05 | 0.67-0.74 | 2-3% |
+| -9 dB | nominal | 0.94 | 0.06-0.11 | 0.65-0.74 | 0.01-0.02 | 46-52% |
+| -9 dB | with spoofing | 0.96-0.97 | 0.96-0.98 | 0.01-0.02 | 0.84-0.90 | 1-2% |
+
+At the analytic 1% residual threshold, 1.03% of the 53 688 spoofed DMRS cells and 0.94% of the
+29 680 benign scheduled DMRS cells of `spoofjam` exceed it (`baselines.residual_cfar_scores`,
+score > 2).
+
+**Partial spoofing** (`spoofpart`: the same replay on a random block of 2-12 PRBs, so usually on
+part of the allocation; 70% of the attacked cells lie inside it). The replay ends inside the
+allocation and the residual sees the step: 22.1% of the 18 035 spoofed scheduled DMRS cells exceed
+the analytic threshold, but so do 15.8% of the 35 381 clean scheduled DMRS cells in those slots
+(0.98% in benign slots). F1 / false alarms: P+R+E 0.133 / 10.9%, P+E 0.318 / 4.3%, P 0.449 /
+1.7%, E 0.511 / 0.9%, P+R+E+C 0.064 / 11.9%, block test 0.111 / 7.3%; trained on mixed attacks
+0.111 / 10.0%, with whole-allocation spoofing in the mix 0.292 / 4.7%. Retraining fixes only the
+form of spoofing it saw.
+
+Unprotected BLER, TDL-C, 15 dB, 512 slots: spoofing 0.158 at -3 dB and 0.693 at +3 dB; Gaussian
+jamming of the DMRS symbol 0.014 and 0.391. The residual is blind to the spoofer, but power and
+EVM carry enough evidence to place it once the network has seen it: the identifiability problem is
+the residual's, not the map's.
+
+### 17.4 Noise power
+
+Full receiver chain with a noise power off by delta (thresholds from the correct one; false
+alarms on benign cells):
+
+| delta | -2 dB | -1 dB | -0.5 dB | 0 | +0.5 dB | +1 dB | +2 dB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| U-Net P+R+E | 55.8% | 39.9% | 16.6% | 0.95% | 0.11% | 0.04% | 0.03% |
+| U-Net P+R+E, noise jitter | 19.0% | 2.1% | 1.4% | 1.2% | 1.2% | 0.8% | 0.2% |
+| Block test | 49.0% | 27.7% | 8.3% | 0.93% | 0.28% | 0.12% | 0.08% |
+| Residual p-value (theory) | 14.5% (14.4%) | 4.9% (4.8%) | 2.35% (2.38%) | 1.01% (1.04%) | 0.45% (0.40%) | 0.14% (0.13%) | 0.01% (0.01%) |
+
+The feature-shift approximation used before (15% and 37% at -0.5 and -1 dB) was close.
+
+Per-slot estimate from the empty DMRS comb (`noise_estimate="comb"`): error median -0.04 dB, 5-95%
+[-1.2, +1.05] dB, std 0.70 dB without jamming; jamming on the DMRS raises it (median +1.6 dB,
+95th percentile +14 dB on the test grid), and a scheduling-aware jammer on the whole DMRS symbol
+of the allocation breaks it (median +10.9 dB). Detection with the estimate:
+
+| Deployment | test_nest F1 / benign FA | sched_nest F1 |
+| --- | --- | --- |
+| U-Net trained and calibrated with the true N0 | 0.839 / 10.2% | 0.657 |
+| same, recalibrated on `val_nest` | 0.847 / 2.4% | 0.498 |
+| U-Net trained with +-1 dB jitter | 0.935 / 1.6% | 0.819 |
+| U-Net trained and calibrated on the estimate (`train_nest`) | **0.948 / 0.67%** | **0.866** |
+| Block test (calibrated on `val_nest`) | 0.737 / 1.7% | 0.460 |
+
+SNR: with one threshold the fused U-Net's benign false-alarm rate falls from 4.4% at 6 dB to
+0.12% at 24 dB; with one threshold per 4 dB bin of the *estimated* SNR it stays at 0.6-1.2%
+(F1 0.943 vs 0.949). The residual p-value stays at 0.9-1.2% with one threshold.
+
+### 17.5 The residual against its theory (rebuilt data)
+
+Analytic 1% threshold on benign test slots: 1.05% (TDL-A), 0.95% (TDL-C), 0.65-1.24% per 2.5 dB
+SNR bin; 62.9% on TDL-C 1000 ns. Pilots of 4 of 12 PRBs jammed (SNR 10 dB), simulation
+TDL-A / TDL-C: inside the block 0.30 / 0.32 at 0 dB JNR (theory 0.29), 0.76 / 0.72 at 6 dB (0.69),
+0.94 / 0.93 at 12 dB (0.93); clean neighbor 0.17 / 0.16 at 12 dB (0.16) and 0.53 / 0.54 at 18 dB
+(0.50). K-slot thresholds: false alarms 0.91-1.00% for K = 1, 2, 4, 8.
+
+### 17.6 Detection before damage, and the link's own margin
+
+BLER without a jammer (MCS 5, random allocations): 10% at about 3.4 dB SNR (TDL-A) and 4.0 dB
+(TDL-C); at 15 dB the link has about 11 dB to spare. Margin = JSR of 10% BLER minus JSR of 90%
+slot Pd (jammer on the scheduled PRBs), fused U-Net, TDL-C, smallest over the three attacks:
+
+| SNR (spare margin, TDL-C) | 15 dB (~11 dB) | 11 dB (~7 dB) | 8 dB (~4 dB) | 5 dB (~1 dB) |
+| --- | --- | --- | --- | --- |
+| 1% slot false alarm | +8.6 dB | +7.7 dB | +3.5 dB | -6.1 dB |
+| 0.1% slot false alarm | +5.5 dB | +5.9 dB | +1.6 dB | -7.9 dB (pilot: 90% never reached) |
+
+TDL-A: +10.1, +8.7, +5.0, -1.8 dB (1%). The detector needs about the same JNR in every case
+(data jamming, TDL-C: 90% slot Pd at -15.1, -12.9, -10.2, -6.5 dB JSR, i.e. JNR -0.1 to -2.2
+dB); the damage threshold moves with the spare margin. Near the link-adaptation point a jammer
+hurts the link before the slot alarm fires. Per-seed margins: `results/margin/*_per_seed.csv`.
+
+### 17.7 Neighbor-cell interference
+
+A synchronized UE of a neighboring cell (QPSK data and its own DMRS on a block of PRBs, its own
+channel) is flagged like jamming: the fused U-Net marks 94.6% of its scheduled cells and 97.7% of
+the others (Gaussian partial-band jammer at the same power: 95.8% / 97.1%), from 77% at -15 dB ISR
+to 99% above -3 dB. The map localizes interference; telling legitimate interference from an
+attack needs information the features do not contain (e.g. the neighbor's DMRS sequence, known to
+the network, or coordination between gNBs).
+
+### 17.8 Size and latency
+
+F1 / pilot Pd at -15 dB: width 4 (7 657 parameters) 0.944 / 0.52, width 6 (16 933) 0.949 / 0.54,
+width 8 (29 841) 0.950 / 0.56, width 12 (66 553) 0.952 / 0.57.
+
+CPU latency (Apple M1 Pro, one thread, 24-PRB allocation, median per stage, after equalization,
+without decoding; `size_sweep --latency`, idle machine, 19 Nov): feature extraction 0.31 ms (all
+seven maps); U-Net eager / frozen 0.27 / 0.17 ms (width 4), 0.32 / 0.22 ms (6), 0.38 / 0.26 ms
+(8), 0.48 / 0.37 ms (12). Totals with the frozen network: 0.48, 0.53, 0.58, 0.68 ms. Only the
+smallest network fits in a 0.5 ms slot. Feature extraction was 0.26 ms before the empty-comb map
+was added.
+
+### 17.9 What the receiver needs from the map (review item 1)
+
+`experiments.recovery`, TDL-C 15 dB unless stated, UE on PRBs 6-17, jammer on 4 of them, three
+detector seeds each on its own 1 600 slots (4 800 per point; a receiver stops after 100 block
+errors per run), run on the M1 Pro (5 processes x 2 threads, about 3.5 h in all). New receivers:
+`lmmse` (the LMMSE interpolator, no map), `slot_ie` (one interference estimate per slot),
+`block_soft` (block-test map), `true_prb_soft` (true map coarsened to one decision for the DMRS
+cell and one for the data cells of each PRB: resolution without detection error),
+`p_r_e_atk_soft` (map of the U-Net trained on `train_atk`). BLER in percent at +9 dB JSR (0: no
+error in 4 800 slots):
+
+| Receiver | pilot | data | partial | pulsed data | pulsed partial | hopping data | hopping partial |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| No protection | 33 | 81 | 88 | 19 | 42 | 29 | 58 |
+| LMMSE, no map | 18 | 81 | 86 | 18 | 36 | 28 | 50 |
+| Slot-wide estimate | 12 | 84 | 90 | 61 | 72 | 75 | 83 |
+| DMRS only | 0.60 | 81 | 1.3 | 18 | 9.9 | 28 | 57 |
+| Power test, hard | 5.1 | 19 | 29 | 1.2 | 4.4 | 1.1 | 12 |
+| Block test, soft | 0.06 | 0.04 | 7.7 | 0 | 3.0 | 54 | 64 |
+| U-Net, hard | 0.17 | 0.08 | 0.19 | 0.42 | 0.65 | 36 | 54 |
+| U-Net, soft | 0.06 | 0.04 | 0.02 | 0 | 0.50 | 21 | 31 |
+| U-Net (mixed attacks), soft | 0.08 | 0.04 | 0.06 | 0 | 0.06 | 0 | 0.25 |
+| True map per PRB, soft | 0.04 | 0.04 | 0.02 | 0 | 0.08 | 52 | 58 |
+| True map, soft | 0.04 | 0.04 | 0.02 | 0 | 0 | 0 | 0.21 |
+
+**Reading.**
+- Without a map, the better interpolator and a slot-wide interference estimate help little; the
+  slot-wide estimate hurts against pulsed and hopping jammers. DMRS-only protects against pilot
+  and partial-band jamming, not data jamming.
+- Resolution: the per-PRB true map is as good as the exact one for jammers that fill PRB rows or
+  pulse within them; against the hopping jammer it fails (52%), because the jamming power estimated
+  over all data symbols of a touched PRB is far too low on the jammed ones.
+- Detection: the U-Net trained on block jammers fails against hopping (21%); trained on mixed
+  attacks it matches the true map (0 / 0.25%). The block test's map falls behind the per-PRB true
+  map under strong partial-band jamming (7.7% vs 0.02%) because its pilot-only rule fires on about
+  a quarter of the jammed data cells (76% flagged at +9 dB, 86% at +3 dB; the rule is a trade-off:
+  testing the power ratio also against the partial-band null raises partial F1 by 0.024 but lowers
+  pilot F1 by 0.067 and overall F1 from 0.868 to 0.864).
+- Hard use at weak jamming: U-Net map without jammer 0.23%; at -15 dB 3.9% (pilot), 9.7% (data),
+  12% (partial). Soft use: no measurable cost at any JSR (0 errors at -15 dB and without jammer).
+- Soft U-Net map, nominal attacks, every JSR: at most 0.08% (4/4 800, partial +3 dB; the true map
+  gives the same).
+- All pilots jammed (whole allocation): true map soft 4.1% at +3 dB, unprotected 38%.
+- 8 dB SNR (about 4 dB spare): unprotected 0.6% without jammer, LMMSE-based receivers 0.2%; data
+  jamming +3 dB: U-Net soft 3.6%, true map 3.6%, unprotected 50%; partial +3 dB: 6.0%, 5.8%, 61%.
+- TDL-A is similar (soft U-Net map at most 0.13%; block map 4.8% under partial +9 dB).
+
 ## Caveats before these go into the paper
 
 - Each Pd point averages over SNR 5–25 dB; the SNR-range files give the split by SNR.
@@ -675,10 +924,9 @@ F1 / false-alarm rate (scored cells), thresholds from `val` (mixed attacks: `val
 - 15 training epochs per run; the validation loss is lowest well before that (training curves).
 - Only 190 different allocations exist, so test allocations repeat training ones; channel
   realizations and jammer draws do not.
-- All slots of a simulated batch share one allocation. The grid splits use batches of 64 or 128,
-  so each grid point (200-500 slots) mixes only a few allocations, and neighbouring points of a
-  Pd curve can differ in allocation mix. Averages over the grid (F1) are not affected much; the
-  `margin` split, whose curves are interpolated, uses batches of 8.
+- All slots of a simulated batch share one allocation. Since section 17 the grid splits use
+  batches of 16 (the `margin` grids 8), so a 500-slot grid point mixes about 31 allocations;
+  sections 3-16 used batches of 64 or 128 (about 4 per point).
 - The reference datasets were generated on a GPU; GPU and CPU draw different random numbers, so
   results are reproducible per device, not bit-identical across devices.
 - Normalized EVM is biased upward at high SNR without jamming (issue #6); the detectors are

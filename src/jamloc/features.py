@@ -15,6 +15,13 @@ divided by the noise level:
   TDL-C): the LS estimator's error variance leaves out interpolation error and channel aging, so
   the equalizer underestimates the true error. Thresholds and the U-Net are calibrated on data
   that contains this effect.
+
+A fourth map, **empty-comb power C**, is stored for baselines and ablations: the received energy on
+the subcarriers of the DMRS symbol that carry no pilot (type-1 DMRS leaves every second subcarrier
+empty) divided by the noise variance, one value per PRB on the DMRS symbol of the whole carrier.
+Without jamming it is the mean of 6 unit exponentials, at any SNR, also inside the allocation. A
+jammer on the whole DMRS symbol raises it; one that hits only the pilot comb, or replays the
+pilots, does not.
 """
 
 from functools import cache
@@ -27,7 +34,15 @@ from jamloc.config import SimConfig
 from jamloc.link import SlotBatch
 from jamloc.receiver import data_positions
 
-FEATURE_NAMES = ("power_db", "residual_db", "evm_db", "alloc_mask", "dmrs_mask", "data_mask")
+FEATURE_NAMES = (
+    "power_db",
+    "residual_db",
+    "evm_db",
+    "alloc_mask",
+    "dmrs_mask",
+    "data_mask",
+    "comb_db",
+)
 DB_RANGE = (-10.0, 40.0)
 
 
@@ -46,6 +61,22 @@ def power_map(y: torch.Tensor, no: torch.Tensor, cfg: SimConfig) -> torch.Tensor
     """Mean received energy per cell divided by the noise variance. ``y``: ``[B, 14, 288]``."""
     energy = (y.abs() ** 2).reshape(y.shape[0], cfg.num_symbols, cfg.num_prb, 12).mean(-1)
     return energy.transpose(1, 2) / no[:, None, None]
+
+
+def comb_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
+    """Energy on the empty DMRS comb per PRB divided by the noise variance, on the DMRS symbol of
+    every PRB of the carrier; 0 elsewhere. ``[B, 24, 14]``."""
+    from jamloc.noise import empty_comb
+
+    # The allocation starts at a PRB boundary (12 subcarriers), so the empty comb has the same
+    # parity on the whole carrier
+    _, sc = empty_comb(batch.tx)
+    parity = int(sc[0]) % 2
+    row = batch.y[:, cfg.dmrs_symbol, parity::2]  # [B, 6 x 24]
+    energy = (row.abs() ** 2).reshape(row.shape[0], cfg.num_prb, 6).mean(-1)
+    out = energy.new_zeros(energy.shape[0], cfg.num_prb, cfg.num_symbols)
+    out[:, :, cfg.dmrs_symbol] = energy / batch.no[:, None]
+    return out
 
 
 # --- DMRS residual ----------------------------------------------------------------------------
@@ -161,9 +192,12 @@ def _db(x: torch.Tensor) -> torch.Tensor:
 
 
 def extract(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
-    """All features stacked as channels ``[B, 6, 24, 14]`` in the order of ``FEATURE_NAMES``."""
+    """All features stacked as channels ``[B, 7, 24, 14]`` in the order of ``FEATURE_NAMES``."""
     alloc, dmrs, data = masks(batch, cfg)
     p = _db(power_map(batch.y, batch.no, cfg))
     r = _db(residual_map(batch, cfg)) * dmrs
     e = _db(evm_map(batch, cfg)) * data
-    return torch.stack([p, r, e, alloc, dmrs, data], dim=1).float()
+    row = torch.zeros_like(alloc)
+    row[:, :, cfg.dmrs_symbol] = 1  # the empty comb exists on the DMRS symbol of every PRB
+    c = _db(comb_map(batch, cfg)) * row
+    return torch.stack([p, r, e, alloc, dmrs, data, c], dim=1).float()
