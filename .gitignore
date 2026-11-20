@@ -10,6 +10,8 @@ dist/
 .ipynb_checkpoints/
 
 # Generated data and results: regenerate from code + seeds, never commit
+/.mpl/
+/.cache/
 data/*
 !data/.gitkeep
 results/*

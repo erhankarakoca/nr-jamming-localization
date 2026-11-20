@@ -114,15 +114,25 @@ def test_pilot_whole_comb_selects_first_true_soft_failure():
         _select(case, truth, truth, {**crc, "true_soft": passes})
 
 
-def test_cli_payload_and_manifest(tiny_models, monkeypatch):
+@pytest.mark.parametrize("dirty", [False, True])
+def test_cli_payload_and_manifest(tiny_models, monkeypatch, dirty):
     import json
     from dataclasses import replace
 
     import numpy as np
 
+    from jamloc.site import export as exporter
     from jamloc.site.__main__ import main
     from jamloc.site.cases import CASES
 
+    def git_output(args, *, cwd, **kwargs):
+        assert cwd == exporter.REPO_ROOT
+        if "rev-parse" in args:
+            return "example-commit\n"
+        assert {"status", "--porcelain", "--untracked-files=no"} <= set(args)
+        return " M site/index.html\n" if dirty else ""
+
+    monkeypatch.setattr(exporter.subprocess, "check_output", git_output)
     monkeypatch.setitem(CASES, "benign", replace(CASES["benign"], batch_size=2))
     main(["export", "--cases", "benign"])
     folder = tiny_models / "results" / "site" / "data"
@@ -135,6 +145,8 @@ def test_cli_payload_and_manifest(tiny_models, monkeypatch):
     assert manifest["schema_version"] == case["schema_version"] == 2
     meta = case["metadata"]
     assert manifest["git_commit"] == meta["git_commit"] and manifest["created_at"]
+    assert manifest["git_commit"] == "example-commit"
+    assert manifest["git_dirty"] is meta["git_dirty"] is dirty
     assert meta["selection"]["slot"] == 0 and meta["selection"]["hit_rate"] is None
     assert np.shape(case["grids"]["truth"]) == (24, 14)
     assert case["grids"]["residual_db"][6][0] is None
@@ -216,23 +228,148 @@ def test_fig3_reports_original_benign_fade(tiny_models):
     assert case["benign"]["r_b"] != case["prb"]["r_b"]
 
 
+def _write_case_data(data):
+    import json
+    from dataclasses import asdict
+
+    from jamloc.site.cases import CASES
+
+    data.mkdir(parents=True)
+    entries = []
+    for case in CASES.values():
+        cfg = case.config()
+        grid = [[0] * cfg.num_symbols] * cfg.num_prb
+        width = case.alloc[1]
+        num_points = width * 12 * (cfg.num_symbols - 1)
+        receivers = {
+            "standard",
+            "fused_hard",
+            "true_soft",
+            "true_prb_soft",
+            *(f"{name}_soft" for name in case.decode_maps),
+        }
+        pilots = {
+            "subcarrier": list(range(0, width * 12, 2)),
+            "residual_power": [0] * (width * 6),
+            "ls": [[0, 0]] * (width * 6),
+            "projection": [[0, 0]] * (width * 6),
+        }
+        document = {
+            "schema_version": 2,
+            "metadata": {
+                **asdict(case),
+                "config": asdict(cfg),
+                "selection": {
+                    "rule": case.selection_rule,
+                    "hit_rate": 0,
+                    "batch_median": 0,
+                    "slot": 0,
+                    "flip_count": 1,
+                    "failure_count": 1,
+                },
+                "thresholds": {
+                    name: {
+                        "split": "val",
+                        "training_data": "train",
+                        "false_alarm_rate": 0.01,
+                        "value": 0.5,
+                    }
+                    for name in case.detectors
+                },
+                "batch_crc": {name: {"slots": 64, "failures": 1} for name in receivers},
+                "noise_variance": 0.04,
+                "true_noise_variance": 0.03,
+            },
+            "grids": {
+                key: grid for key in ("allocation", "truth", "power_db", "residual_db", "evm_db")
+            },
+            "detectors": {
+                name: {key: grid for key in ("scores", "decisions", "unscored")}
+                for name in case.detectors
+            },
+            "prb": {"r_b": [0] * width, "threshold": [1] * width},
+            "pilots": pilots,
+            "receivers": {
+                name: {"crc": True, "x_hat": "shared", "abs_llr": "shared"} for name in receivers
+            },
+            "x_hat": {"shared": [[0, 0]] * num_points},
+            "abs_llr": {"shared": [0] * num_points},
+        }
+        if case.name in ("fig3", "jsr_sweep"):
+            document["benign"] = {"jsr_db": None, "pilots": pilots, "r_b": [0] * width}
+        if case.name == "jsr_sweep":
+            document["sweep"] = [
+                {"jsr_db": db, "pilots": pilots, "r_b": [0] * width} for db in range(-15, 10, 3)
+            ]
+        path = data / f"{case.name}.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        entries.append({"name": case.name, "title": case.title, "file": path.name})
+    (data / "manifest.json").write_text(
+        json.dumps({"schema_version": 2, "cases": entries}), encoding="utf-8"
+    )
+
+
+def test_check_build_requires_page_cases(tmp_path):
+    import json
+
+    from jamloc.site.build import check_build
+
+    data = tmp_path / "data"
+    _write_case_data(data)
+    (data / "results.json").write_text("{}", encoding="utf-8")
+    path = data / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["cases"] = [entry for entry in manifest["cases"] if entry["name"] == "pilot"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"manifest\.json.*hopping.*jsr_sweep.*walkthrough_flip"):
+        check_build(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "name, keys",
+    [
+        ("pilot", ("schema_version",)),
+        ("pilot", ("grids", "residual_db")),
+        ("walkthrough_flip", ("metadata", "selection", "flip_count")),
+        ("pilot_whole_comb", ("metadata", "thresholds", "fused", "value")),
+        ("hopping", ("detectors", "fused_atk", "decisions")),
+        ("hopping", ("metadata", "batch_crc", "fused_atk_soft")),
+        ("pilot", ("x_hat", "shared")),
+        ("jsr_sweep", ("sweep", 0, "pilots", "residual_power")),
+    ],
+)
+def test_check_build_requires_case_fields(tmp_path, name, keys):
+    import json
+    import re
+
+    from jamloc.site.build import check_build
+
+    data = tmp_path / "data"
+    _write_case_data(data)
+    (data / "results.json").write_text("{}", encoding="utf-8")
+    path = data / f"{name}.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    parent = document
+    for key in keys[:-1]:
+        parent = parent[key]
+    del parent[keys[-1]]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=rf"{name}\.json.*{re.escape(keys[-1])}"):
+        check_build(tmp_path)
+
+
 def test_build_showcase(tmp_path, monkeypatch):
     import json
     from pathlib import Path
 
     from jamloc.site.__main__ import main
-    from jamloc.site.build import PLOTLY_URL, check_build
+    from jamloc.site.build import PLOTLY_URL, build_site, check_build
 
     results = tmp_path / "results"
     papers = tmp_path / "paper-results"
     monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(results))
     data = results / "site" / "data"
-    data.mkdir(parents=True)
-    (data / "pilot.json").write_text('{"schema_version":2}', encoding="utf-8")
-    manifest = data / "manifest.json"
-    manifest.write_text(
-        '{"schema_version":2,"cases":[{"name":"pilot","file":"pilot.json"}]}', encoding="utf-8"
-    )
+    _write_case_data(data)
 
     inputs = {
         "eval/test_pd_vs_jsr.csv": (
@@ -256,22 +393,31 @@ def test_build_showcase(tmp_path, monkeypatch):
             "fused,no_residual,f1,all,,mean,3,0.005,0.004,0.007\n"
         ),
     }
+    unselected = {}
     for suffix, jammer in (("", "nominal"), ("_pulsed", "pulsed"), ("_hopping", "hopping")):
         base = f"recovery/recovery_C{suffix}"
-        # The real results tree also stores this dataset under its replay name.
-        source = f"{base}_replay.csv" if jammer == "hopping" else f"{base}.csv"
-        inputs[source] = (
+        stem = base if jammer == "nominal" else f"{base}_replay"
+        inputs[f"{stem}.csv"] = (
             "receiver,jammer,noise_estimate,seed,attack,jsr_db,snr_db,ber,bler,block_errors,blocks\n"
             f"standard,{jammer},true,0,data,9,15,0,0.8,8,10\n"
             f"standard,{jammer},true,1,data,9,15,0,0.1,1,20\n"
             f"standard,{jammer},true,1,data,6,15,0,0,0,10\n"
         )
-        inputs[f"{base}_replay_paired.csv"] = (
+        inputs[f"{stem}_paired.csv"] = (
             "first,second,attack,jsr_db,slots,only_first,only_second,"
             "bler_first,bler_second,delta,delta_lo,delta_hi\n"
             "standard,p_r_e_soft,data,9,10,8,1,0.8,0.1,0.7,0.5,0.8\n"
         )
-    for name, contents in inputs.items():
+        if jammer == "pulsed":  # Both complete runs exist, with different estimates.
+            unselected[f"{base}.csv"] = inputs[f"{stem}.csv"].replace("0.8,8,10", "0.2,2,10")
+            unselected[f"{base}_paired.csv"] = inputs[f"{stem}_paired.csv"].replace(
+                ",9,10,", ",9,99,"
+            )
+        if jammer == "nominal":  # An incomplete replay cannot override a complete original.
+            unselected[f"{base}_replay_paired.csv"] = inputs[f"{stem}_paired.csv"].replace(
+                ",9,10,", ",9,99,"
+            )
+    for name, contents in (inputs | unselected).items():
         path = papers / name
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8", newline="") as f:
@@ -296,7 +442,7 @@ def test_build_showcase(tmp_path, monkeypatch):
     recovery = content["recovery"]
     assert {r["jammer"] for r in recovery["rows"]} == {"nominal", "pulsed", "hopping"}
     assert all(r["bler"] == 9 / 30 and r["blocks"] == 30 for r in recovery["rows"])
-    assert recovery["paired"][0]["slots"] == 10
+    assert len(recovery["paired"]) == 3 and all(r["slots"] == 10 for r in recovery["paired"])
     assert content["matched"]["rows"][0]["f1"] == 0.77
     assert content["matched"]["paired"][0]["jsr_db"] is None
     for section in content.values():
@@ -305,11 +451,13 @@ def test_build_showcase(tmp_path, monkeypatch):
             assert (build / download).is_file()
     for name in inputs:
         assert (build / "downloads" / Path(name).name).read_bytes() == (papers / name).read_bytes()
+    for name in unselected:
+        assert not (build / "downloads" / Path(name).name).exists()
 
     check_build(build)
-    (papers / "eval" / "test_pd_vs_jsr.csv").unlink()
-    with pytest.raises(SystemExit, match="2"):
-        main(["build", "--results-from", str(papers)])
+    (papers / "recovery" / "recovery_C_paired.csv").unlink()
+    with pytest.raises(FileNotFoundError, match="complete recovery pair for recovery_C"):
+        build_site(results_from=papers)
     assert json.loads((build / "data" / "results.json").read_text(encoding="utf-8")) == content
 
     page = build / "extra.html"
@@ -334,3 +482,61 @@ def test_build_showcase(tmp_path, monkeypatch):
     (build / "data" / "pilot.json").unlink()
     with pytest.raises(ValueError, match="pilot.json"):
         check_build(build)
+
+
+@pytest.mark.parametrize("dirty_at", ["before build", "during build", "before push", None])
+def test_deploy_checks_source_worktree(tmp_path, monkeypatch, dirty_at):
+    from subprocess import CompletedProcess
+
+    from jamloc.site import deploy
+
+    source = tmp_path / "source-worktree"
+    main = tmp_path / "primary-checkout"
+    output = tmp_path / "build"
+    output.mkdir()
+    calls = []
+
+    def build(*, results_from):
+        calls.append("build")
+        return output
+
+    def git(args, *, cwd, **kwargs):
+        if "worktree" in args and "list" in args:
+            return CompletedProcess(args, 0, f"worktree {main}\0\0", "")
+        if "status" in args:
+            assert {"--porcelain", "--untracked-files=normal", "--ignore-submodules=none"} <= set(
+                args
+            )
+            dirty = {
+                "before build": "?? new.html\n",
+                "during build": " M site/index.html\n" if "build" in calls else "",
+                "before push": "M  site/index.html\n" if "stage" in calls else "",
+                None: "",
+            }[dirty_at]
+            return CompletedProcess(args, 0, dirty if cwd == source else "", "")
+        if "ls-remote" in args:
+            calls.append("remote")
+            return CompletedProcess(args, 2, "", "")
+        if args[1] == "add":
+            calls.append("stage")
+        if args[1] == "push":
+            calls.append("push")
+        return CompletedProcess(args, 0, "", "")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(deploy, "REPO_ROOT", source)
+    monkeypatch.setattr(deploy, "build_site", build)
+    monkeypatch.setattr(deploy, "check_build", lambda path: None)
+    monkeypatch.setattr(deploy.subprocess, "run", git)
+    if dirty_at is None:
+        deploy.deploy_site()
+        assert calls == ["build", "remote", "stage", "push"]
+    else:
+        with pytest.raises(ValueError, match=r"dirty.*source-worktree"):
+            deploy.deploy_site()
+        expected = {
+            "before build": [],
+            "during build": ["build"],
+            "before push": ["build", "remote", "stage"],
+        }
+        assert calls == expected[dirty_at]
