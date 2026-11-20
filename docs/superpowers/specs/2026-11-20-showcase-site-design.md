@@ -51,7 +51,7 @@ the constellation and the decoding outcome. The same material improves the paper
 
 ## Constraints
 
-- **Project conventions (README, CLAUDE-style rules):**
+- **Project conventions (README):**
   - code in `src/jamloc/`, tests in `tests/`, runs unchanged on CPU and CUDA and on Windows, Linux
     and macOS;
   - pathlib, utf-8;
