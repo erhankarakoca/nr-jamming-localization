@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Localizing jamming in the 5G uplink · NR Jamming Localization</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script type="module" src="assets/js/nav.js"></script>
+  <script type="module" src="assets/js/grid.js"></script>
+  <script type="module" src="assets/js/results.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="wordmark" href="index.html">NR Jamming Localization</a>
+      <nav aria-label="Main navigation">
+        <a href="index.html" aria-current="page">Overview</a>
+        <a href="walkthrough.html">Walkthrough</a>
+        <a href="explore.html">Explore</a>
+        <a href="constellations.html">Constellations</a>
+        <a href="animations.html">Animations</a>
+        <a href="results.html">Results</a>
+      </nav>
+    </div>
+  </header>
+  <main class="shell" id="main" tabindex="-1">
+<section class="hero">
+  <div>
+    <p class="eyebrow">5G NR uplink research</p>
+    <h1>Localizing jamming in the 5G uplink</h1>
+    <p class="lede">This project uses measurements from the uplink receiver to locate
+      interference in a slot. The resulting map lets the receiver account for interference
+      where it occurs and gives the decoder a better estimate of which bits to trust.</p>
+    <a class="button primary" href="walkthrough.html">Follow one slot <span aria-hidden="true">→</span></a>
+  </div>
+  <figure class="panel hero-figure">
+    <div id="overview-grid" aria-busy="true"></div>
+    <figcaption id="overview-caption">Loading the pilot-jamming slot…</figcaption>
+  </figure>
+</section>
+<section aria-labelledby="receiver-heading">
+  <h2 id="receiver-heading">From a received slot to a decoded block</h2>
+  <p>After equalizing the buffered slot, the receiver measures received power
+    (<var>P</var>), the pilot residual (<var>R</var>), and error vector magnitude
+    (<var>E</var>). A U-Net uses these features to flag physical resource blocks (PRBs)
+    by OFDM symbol. The map-aware receiver reprocesses the same slot and adjusts the
+    bit reliabilities used for decoding.</p>
+  <ol class="pipeline" aria-label="Receiver processing order">
+    <li>Buffered receiver</li><li>Power · Residual · EVM</li>
+    <li>U-Net map</li><li>Map-aware decoding</li>
+  </ol>
+</section>
+<section aria-labelledby="findings-heading">
+  <h2 id="findings-heading">Key results</h2>
+  <div id="home-results" class="findings" aria-live="polite">Loading the paper results…</div>
+</section>
+<section aria-labelledby="pages-heading">
+  <h2 id="pages-heading">Explore the experiment</h2>
+  <div class="cards">
+    <a href="walkthrough.html"><strong>One slot, step by step</strong><span>Follow the buffered receiver from the input grid to the CRC.</span></a>
+    <a href="explore.html"><strong>Explore a slot</strong><span>Inspect individual cells, detector scores, and equalized symbols.</span></a>
+    <a href="constellations.html"><strong>Constellations</strong><span>Compare standard and protected receivers on the same symbols.</span></a>
+    <a href="animations.html"><strong>Animations</strong><span>Follow jammer support across symbols and vary pilot interference power.</span></a>
+    <a href="results.html"><strong>Results</strong><span>Inspect aggregate results and download the underlying data.</span></a>
+  </div>
+</section>
+  </main>
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <div><a href="https://github.com/erhankarakoca/nr-jamming-localization">Code repository</a><span>Paper in preparation</span></div>
+      <details>
+        <summary>How to cite this repository</summary>
+        <pre><code>@misc{karakoca_nr_jamming_localization,
+  author = {Erhan Karakoca},
+  title = {NR Jamming Localization},
+  howpublished = {Software repository},
+  url = {https://github.com/erhankarakoca/nr-jamming-localization}
+}</code></pre>
+      </details>
+    </div>
+  </footer>
+</body>
+</html>

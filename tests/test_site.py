@@ -214,3 +214,123 @@ def test_fig3_reports_original_benign_fade(tiny_models):
     assert selection["block_min_relative_db"] >= -3
     assert case["benign"]["pilots"]["ls"][:24] == case["pilots"]["ls"][:24]
     assert case["benign"]["r_b"] != case["prb"]["r_b"]
+
+
+def test_build_showcase(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+
+    from jamloc.site.__main__ import main
+    from jamloc.site.build import PLOTLY_URL, check_build
+
+    results = tmp_path / "results"
+    papers = tmp_path / "paper-results"
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(results))
+    data = results / "site" / "data"
+    data.mkdir(parents=True)
+    (data / "pilot.json").write_text('{"schema_version":2}', encoding="utf-8")
+    manifest = data / "manifest.json"
+    manifest.write_text(
+        '{"schema_version":2,"cases":[{"name":"pilot","file":"pilot.json"}]}', encoding="utf-8"
+    )
+
+    inputs = {
+        "eval/test_pd_vs_jsr.csv": (
+            "detector,attack,channel,jsr_db,cells,num_cells,pd_mean,pd_std,n_seeds\n"
+            "fused,pilot,both,-15,scheduled,18,0.5,0.1,3\n"
+            "fused,pilot,both,-15,all,20,0.6,0.1,3\n"
+            "fused,pilot,C,-15,scheduled,8,0.4,0.1,3\n"
+        ),
+        "margin/margin_vs_snr_ci.csv": (
+            "snr_db,channel,detector,slot_fa_target,margin_db,boot_draws,margin_lo_db,"
+            "margin_hi_db,point_any_attack_censored\n"
+            "5,C,fused,0.001,-7.9,1000,-inf,-5.7,True\n"
+        ),
+        "intervals/test_matched_by_attack_f1_ci.csv": (
+            "detector,attack,seed,n_seeds,f1,f1_lo,f1_hi,fa_scored,fa_scored_lo,fa_scored_hi,"
+            "jsr_db,pd,pd_lo,pd_hi\n"
+            "fused,pilot,mean,3,0.77,0.75,0.79,0.01,0.009,0.011,-15,0.65,0.62,0.67\n"
+        ),
+        "intervals/test_matched_by_attack_paired.csv": (
+            "first,second,metric,attack,jsr_db,seed,n_seeds,delta,delta_lo,delta_hi\n"
+            "fused,no_residual,f1,all,,mean,3,0.005,0.004,0.007\n"
+        ),
+    }
+    for suffix, jammer in (("", "nominal"), ("_pulsed", "pulsed"), ("_hopping", "hopping")):
+        base = f"recovery/recovery_C{suffix}"
+        # The real results tree also stores this dataset under its replay name.
+        source = f"{base}_replay.csv" if jammer == "hopping" else f"{base}.csv"
+        inputs[source] = (
+            "receiver,jammer,noise_estimate,seed,attack,jsr_db,snr_db,ber,bler,block_errors,blocks\n"
+            f"standard,{jammer},true,0,data,9,15,0,0.8,8,10\n"
+            f"standard,{jammer},true,1,data,9,15,0,0.1,1,20\n"
+            f"standard,{jammer},true,1,data,6,15,0,0,0,10\n"
+        )
+        inputs[f"{base}_replay_paired.csv"] = (
+            "first,second,attack,jsr_db,slots,only_first,only_second,"
+            "bler_first,bler_second,delta,delta_lo,delta_hi\n"
+            "standard,p_r_e_soft,data,9,10,8,1,0.8,0.1,0.7,0.5,0.8\n"
+        )
+    for name, contents in inputs.items():
+        path = papers / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8", newline="") as f:
+            f.write(contents)
+
+    main(["build", "--results-from", str(papers)])
+    build = results / "site" / "build"
+    assert {p.name for p in build.glob("*.html")} == {
+        "index.html",
+        "walkthrough.html",
+        "explore.html",
+        "constellations.html",
+        "animations.html",
+        "results.html",
+    }
+    assert (build / ".nojekyll").is_file()
+    content = json.loads((build / "data" / "results.json").read_text(encoding="utf-8"))
+    pd = content["pd"]["rows"]
+    assert len(pd) == 1 and pd[0]["pd_mean"] == 0.5 and pd[0]["num_cells"] == 18
+    (margin,) = content["margin"]["rows"]
+    assert margin["margin_lo_db"] is None and margin["point_any_attack_censored"] is True
+    recovery = content["recovery"]
+    assert {r["jammer"] for r in recovery["rows"]} == {"nominal", "pulsed", "hopping"}
+    assert all(r["bler"] == 9 / 30 and r["blocks"] == 30 for r in recovery["rows"])
+    assert recovery["paired"][0]["slots"] == 10
+    assert content["matched"]["rows"][0]["f1"] == 0.77
+    assert content["matched"]["paired"][0]["jsr_db"] is None
+    for section in content.values():
+        assert section["population"]
+        for download in section["downloads"]:
+            assert (build / download).is_file()
+    for name in inputs:
+        assert (build / "downloads" / Path(name).name).read_bytes() == (papers / name).read_bytes()
+
+    check_build(build)
+    (papers / "eval" / "test_pd_vs_jsr.csv").unlink()
+    with pytest.raises(SystemExit, match="2"):
+        main(["build", "--results-from", str(papers)])
+    assert json.loads((build / "data" / "results.json").read_text(encoding="utf-8")) == content
+
+    page = build / "extra.html"
+    for markup, error in (
+        ('<a href="absent.csv">Missing</a>', "absent.csv"),
+        ('<link rel="stylesheet" href="absent.css">', "absent.css"),
+        ('<script src="absent.js"></script>', "absent.js"),
+        ('<script src=""></script>', "file path"),
+        ('<script src="//example.com/script.js"></script>', "pinned"),
+        (f'<script src="{PLOTLY_URL}?v=2"></script>', "pinned"),
+        (f'<script src="{PLOTLY_URL}"></script>', "results.html"),
+    ):
+        page.write_text(markup, encoding="utf-8")
+        with pytest.raises(ValueError, match=error):
+            check_build(build)
+    page.unlink()
+    module = build / "extra.js"
+    module.write_text('import "./missing.js";', encoding="utf-8")
+    with pytest.raises(ValueError, match="missing.js"):
+        check_build(build)
+    module.unlink()
+    (build / "data" / "pilot.json").unlink()
+    with pytest.raises(ValueError, match="pilot.json"):
+        check_build(build)
