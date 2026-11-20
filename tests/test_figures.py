@@ -1,13 +1,15 @@
+import csv
 import json
 import xml.etree.ElementTree as ET
 
+import numpy as np
 import pytest
 from matplotlib.figure import Figure
 
 from jamloc.experiments import figures
 from jamloc.paths import REPO_ROOT
 
-MODEL_FREE = ["attack_patterns", "residual_explained", "constellations"]
+MODEL_FREE = ["attack_patterns", "timing", "residual_explained", "constellations"]
 
 
 def test_drawio_sources_are_xml():
@@ -50,6 +52,27 @@ def test_main_writes_files_and_captions(tmp_path, monkeypatch):
     assert "attack_patterns" in captions
 
 
+def test_residual_panels_pool_the_same_pilots():
+    from jamloc.features import delay_subspace, dmrs_ls
+
+    fig, _ = figures.residual_explained()
+    pilots, prbs = fig.axes
+    seed = figures._example_seed("C")
+    for attack in ("none", "pilot"):
+        batch = figures._example_batch(attack, 0.0, 20.0, "C", seed)
+        ls, sc, power = dmrs_ls(batch.y_alloc, batch.tx)
+        basis = delay_subspace(sc, figures.CFG.scs, figures.CFG.tau_max).cpu().numpy()
+        projection = basis @ basis.conj().T
+        residual = ls[0].cpu().numpy() - projection @ ls[0].cpu().numpy()
+        energy = abs(residual) ** 2 / (batch.no.item() / power)
+        kept = 1 - np.diag(projection).real
+        pooled = energy.reshape(-1, 6).sum(1) / kept.reshape(-1, 6).sum(1)
+        label = "Benign" if attack == "none" else "Pilot jammed"
+        for ax, expected in ((pilots, energy), (prbs, pooled)):
+            series = next(line for line in ax.lines if line.get_label() == label)
+            np.testing.assert_allclose(series.get_ydata(), 10 * np.log10(expected), atol=0.002)
+
+
 def _tiny_project(tmp_path, monkeypatch):
     from jamloc.dataset import generate
     from jamloc.model import VARIANTS
@@ -63,6 +86,24 @@ def _tiny_project(tmp_path, monkeypatch):
     for variant in VARIANTS:
         train(variant, epochs=2, batch_size=32)
 
+    # A miniature interval export, with other seeds, attacks and JSRs to distinguish.
+    out = tmp_path / "results" / "intervals"
+    out.mkdir()
+    with (out / "test_pd_ci.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(("detector", "attack", "seed", "n_seeds", "jsr_db", "pd", "pd_lo", "pd_hi"))
+        for i, detector in enumerate(
+            ("fused", "no_residual", "power", "evm", "block_test", "evm_threshold", "residual_cfar")
+        ):
+            pd = (i + 1) / 10
+            writer.writerow((detector, "pilot", "mean", 3, -15, pd, pd - 0.03, pd + 0.05))
+            for attack, seed, db in (
+                ("pilot", "0", -15),
+                ("data", "mean", -18),
+                ("pilot", "mean", -9),
+            ):
+                writer.writerow((detector, attack, seed, 3, db, 0.99, 0.98, 1.0))
+
 
 def test_data_figures_and_gallery(tmp_path, monkeypatch):
     _tiny_project(tmp_path, monkeypatch)
@@ -74,6 +115,16 @@ def test_data_figures_and_gallery(tmp_path, monkeypatch):
     ):
         fig, caption = figures.FIGURES[name]()
         assert fig.axes and caption.count(". ") >= 1 and len(caption) > 120, name
+        if name == "detector_outputs":
+            truth, evm, unet, pd = fig.axes
+            for ax in (truth, evm, unet):
+                assert ax.images[0].get_array().shape == (24, 14)
+            expected = np.arange(1, 8) / 10
+            np.testing.assert_allclose(pd.lines[0].get_xdata(), expected)
+            segments = pd.collections[0].get_segments()
+            np.testing.assert_allclose(
+                [s[:, 0] for s in segments], np.c_[expected - 0.03, expected + 0.05]
+            )
 
     figures.main([])
     out = tmp_path / "results" / "figures"
