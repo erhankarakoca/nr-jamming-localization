@@ -1,14 +1,15 @@
 """Export one buffered uplink slot per case. JSON schema, version 2.
 
-manifest.json has schema_version, git_commit, created_at (UTC ISO 8601), and cases in
-display order. Each entry has name, title, file (relative to the manifest) and size_bytes.
+manifest.json has schema_version, git_commit, git_dirty, created_at (UTC ISO 8601), and
+cases in display order. git_dirty reports changes to tracked files or is null when Git
+status is unavailable. Each entry has name, title, file (relative to the manifest) and size_bytes.
 Each invocation lists the cases requested in that invocation.
 
 Each case file has schema_version and the following fields. All indices start at zero.
 Numbers have about four significant digits. Undefined values are JSON null.
 
 * metadata: the Case fields (alloc and jam are [carrier start PRB, count], jam gives the
-  nominal block before hopping or pulsing), config (SimConfig), device, git_commit,
+  nominal block before hopping or pulsing), config (SimConfig), device, git_commit, git_dirty,
   noise_variance and true_noise_variance for the slot. thresholds maps each detector to
   its validation split, model training data, target false-alarm rate and threshold value.
   batch_crc maps each receiver name to {"slots": n, "failures": k} for the full case
@@ -254,13 +255,25 @@ def _pilot_frame(batch, cfg, slot, jsr_db):
     )
 
 
-def _git_commit():
+def _git_output(*args):
     try:
         return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True, stderr=subprocess.DEVNULL
+            ["git", *args], cwd=REPO_ROOT, text=True, encoding="utf-8", stderr=subprocess.DEVNULL
         ).strip()
     except (OSError, subprocess.CalledProcessError):
-        return "unknown"
+        return None
+
+
+def _git_revision():
+    commit = _git_output("rev-parse", "HEAD") or "unknown"
+    status = _git_output(
+        "--no-optional-locks",
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+        "--ignore-submodules=untracked",
+    )
+    return commit, None if status is None else bool(status)
 
 
 def _share(table, name, values):
@@ -272,8 +285,10 @@ def _share(table, name, values):
     return name
 
 
-def payload(run: CaseRun, *, git_commit: str | None = None) -> dict:
+def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | None = None) -> dict:
     """Build the versioned JSON document for the selected slot."""
+    if git_commit is None:
+        git_commit, git_dirty = _git_revision()
     case, batch = run.case, run.batch
     cfg, i = case.config(), run.selection["slot"]
     features = dict(zip(FEATURE_NAMES, extract(batch, cfg)[i], strict=True))
@@ -311,7 +326,8 @@ def payload(run: CaseRun, *, git_commit: str | None = None) -> dict:
                 **asdict(case),
                 "config": asdict(cfg),
                 "device": str(batch.y.device),
-                "git_commit": git_commit or _git_commit(),
+                "git_commit": git_commit,
+                "git_dirty": git_dirty,
                 "selection": run.selection,
                 "batch_crc": batch_crc,
                 "thresholds": run.thresholds,
@@ -371,12 +387,14 @@ def export(cases):
     """Calibrate each detector once per export and write the manifest after its cases."""
     directory = results_dir() / "site" / "data"
     directory.mkdir(parents=True, exist_ok=True)
-    commit = _git_commit()
+    commit, dirty = _git_revision()
     load_detector = cache(_load_detector)
     entries = []
     for case in cases:
         path = directory / f"{case.name}.json"
-        document = payload(simulate_case(case, load_detector=load_detector), git_commit=commit)
+        document = payload(
+            simulate_case(case, load_detector=load_detector), git_commit=commit, git_dirty=dirty
+        )
         _write(path, document)
         size = path.stat().st_size
         entries.append(
@@ -391,6 +409,7 @@ def export(cases):
         {
             "schema_version": SCHEMA_VERSION,
             "git_commit": commit,
+            "git_dirty": dirty,
             "created_at": datetime.now(UTC).isoformat(),
             "cases": entries,
         },

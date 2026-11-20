@@ -20,20 +20,24 @@ POPULATIONS = {
     "pd": (
         "Detection probability is the fraction of jammed cells inside the scheduled allocation "
         "that are flagged on the test split, pooling TDL-A and TDL-C. Thresholds target 1% "
-        "per-cell false alarms on validation. Lines are means over training seeds and the bands "
-        "span one standard deviation on either side."
+        "per-cell false alarms on validation. Lines are means over training seeds 0, 1, and 2. "
+        "The plotted bands span one standard deviation on either side, clipped to [0, 1]."
     ),
     "margin": (
         "The fused U-Net's smallest margin over pilot, data, and partial-band jamming on the "
         "scheduled PRBs is the JSR at 10% standard-receiver BLER minus the JSR at 90% slot "
-        "detection. The thresholds target false alarms per benign slot. The 95% intervals "
-        "use a stratified batch bootstrap with binomial resampling of block errors. Open markers "
-        "give upper bounds where slot detection did not reach 90% on the tested JSR grid."
+        "detection. Slot detection averages over training seeds 0, 1, and 2. Its JSR grid runs "
+        "from −30 to 0 dB at 15 dB SNR and from −36 to 0 dB at 5, 8, and 11 dB SNR, in 3 dB "
+        "steps. The 1% and 0.1% per-slot false-alarm thresholds are calibrated on every other "
+        "benign batch in each margin split, starting with the first. The remaining benign "
+        "batches measure the false-alarm rate. The 95% intervals use a stratified batch bootstrap "
+        "with binomial resampling of block errors. Open markers give upper bounds where slot "
+        "detection did not reach 90% on the tested JSR grid."
     ),
     "recovery": (
-        "Block error rate (BLER) pools block errors and decoded blocks across detector seeds "
-        "at +9 dB JSR on TDL-C at 15 dB SNR with known noise power. The allocation spans "
-        "12 PRBs and the jammer occupies 4 PRBs when active. Receivers share the same draws "
+        "Block error rate (BLER) pools block errors and decoded blocks across detector training "
+        "seeds 0, 1, and 2 at +9 dB JSR on TDL-C at 15 dB SNR with known noise power. The "
+        "allocation spans 12 PRBs and the jammer occupies 4 PRBs when active. Receivers share the same draws "
         "but can stop at different block counts. The paired 95% intervals use only slots "
         "decoded by both receivers, so their BLER differences can differ from the pooled table."
     ),
@@ -41,7 +45,7 @@ POPULATIONS = {
         "On the nominal test split, thresholds are fitted by attack and detector to flag 1% "
         "of scored clean cells, rounded down to a whole cell. F1 uses all cell decisions. "
         "Detection probability uses jammed scheduled cells at the weakest tested JSR. "
-        "The values average over training seeds. The 95% batch-bootstrap intervals hold "
+        "The values average over training seeds 0, 1, and 2. The 95% batch-bootstrap intervals hold "
         "the matched decisions fixed."
     ),
 }
@@ -141,18 +145,28 @@ def _matched_paired(rows):
     ]
 
 
+def _recovery_files(directory: Path, stem: str) -> tuple[Path, Path]:
+    for name in (f"{stem}_replay", stem):
+        points = directory / f"{name}.csv"
+        intervals = directory / f"{name}_paired.csv"
+        if points.is_file() and intervals.is_file():
+            return points, intervals
+    raise FileNotFoundError(
+        f"Missing a complete recovery pair for {stem} in {directory}. "
+        f"Expected {stem}_replay.csv with {stem}_replay_paired.csv "
+        f"or {stem}.csv with {stem}_paired.csv."
+    )
+
+
 def write_results(source: Path, build: Path) -> None:
     """Write data/results.json and the original CSVs, including paper replay filenames."""
     downloads = build / "downloads"
     downloads.mkdir(parents=True, exist_ok=True)
     paths = {kind: [] for kind in POPULATIONS}
 
-    def copy(kind, path, *, alternate=None):
-        if not path.is_file() and alternate is not None and alternate.is_file():
-            path = alternate
+    def copy(kind, path):
         if not path.is_file():
-            alternatives = f" (also tried {alternate})" if alternate else ""
-            raise FileNotFoundError(f"Missing paper result {path}{alternatives}")
+            raise FileNotFoundError(f"Missing paper result {path}")
         target = downloads / path.name
         shutil.copyfile(path, target)
         paths[kind].append(target.relative_to(build).as_posix())
@@ -165,16 +179,11 @@ def write_results(source: Path, build: Path) -> None:
     recovery, paired = [], []
     recovery_dir = source / "recovery"
     for jammer, stem in RECOVERY_RUNS.items():
-        rows = copy(
-            "recovery",
-            recovery_dir / f"{stem}.csv",
-            alternate=recovery_dir / f"{stem}_replay.csv",
-        )
-        intervals = copy("recovery", recovery_dir / f"{stem}_replay_paired.csv")
-        recovery.extend(_recovery(rows))
-        paired.extend(_recovery_paired(_read(intervals), jammer))
+        points, intervals = _recovery_files(recovery_dir, stem)
+        recovery.extend(_recovery(copy("recovery", points)))
+        paired.extend(_recovery_paired(_read(copy("recovery", intervals)), jammer))
     for path in sorted(recovery_dir.glob("recovery_C*_replay_paired.csv")):
-        if f"downloads/{path.name}" not in paths["recovery"]:
+        if path.stem.removesuffix("_replay_paired") not in RECOVERY_RUNS.values():
             copy("recovery", path)
 
     payload = {

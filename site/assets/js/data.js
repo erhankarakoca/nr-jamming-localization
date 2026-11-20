@@ -85,11 +85,17 @@ export function signedDb(value) {
   return value == null ? "No jamming" : `${value > 0 ? "+" : ""}${String(value).replace("-", "−")} dB`;
 }
 
+export function calibrationText(slot) {
+  const m = slot.metadata;
+  const calibration = m.thresholds.fused;
+  return `Simulation seed ${m.seed}, detector seed ${m.detector_seed} (${calibration.training_data}). The nominal U-Net cutoff is ${calibration.value}, calibrated on ${calibration.split} at a ${percent(calibration.false_alarm_rate)} per-cell false-alarm target`;
+}
+
 export function conditions(slot) {
   const m = slot.metadata;
   const jsr = m.jsr_db == null ? "no jamming" : `${signedDb(m.jsr_db)} JSR`;
   const noise = m.noise_estimate === "comb" ? "estimated noise power" : "known noise power";
-  return `TDL-${m.channel} · ${m.snr_db} dB SNR · ${jsr} · ${noise}`;
+  return `TDL-${m.channel} · ${m.snr_db} dB SNR · ${jsr} · ${noise}. ${calibrationText(slot)}`;
 }
 
 export function selectionText(slot) {
