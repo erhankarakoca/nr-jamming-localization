@@ -7,6 +7,7 @@ Meant for a Colab GPU; runs the same way on a laptop CPU (slower training):
 1. generate the train / val / test / sched datasets,
 2. train every U-Net variant once per seed (with per-epoch loss histories),
 3. evaluate on the test split, the scheduling-aware split, and two SNR ranges of the test split,
+   with bootstrap intervals for the test split,
 4. run the map-aware recovery experiment for TDL-A and TDL-C (seed-0 detectors),
 5. draw the explanatory figures and the gallery page,
 6. pack ``results/{eval,models,recovery,figures}`` into ``results/full_run.zip``.
@@ -21,7 +22,7 @@ import zipfile
 
 from jamloc import evaluate
 from jamloc.dataset import CORE_SPLITS, generate
-from jamloc.experiments import figures, recovery
+from jamloc.experiments import figures, intervals, recovery
 from jamloc.model import VARIANTS
 from jamloc.paths import data_dir, results_dir
 from jamloc.train import train
@@ -61,6 +62,8 @@ def main(argv=None):
     # 3. Evaluation
     evaluate.main(["--split", "test"])
     evaluate.main(["--split", "sched"])
+    # Bootstrap intervals of the test split (the detector-output figure plots them)
+    intervals.main(["--split", "test", "--boot", "20" if args.small else "1000"])
     if not args.small:
         for lo, hi in SNR_RANGES:
             evaluate.main(["--split", "test", "--snr-db", str(lo), str(hi)])
