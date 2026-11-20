@@ -11,6 +11,12 @@ simulated in [Sionna](https://nvlabs.github.io/sionna/) (PyTorch backend).
 
 The full proposal is in [`docs/proposal.pdf`](docs/proposal.pdf).
 
+## Showcase site
+
+The showcase follows a simulated uplink slot from the received grid through decoding and includes
+the paper's result tables. Its [GitHub Pages address](https://erhankarakoca.github.io/nr-jamming-localization/)
+will be available after publication.
+
 ## Setting up on a new computer
 
 You need **git** with access to this repo (an SSH key on your GitHub account, or `gh auth login`)
