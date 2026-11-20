@@ -1085,3 +1085,42 @@ intervals in brackets where shown.
   calibrated on data that contains this effect.
 - On Colab's CUDA 13 build, PyTorch's batched complex double-precision solve (MAGMA) crashes; the
   LMMSE interpolation therefore solves its small systems on the CPU.
+
+## 19. Showcase site and new paper figures
+
+Design `docs/superpowers/specs/2026-11-20-showcase-site-design.md`, plan
+`docs/superpowers/plans/2026-11-20-showcase-site.md`.
+
+**Paper figures.** All three come from `experiments.figures`:
+
+- **Timing (new, system model):** detection and mitigation both work on the buffered slot.
+- **Fig. 3 (new):** the per-pilot residual after projection, and `R_b` with its position-dependent
+  threshold. The realization is the CPU one, so the leakage shows on clean PRB 9.
+- **Fig. 6 (new):** one pilot-jammed slot as three aligned maps, plus Pd at -15 dB per detector
+  from `results/intervals/test_pd_ci.csv`.
+
+**Example slots** (`python -m jamloc.site export`, CPU, simulation seed 7, detector seed 0):
+
+- 12 cases, schema version 2. Each case holds the feature maps, every detector's decisions, the
+  pilot residuals, and per receiver (on the same received grid) the equalized symbols, |LLR| and
+  CRC.
+- Each case also records the failure count of every receiver over its 64-slot batch
+  (`batch_crc`).
+- Examples are chosen by a stated rule: the median U-Net hit rate by default, outcome-conditioned
+  for `walkthrough_flip` (2/64) and `pilot_whole_comb` (true map fails in 42/64).
+- The export ran from commit 7725069 on a clean tree.
+
+**Site** (`python -m jamloc.site build | serve | deploy`, static, served from the `gh-pages` branch):
+
+- Address: https://erhankarakoca.github.io/nr-jamming-localization/
+- Pages: walkthrough, slot explorer, constellations, animations (hopping and pulsed jammers with
+  both U-Nets, the residual against JSR), and results (Pd, margin, recovery with paired intervals,
+  matched false alarms, where it fails).
+- An independent check found the published numbers equal to the CSVs, and to the paper at its
+  precision:
+  - 405 Pd rows;
+  - 16 margin rows;
+  - 132 matched rows;
+  - 77 recovery cells;
+  - 385 paired rows;
+  - 11 downloads, byte for byte.
