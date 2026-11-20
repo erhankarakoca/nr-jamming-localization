@@ -52,3 +52,30 @@ def wilson_interval(errors, trials, z: float = 1.96):
     center = (p + z**2 / (2 * n)) / denom
     half = z * np.sqrt(p * (1 - p) / n + z**2 / (4 * n**2)) / denom
     return np.clip(center - half, 0, 1), np.clip(center + half, 0, 1)
+
+
+def paired_difference_interval(both, only_first, only_second, neither, z: float = 1.96):
+    """Difference of two error rates measured on the same trials, with its 95% interval.
+
+    Two receivers decode the same slots. ``both`` slots fail with both, ``only_first`` only with
+    the first, ``only_second`` only with the second, ``neither`` with none. The difference of the
+    error rates is ``(only_first - only_second) / n``; only the discordant slots carry it. The
+    interval is Newcombe's method 10 (Statistics in Medicine 17, 1998): the Wilson intervals of the
+    two rates, combined with the correlation of the paired outcomes. It stays inside [-1, 1] and
+    still gives a useful interval when one or both receivers make no error at all.
+
+    Returns ``(difference, low, high)``.
+    """
+    a, b, c, d = (float(v) for v in (both, only_first, only_second, neither))
+    n = a + b + c + d
+    p1, p2 = (a + b) / n, (a + c) / n
+    l1, u1 = (float(v) for v in wilson_interval(a + b, n, z))
+    l2, u2 = (float(v) for v in wilson_interval(a + c, n, z))
+    margins = (a + b) * (c + d) * (a + c) * (b + d)
+    phi = (a * d - b * c) / np.sqrt(margins) if margins > 0 else 0.0
+    delta = p1 - p2
+    low = delta - np.sqrt(max((p1 - l1) ** 2 - 2 * phi * (p1 - l1) * (u2 - p2) + (u2 - p2) ** 2, 0))
+    high = delta + np.sqrt(
+        max((p2 - l2) ** 2 - 2 * phi * (p2 - l2) * (u1 - p1) + (u1 - p1) ** 2, 0)
+    )
+    return delta, float(low), float(high)

@@ -144,6 +144,43 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
     assert len(pooled) == len(pulsed) // 2
     assert (out / "recovery_A_pulsed_sources.png").is_file()
 
+    # Per-slot outcomes: one array per receiver and point, consistent with the counts; paired
+    # differences for every pair of receivers decoding the same point
+    import numpy as np
+
+    slots = dict(np.load(out / "recovery_A_pulsed_seed1_slots.npz"))
+    for r in (r for r in pulsed if r["seed"] == "1"):
+        failed = slots[recovery.slot_key(r["attack"], float(r["jsr_db"]), r["receiver"])]
+        assert len(failed) == int(r["blocks"]) and failed.sum() == int(r["block_errors"])
+    with open(out / "recovery_A_pulsed_paired.csv", encoding="utf-8", newline="") as f:
+        paired = list(csv.DictReader(f))
+    n_rx = len({r["receiver"] for r in pulsed})
+    assert len(paired) == 2 * n_rx * (n_rx - 1) // 2  # two points (data, partial at 3 dB)
+    for r in paired:
+        assert float(r["delta_lo"]) <= float(r["delta"]) <= float(r["delta_hi"])
+        assert int(r["slots"]) == 2 * 8  # both seeds, one batch of 8 slots each
+
+    # A replay of the nominal run decodes only the quoted points, on the same slots
+    earlier = tmp_path / "earlier"
+    earlier.mkdir()
+    (out / "recovery_A_seed0.csv").rename(earlier / "recovery_A_seed0.csv")
+    recovery.main([*args, "--replay", str(earlier)])
+    replayed = recovery._read_rows(out / "recovery_A_replay_seed0.csv")
+    assert {(r["attack"], r["jsr_db"]) for r in replayed} == {
+        ("none", r["jsr_db"]) for r in replayed if r["attack"] == "none"
+    } | {("partial", 3.0)}
+    assert not recovery.check_replay(replayed, earlier / "recovery_A_seed0.csv")
+
+    # The noise power estimated per slot: only the detectors trained or calibrated on it
+    generate("train_nest", num_slots=64, batch_size=32)
+    generate("val_nest", num_slots=32, batch_size=32)
+    train("fused", epochs=1, batch_size=32, data="nest")
+    recovery.main([*args[:-2], "3", "--noise-estimate", "comb"])
+    nest = recovery._read_rows(out / "recovery_A_nest.csv")
+    assert {r["noise_estimate"] for r in nest} == {"comb"}
+    assert {"p_r_e_soft", "block_soft", "true_soft"} <= {r["receiver"] for r in nest}
+    assert not {"p_e_soft", "p_r_e_atk_soft"} & {r["receiver"] for r in nest}
+
 
 def test_paper_run_plans_every_split_and_model(tmp_path, monkeypatch):
     from jamloc.experiments import paper_run

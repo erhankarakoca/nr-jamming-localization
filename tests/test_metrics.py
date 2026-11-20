@@ -56,3 +56,21 @@ def test_wilson_interval():
     assert lo[0] == 0 and abs(hi[0] - 0.0370) < 1e-3  # no error in 100: below ~3.7%
     assert lo[1] < 0.5 < hi[1] and abs((0.5 - lo[1]) - (hi[1] - 0.5)) < 1e-9
     assert abs(hi[2] - 1) < 1e-12 and 0.95 < lo[2] < 1
+
+
+def test_paired_difference_interval():
+    from jamloc.metrics import paired_difference_interval
+
+    # No discordant slot: no difference, but the interval still allows a small one either way
+    delta, lo, hi = paired_difference_interval(0, 0, 0, 4800)
+    assert delta == 0 and lo < 0 < hi < 0.001
+    # Swapping the receivers mirrors the interval
+    d1, lo1, hi1 = paired_difference_interval(10, 40, 5, 945)
+    d2, lo2, hi2 = paired_difference_interval(10, 5, 40, 945)
+    assert np.isclose(d1, -d2) and np.isclose(lo1, -hi2) and np.isclose(hi1, -lo2)
+    assert lo1 < d1 < hi1 and lo1 > 0  # 40 vs 5 discordant slots: clearly different
+    # Same error rates (10% each): shared failures leave a narrower interval than independent ones
+    shared = paired_difference_interval(95, 5, 5, 895)
+    independent = paired_difference_interval(10, 90, 90, 810)
+    assert shared[0] == independent[0] == 0
+    assert shared[2] - shared[1] < 0.5 * (independent[2] - independent[1])
