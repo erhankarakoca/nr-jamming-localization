@@ -1,6 +1,6 @@
 # Showcase site and new paper figures: design
 
-20 November 2026. Status: draft for approval.
+20 November 2026. Status: approved (merged in #11).
 
 ## Intent
 
@@ -230,7 +230,7 @@ six of them; one is the author's.
 4. **Detectors in the estimated-noise case.** *Call:* only the detectors trained or calibrated on
    the estimate (the fused U-Net of `train_nest`, and the block test and power test on `val_nest`).
    The others show "not available in this setting".
-5. **Walkthrough outcome (the author's decision, open).** Should the step-by-step slot be the
+5. **Walkthrough outcome (settled: the designer's suggestion, the author left it open).** Should the step-by-step slot be the
    representative slot (where both receivers may decode), or a slot where protection turns a
    failed CRC into a pass, shown with how often that happens in the batch? The designer's
    suggestion: the representative slot, plus a second, clearly labeled slot where protection made
