@@ -114,11 +114,13 @@ def test_detection_margin_small(tmp_path, monkeypatch):
     for channel in ("A", "C"):
         with open(bler_dir / f"ber_bler_{channel}.csv", "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["attack", "snr_db", "jsr_db", "bler"])
+            writer.writerow(["attack", "snr_db", "jsr_db", "bler", "block_errors", "blocks"])
             for attack in ("pilot", "data", "partial"):
                 for jsr in range(-20, 11, 5):
-                    writer.writerow([attack, 15.0, jsr, 1 / (1 + np.exp(-jsr))])
-                    writer.writerow([attack, 5.0, jsr, 0.5])  # another SNR: must be ignored
+                    blocks = 10**8
+                    errors = round(blocks / (1 + np.exp(-jsr)))
+                    writer.writerow([attack, 15.0, jsr, errors / blocks, errors, blocks])
+                    writer.writerow([attack, 5.0, jsr, 0.5, 1, 2])  # must be ignored
     detection_margin.main(["--seeds", "0"])
     out = tmp_path / "results" / "margin"
     assert (out / "margin.png").is_file()
@@ -127,11 +129,31 @@ def test_detection_margin_small(tmp_path, monkeypatch):
     assert {r["detector"] for r in rows} == set(detection_margin.DETECTORS)
     assert {float(r["slot_fa_target"]) for r in rows} == set(detection_margin.SLOT_FAS)
     with open(out / "margin_summary_per_seed.csv", encoding="utf-8", newline="") as f:
-        assert {r["seed"] for r in csv.DictReader(f)} == {"0"}
+        per_seed = list(csv.DictReader(f))
+    assert {r["seed"] for r in per_seed} == {"0"}
     # linear interpolation between the grid points -5 and 0 dB of the logistic BLER curve
     lo, hi = 1 / (1 + np.exp(5)), 0.5
     expected = -5 + 5 * (0.1 - lo) / (hi - lo)
     assert all(np.isclose(float(r["jsr_bler10_db"]), expected) for r in rows)
+
+    legacy = {p: p.read_bytes() for p in out.glob("*.csv")}
+    detection_margin.main(["--seeds", "0", "--boot", "30"])
+    assert all(p.read_bytes() == original for p, original in legacy.items())
+    with open(out / "margin_summary_ci.csv", encoding="utf-8", newline="") as f:
+        ci = list(csv.DictReader(f))
+    assert len(ci) == len(rows) + len(per_seed)
+    for point, interval in zip(rows + per_seed, ci, strict=True):
+        assert point == {k: interval[k] for k in point}
+        assert interval["boot_draws"] == "30"
+    with open(out / "margin_paired_ci.csv", encoding="utf-8", newline="") as f:
+        paired = list(csv.DictReader(f))
+    assert len(paired) == 56
+    assert {r["comparison"] for r in paired} == {"detector", "slot_fa"}
+    assert {r["attack"] for r in paired} == {"minimum", *detection_margin.ATTACK_NAMES}
+    with open(out / "margin_vs_snr_ci.csv", encoding="utf-8", newline="") as f:
+        minima = list(csv.DictReader(f))
+    assert len(minima) == 12
+    assert all(float(r["margin_lo_db"]) <= float(r["margin_hi_db"]) for r in minima)
 
 
 def test_crossing():
@@ -140,6 +162,123 @@ def test_crossing():
     assert crossing([0, 1, 2], [0.0, 0.5, 1.0], 0.75) == 1.5
     assert crossing([0, 1], [0.95, 1.0], 0.9) == -np.inf
     assert np.isnan(crossing([0, 1], [0.1, 0.2], 0.9))
+
+
+def test_slot_bootstrap_matches_explicit_batch_resampling():
+    from jamloc.experiments.detection_margin import SLOT_FAS, SlotBootstrap
+    from jamloc.metrics import threshold_at_fa
+
+    # Two calibration batches of different sizes, one held-out benign slot, and both TDLs.
+    d = {
+        "batch": np.repeat([8, 9, 10, 20, 21, 23], [100, 1, 1, 2, 1, 1]),
+        "channel": np.repeat([0, 1], [105, 1]),
+        "attack": np.repeat([0, 1], [102, 4]),
+        "jsr_db": np.repeat([0.0, -3.0], [102, 4]),
+    }
+    boot = SlotBootstrap(d, np.arange(101), [-3.0], 30, np.random.default_rng(4))
+    base = np.r_[np.arange(100), 110, 1000, 99, 105, np.nan, 120]
+    for slot in (base, base[::-1]):
+        thresholds = boot.thresholds(slot)
+        assert np.unique(thresholds[1]).size > 1
+        curves = boot.curves(slot)
+        for i in range(31):
+            batches, weights = boot.calib
+            calib = np.concatenate([np.tile(b, n) for b, n in zip(batches, weights[i])])
+            for a, alpha in enumerate(SLOT_FAS):
+                threshold = threshold_at_fa(slot[calib], alpha)
+                assert thresholds[a, i] == threshold
+                for channel in ("A", "C"):
+                    batches, weights = boot.jammed[channel, "pilot", 0]
+                    jammed = np.concatenate([np.tile(b, n) for b, n in zip(batches, weights[i])])
+                    assert curves[channel, "pilot"][a, i, 0] == (slot[jammed] > threshold).mean()
+
+
+def test_margin_bootstrap_censoring_and_independent_differences():
+    from jamloc.experiments.detection_margin import _crossing_samples, _independent_rows, _interval
+
+    pd = np.array([[0, 0.8, 1], [1, 1, 1], [0, 0.1, 0.8], [np.nan, np.nan, np.nan]])
+    point, bounds = _crossing_samples([0, 1, 2], pd, 0.9)
+    np.testing.assert_array_equal(point, [1.5, -np.inf, np.nan, np.nan])
+    np.testing.assert_array_equal(
+        bounds, [[1.5, 1.5], [-np.inf, 0], [2, np.inf], [-np.inf, np.inf]]
+    )
+
+    # An exactly observed BLER crossing of 3 dB gives one lower bound and one upper bound.
+    margins = 3 - bounds[:, ::-1]
+    result = _interval(margins[:3])
+    assert result["censored_fraction"] == 1
+    assert result["margin_lo_db"] == -np.inf
+    assert result["margin_hi_db"] == np.inf
+    result = _interval(margins[[0, 2]])
+    assert result["margin_lo_db"] == -np.inf
+    assert result["margin_hi_db"] == 1
+    result = _interval(margins[:2])
+    assert result["margin_lo_db"] == 3
+    assert result["margin_hi_db"] == np.inf
+
+    key = ("A", "fused", 0.01)
+    hi = np.array([[6, 6], [7, 7], [4, 4]])
+    low = np.array([[3, 3], [5, 5], [-np.inf, 2]])
+    (delta,) = _independent_rows({8: {key: (6, hi)}, 5: {key: (3, low)}})
+    assert delta["delta_db"] == 3
+    assert delta["censored_fraction"] == 0.5
+    assert delta["delta_lo_db"] == 2
+    assert delta["delta_hi_db"] == np.inf
+
+
+def test_minimum_margin_switches_attacks_and_keeps_censoring():
+    from jamloc.experiments import detection_margin as dm
+
+    summary, margins = [], {}
+    for channel in dm.CHANNELS:
+        for detector in dm.DETECTORS:
+            for alpha in dm.SLOT_FAS:
+                for attack, point, bounds in (
+                    ("pilot", np.nan, [[-np.inf, 2], [4, 4], [3, np.inf], [0, np.inf]]),
+                    ("data", 1, [[1, 1], [3, 3], [2, 2], [2, 2]]),
+                    ("partial", 4, [[4, 4], [2, 2], [5, 5], [4, 4]]),
+                ):
+                    summary.append(
+                        {
+                            "snr_db": 15.0,
+                            "channel": channel,
+                            "detector": detector,
+                            "slot_fa_target": alpha,
+                            "attack": attack,
+                            "margin_db": point,
+                        }
+                    )
+                    margins[channel, attack, detector, alpha] = np.asarray(bounds)
+    minima, rows = dm._minimum_samples(summary, margins)
+    point, bounds = minima["A", "fused", 0.01]
+    assert point == 1
+    np.testing.assert_array_equal(bounds, [[-np.inf, 1], [2, 2], [2, 2], [0, 2]])
+    assert rows[0]["point_any_attack_censored"]
+    assert rows[0]["any_attack_censored_fraction"] == 2 / 3
+    assert rows[0]["censored_fraction"] == 1 / 3
+
+
+def test_margin_draw_zero_uses_recorded_pd_after_rescoring(tmp_path):
+    from jamloc.experiments import detection_margin as dm
+
+    path = tmp_path / "margin_per_seed.csv"
+    row = {
+        "detector": "fused",
+        "seed": 0,
+        "channel": "A",
+        "attack": "pilot",
+        "slot_fa_target": 0.01,
+        "jsr_db": -30,
+        "slots": 4,
+        "slot_pd": 0.5,
+    }
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+    pd = np.array([[[0.75], [1.0]]])
+    dm._use_saved_pd(path, [{**row, "slot_pd": 0.75}], {("fused", 0): {("A", "pilot"): pd}}, 15)
+    np.testing.assert_array_equal(pd, [[[0.5], [1.0]]])
 
 
 def test_calibration_small(tmp_path, monkeypatch):

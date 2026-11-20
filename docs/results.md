@@ -916,6 +916,158 @@ error in 4 800 slots):
   jamming +3 dB: U-Net soft 3.6%, true map 3.6%, unprotected 50%; partial +3 dB: 6.0%, 5.8%, 61%.
 - TDL-A is similar (soft U-Net map at most 0.13%; block map 4.8% under partial +9 dB).
 
+## 18. Open items of review v6
+
+### 18.1 Detectors at matched false-alarm rates
+
+Overall cell F1, averaged over seeds, on the nominal test and scheduling-aware splits. The
+matched thresholds are an oracle for detector comparison. They use the evaluated split to
+flag 1% of each detector's scored clean cells, rounded down to a whole cell. Split-wide
+matching pools clean cells across the split. By-attack matching fits each attack type
+separately. If a group has no scored clean cells, it uses the split-wide threshold. The
+bootstrap holds the fitted decisions fixed.
+
+| Detector | Test val | Test split-wide | Test by attack | Sched val | Sched split-wide | Sched by attack |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| U-Net P+R+E | 0.952 | 0.954 | 0.951 | 0.937 | 0.949 | 0.948 |
+| U-Net P+R+E+C | 0.952 | 0.955 | 0.952 | 0.947 | 0.955 | 0.953 |
+| U-Net P+E | 0.945 | 0.948 | 0.946 | 0.938 | 0.936 | 0.940 |
+| Block test | 0.868 | 0.865 | 0.883 | 0.837 | 0.731 | 0.870 |
+| Wide per-cell MLP | 0.707 | 0.675 | 0.855 | 0.629 | 0.351 | 0.890 |
+| EVM threshold | 0.314 | 0.306 | 0.623 | 0.412 | 0.185 | 0.185 |
+
+Paired differences with by-attack matching (95% batch-bootstrap intervals). Pilot Pd uses
+jammed scheduled cells at -15 dB JSR.
+
+| Difference | Metric | Test | Scheduling-aware |
+| --- | --- | --- | --- |
+| P+R+E minus wide MLP | Overall F1 | +0.096 [0.093, 0.098] | +0.058 [0.055, 0.061] |
+| P+R+E minus block test | Overall F1 | +0.068 [0.066, 0.070] | +0.078 [0.075, 0.081] |
+| P+R+E minus P+E | Pilot Pd | +0.234 [0.207, 0.259] | +0.376 [0.361, 0.394] |
+| P+R+E+C minus P+R+E | Pilot Pd | +0.096 [0.080, 0.113] | +0.109 [0.098, 0.119] |
+
+**Reading.**
+
+- The wider MLP's validation threshold flags 0.01% of clean cells in the test split's
+  data-jammed slots. Its F1 gap to the fused U-Net widens with split-wide matching and
+  narrows when each attack gets its own threshold. The fused U-Net leads every non-U-Net
+  detector in overall F1 at both matched settings on both splits. The paired intervals
+  for its leads over the block test, both MLPs and the EVM threshold exclude zero.
+- The residual increases weak-pilot Pd at both matched settings. The empty comb adds
+  another weak-pilot gain and lifts pooled F1 more on the scheduling-aware split than on
+  the nominal test. With by-attack matching on the nominal test, the standalone comb
+  also beats the standalone residual on pilot F1.
+
+### 18.2 Uncertainty of the detection margins
+
+Smallest margin over attacks, in dB, for the fused U-Net (95% intervals). Each of 1,000
+stratified batch-bootstrap draws refits the slot threshold and draws new block-error counts
+from binomial distributions fitted to the observed counts. The binomial approximation can
+understate uncertainty from shared allocations and the simulation's error-count stopping rule.
+
+| SNR | TDL-A, 1% slot FA | TDL-A, 0.1% slot FA | TDL-C, 1% slot FA | TDL-C, 0.1% slot FA |
+| --- | --- | --- | --- | --- |
+| 15 dB | 10.1 [9.6, 10.7] | 8.0 [4.8, 8.7] | 8.6 [7.3, 9.1] | 5.5 [1.3, 6.4] |
+| 11 dB | 8.7 [7.5, 9.8] | 7.4 [6.1, 8.0] | 7.7 [6.6, 8.3] | 5.9 [5.1, 6.6] |
+| 8 dB | 5.0 [3.9, 5.8] | 3.4 [2.8, 4.3] | 3.5 [2.3, 4.5] | 1.6 [0.5, 2.5] |
+| 5 dB | -1.8 [-3.2, -1.2] | -3.7 [−∞, -2.7] | -6.1 [-11.6, -4.3] | ≤ -7.9 [−∞, -5.7] |
+
+Selected differences on TDL-C in dB (95% intervals). The detector and false-alarm
+comparisons share draws within an SNR. The between-SNR comparisons use independent draws.
+
+| Difference | Conditions | Estimate [95% interval] |
+| --- | --- | --- |
+| P+R+E minus P+E | Pilot margin at 15 dB, 1% slot FA | +4.0 [1.8, 5.4] |
+| P+R+E minus block test | Smallest margin at 15 dB, 1% slot FA | +2.1 [1.1, 2.7] |
+| 1% minus 0.1% slot FA | P+R+E smallest margin at 15 dB | +3.1 [1.8, 7.2] |
+| 15 minus 11 dB SNR | P+R+E smallest margin, 1% slot FA | +0.9 [-0.3, 2.1] |
+| 15 minus 8 dB SNR | P+R+E smallest margin, 1% slot FA | +5.1 [3.5, 6.5] |
+| 8 minus 5 dB SNR | P+R+E smallest margin, 1% slot FA | +9.5 [7.2, 15.3] |
+
+**Reading.**
+
+- The smallest margin is positive at the top three SNRs and negative at 5 dB for both
+  channels and targets. On TDL-C at 5 dB and 0.1% slot false alarms, pilot Pd falls short
+  of the target across the JSR grid, so the smallest point estimate is an upper bound.
+- At 1% slot false alarms, the smallest margin favors the fused U-Net over the block test
+  at every SNR on both channels. At 0.1%, the paired intervals establish the lead at 11
+  and 8 dB. The fused U-Net's gain from the higher false-alarm target is resolved at each SNR.
+- The drop from 8 to 5 dB is resolved on both channels at both targets. From 15 to 8 dB,
+  it is resolved on both channels at 1% and on TDL-A at 0.1%. From 15 to 11 dB, it is
+  resolved only on TDL-A at 1%.
+
+### 18.3 Paired BLER intervals
+
+The TDL-C replay put all receivers on the same slots. The paired 95% intervals (Newcombe's
+method 10) pool outcomes across three detector seeds, with up to 4 800 slots per point and
+fewer when either receiver stopped after 100 errors. Differences are in percentage points,
+first receiver minus second. SNR is 15 dB unless stated.
+
+| Receiver comparison | Conditions | Difference [95% interval] |
+| --- | --- | --- |
+| Soft U-Net map vs true map | Nominal pilot, +9 dB | +0.02 [-0.06, +0.12] |
+| Soft U-Net map vs true map | Nominal data and partial, +9 dB, and partial, +3 dB | 0.00 [-0.08, +0.08] each |
+| True map per PRB vs exact true map | Nominal and pulsed | Within 0.08, all intervals include zero |
+| True map per PRB vs exact true map | Hopping data, +9 dB | +52 [48, 56] |
+| True map per PRB vs exact true map | Hopping partial, +9 dB | +57 [53, 61] |
+| Block-test map vs true map per PRB | Nominal partial, +9 dB | +7.7 [6.9, 8.5] |
+| Soft U-Net map, nominal training, vs true map | Pulsed partial, +9 dB | +0.50 [0.32, 0.74] |
+| Soft U-Net map, mixed training, vs true map | Pulsed partial, +9 dB | +0.06 [-0.03, +0.18] |
+| Soft U-Net map, mixed training, vs true map | Hopping data, +9 dB | 0.00 [-0.08, +0.08] |
+| Soft U-Net map, mixed training, vs true map | Hopping partial, +9 dB | +0.04 [-0.05, +0.15] |
+| Hard vs soft U-Net map | No jammer | +0.23 [0.10, 0.41] |
+| Hard vs soft U-Net map | Nominal pilot, -15 dB | +3.9 [3.4, 4.5] |
+| Hard vs soft U-Net map | Nominal data, -15 dB | +9.7 [8.7, 10.8] |
+| Hard vs soft U-Net map | Nominal partial, -15 dB | +12.2 [11.0, 13.5] |
+| LMMSE, no map, vs Sionna | Nominal pilot, +9 dB | -15.7 [-18.2, -13.2] |
+| Slot-wide estimate vs LMMSE, no map | Pulsed and hopping, +9 dB | +33 to +46 (pulsed data +42 [38, 46]) |
+| Soft U-Net map vs true map | 8 dB SNR, nominal data, +3 dB | +0.06 [-0.04, +0.17] |
+| Soft U-Net map vs true map | 8 dB SNR, nominal partial, +3 dB | +0.15 [+0.01, +0.29] |
+| Sionna vs LMMSE, no map | 8 dB SNR, no jammer | +0.42 [0.25, 0.64] |
+
+**Reading.**
+
+- The replay reproduced the table counts except for the coarsened true map under hopping
+  partial-band jamming at +9 dB. Its BLER on the common slots is 57% (328/576).
+- Under pulsed partial-band jamming at +9 dB, the nominally trained U-Net gives 0.50%
+  BLER and the true map gives zero. With mixed training, the intervals for this difference
+  and for both hopping differences include zero.
+- Without a map, the LMMSE interpolator lowers pilot BLER at +9 dB on the 1 024 slots both
+  receivers decoded. The slot-wide estimate raises BLER under pulsed and hopping jamming.
+- At 8 dB SNR, the partial-band difference is small and its interval excludes zero.
+  Without a jammer, the LMMSE-based receivers give 0.21% BLER, against 0.62% for Sionna.
+
+### 18.4 Recovery with the estimated noise power
+
+The receiver and features use the noise power estimated in each slot from the empty DMRS
+comb. The fused U-Net is trained on the estimate (`train_nest`), and the block and power
+tests are calibrated on it. The TDL-C runs use 15 dB SNR, the same UE and jammer setup, and
+JSRs from -15 to +9 dB in 6 dB steps. Three seeds use up to 6 400 slots each (19 200 per
+point). The true-noise runs use different slots. BLER is in percent, with 95% Wilson
+intervals in brackets where shown.
+
+| Receiver | Conditions | Estimated noise power | True noise power |
+| --- | --- | --- | --- |
+| U-Net map, soft | No jammer | 0 | 0 |
+| U-Net map, soft | Nominal pilot, +9 dB | 0.057 | — |
+| U-Net map, soft | Nominal data, +9 dB | 0.089 | — |
+| U-Net map, soft | Nominal partial, +9 dB | 0.23 [0.18, 0.31] | 0.02 |
+| True map | Nominal partial, +9 dB | 0.20 [0.15, 0.28] | 0.02 |
+| Block-test map, soft | Nominal partial, +9 dB | 9.9 | 7.7 |
+| U-Net map, hard | Nominal data, -15 dB | 6.0 | 9.7 |
+| True map / no protection | Whole-allocation pilot, +3 dB | 54 / 53 | 4.1 (true map) |
+| True map / no protection | Whole-allocation pilot, +9 dB | 98 / 98 | — |
+
+**Reading.**
+
+- The soft U-Net map gives at most 0.23% BLER under nominal jamming. The true map has
+  a similar increase under partial-band jamming at +9 dB, where jamming on the DMRS symbol
+  of 4 of the 12 PRBs raises the noise estimate.
+- Hard use of the U-Net map costs less at -15 dB under data jamming because the detector
+  was trained on the estimate.
+- Whole-allocation pilot jamming contaminates every element of the empty comb. The estimate
+  fails, and the true map gives no recovery gain over the unprotected receiver.
+
 ## Caveats before these go into the paper
 
 - Each Pd point averages over SNR 5–25 dB; the SNR-range files give the split by SNR.
