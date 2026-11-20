@@ -1,4 +1,4 @@
-import { conditions, loadCase, selectionText, signedDb } from "./data.js";
+import { calibrationText, conditions, loadCase, percent, selectionText, signedDb } from "./data.js";
 import { drawGrid, svgNode } from "./grid.js";
 import { element, options, reportError } from "./nav.js";
 
@@ -212,6 +212,7 @@ async function sweep(host) {
   const [benign, ...frames] = all;
   const pilotTicks = axisTicks(all.flatMap(frame => frame.pilotDb), 10);
   const prbTicks = axisTicks([...threshold, ...all.flatMap(frame => frame.prbDb)], 5);
+  const { selection, batch_size: size, jsr_db: selectionJsr } = slot.metadata;
 
   function show() {
     const frame = frames[Number(slider.value)];
@@ -229,7 +230,7 @@ async function sweep(host) {
       yTicks: prbTicks, jam: prbJam,
     });
     host.replaceChildren(perPilot, perPRB, sweepLegend(), element("p",
-      `TDL-${slot.metadata.channel} · ${slot.metadata.snr_db} dB SNR · ${signedDb(frames[0].jsr)} to ${signedDb(frames.at(-1).jsr)} JSR. The analytic threshold targets a 1% false-alarm rate per scheduled pilot cell. ${selectionText(slot)}`,
+      `TDL-${slot.metadata.channel} · ${slot.metadata.snr_db} dB SNR · ${signedDb(frames[0].jsr)} to ${signedDb(frames.at(-1).jsr)} JSR. The slider changes only jammer power on this fixed slot. At the ${signedDb(selectionJsr)} JSR selection point, its U-Net hit rate was ${percent(selection.hit_rate)} and the median over ${size} batch slots was ${percent(selection.batch_median)}. ${calibrationText(slot)}. The analytic threshold targets a 1% false-alarm rate per scheduled pilot cell.`,
       "context",
     ));
   }

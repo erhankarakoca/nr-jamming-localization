@@ -267,13 +267,13 @@ function matched(section) {
   show();
 }
 
-function finding(title, value, note, link) {
+function finding(title, value, note, link, linkLabel = "Inspect the slot") {
   const article = element("article");
   article.append(element("h3", title));
   if (value) article.append(element("strong", value));
   article.append(element("p", note));
   if (link) {
-    const anchor = element("a", "Inspect the slot");
+    const anchor = element("a", linkLabel);
     anchor.href = link;
     article.append(anchor);
   }
@@ -311,9 +311,12 @@ async function failures(host, data) {
   const hoppingRows = data.recovery.rows.filter(r => r.jammer === "hopping" && r.attack === "data");
   const block = hoppingRows.find(r => r.receiver === "p_r_e_soft");
   const mixed = hoppingRows.find(r => r.receiver === "p_r_e_atk_soft");
-  const hoppingNote = block && mixed
-    ? `At ${signedDb(block.jsr_db)} JSR on TDL-C at ${block.snr_db} dB SNR, the soft receiver using the block-trained map had ${percent(block.bler)} BLER (${integer(block.block_errors)}/${integer(block.blocks)}) on hopping data jamming. The mixed-attack map had ${percent(mixed.bler)} (${integer(mixed.block_errors)}/${integer(mixed.blocks)}). Both rates pool the recovery runs over training seeds with known noise power.`
-    : `${conditions(hopping)}. The block-trained network flagged ${hitCount(hopping, "fused")} of the injected cells in the selected slot. The mixed-attack network flagged ${hitCount(hopping, "fused_atk")}.`;
+  const hoppingData = block && mixed
+    ? `At ${signedDb(block.jsr_db)} JSR on TDL-C at ${block.snr_db} dB SNR, the soft receiver using the block-trained map had ${percent(block.bler)} BLER (${integer(block.block_errors)}/${integer(block.blocks)}) on hopping data jamming. The mixed-attack map had ${percent(mixed.bler)} (${integer(mixed.block_errors)}/${integer(mixed.blocks)}). Both rates pool the recovery runs over training seeds 0, 1, and 2 with known noise power. `
+    : "";
+  const hoppingBatch = hopping.metadata.batch_crc;
+  const batchBler = ({ failures, slots }) => `${percent(failures / slots)} (${integer(failures)}/${integer(slots)})`;
+  const hoppingExample = `The linked slot shows partial-band hopping. In its batch, the block-trained and mixed-attack soft receivers had ${batchBler(hoppingBatch.fused_soft)} and ${batchBler(hoppingBatch.fused_atk_soft)} BLER, respectively.`;
   host.replaceChildren(
     finding("Pilot spoofing", null,
       `${conditions(spoof)}. In the slot closest to the nominal U-Net’s median hit rate, its map flagged ${hitCount(spoof, "fused")} of ${jammed} injected pilot cells. The spoof-trained map flagged ${hitCount(spoof, "fused_atk2")} of ${jammed} on that slot.`,
@@ -321,7 +324,8 @@ async function failures(host, data) {
     finding("Whole-allocation pilot jamming", null,
       `${conditions(whole)}. The receiver decoded with the true map and failed in ${crc.failures} of ${crc.slots} slots in this batch. In the first such slot, the comb gave a noise variance of ${noise.noise_variance} against a simulated variance of ${noise.true_noise_variance}.`,
       "explore.html?case=pilot_whole_comb"),
-    finding("Hopping with block-trained detection", null, hoppingNote, "explore.html?case=hopping"),
+    finding("Hopping with block-trained detection", null, hoppingData + hoppingExample,
+      "explore.html?case=hopping", "Inspect the partial-band hopping slot"),
   );
 }
 
