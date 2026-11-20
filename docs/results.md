@@ -998,11 +998,75 @@ comparisons share draws within an SNR. The between-SNR comparisons use independe
 
 ### 18.3 Paired BLER intervals
 
-Pending (recovery runs in progress).
+The TDL-C replay put all receivers on the same slots. The paired 95% intervals (Newcombe's
+method 10) pool outcomes across three detector seeds, with up to 4 800 slots per point and
+fewer when either receiver stopped after 100 errors. Differences are in percentage points,
+first receiver minus second. SNR is 15 dB unless stated.
+
+| Receiver comparison | Conditions | Difference [95% interval] |
+| --- | --- | --- |
+| Soft U-Net map vs true map | Nominal pilot, +9 dB | +0.02 [-0.06, +0.12] |
+| Soft U-Net map vs true map | Nominal data and partial, +9 dB, and partial, +3 dB | 0.00 [-0.08, +0.08] each |
+| True map per PRB vs exact true map | Nominal and pulsed | Within 0.08, all intervals include zero |
+| True map per PRB vs exact true map | Hopping data, +9 dB | +52 [48, 56] |
+| True map per PRB vs exact true map | Hopping partial, +9 dB | +57 [53, 61] |
+| Block-test map vs true map per PRB | Nominal partial, +9 dB | +7.7 [6.9, 8.5] |
+| Soft U-Net map, nominal training, vs true map | Pulsed partial, +9 dB | +0.50 [0.32, 0.74] |
+| Soft U-Net map, mixed training, vs true map | Pulsed partial, +9 dB | +0.06 [-0.03, +0.18] |
+| Soft U-Net map, mixed training, vs true map | Hopping data, +9 dB | 0.00 [-0.08, +0.08] |
+| Soft U-Net map, mixed training, vs true map | Hopping partial, +9 dB | +0.04 [-0.05, +0.15] |
+| Hard vs soft U-Net map | No jammer | +0.23 [0.10, 0.41] |
+| Hard vs soft U-Net map | Nominal pilot, -15 dB | +3.9 [3.4, 4.5] |
+| Hard vs soft U-Net map | Nominal data, -15 dB | +9.7 [8.7, 10.8] |
+| Hard vs soft U-Net map | Nominal partial, -15 dB | +12.2 [11.0, 13.5] |
+| LMMSE, no map, vs Sionna | Nominal pilot, +9 dB | -15.7 [-18.2, -13.2] |
+| Slot-wide estimate vs LMMSE, no map | Pulsed and hopping, +9 dB | +33 to +46 (pulsed data +42 [38, 46]) |
+| Soft U-Net map vs true map | 8 dB SNR, nominal data, +3 dB | +0.06 [-0.04, +0.17] |
+| Soft U-Net map vs true map | 8 dB SNR, nominal partial, +3 dB | +0.15 [+0.01, +0.29] |
+| Sionna vs LMMSE, no map | 8 dB SNR, no jammer | +0.42 [0.25, 0.64] |
+
+**Reading.**
+
+- The replay reproduced the table counts except for the coarsened true map under hopping
+  partial-band jamming at +9 dB. Its BLER on the common slots is 57% (328/576).
+- Under pulsed partial-band jamming at +9 dB, the nominally trained U-Net gives 0.50%
+  BLER and the true map gives zero. With mixed training, the intervals for this difference
+  and for both hopping differences include zero.
+- Without a map, the LMMSE interpolator lowers pilot BLER at +9 dB on the 1 024 slots both
+  receivers decoded. The slot-wide estimate raises BLER under pulsed and hopping jamming.
+- At 8 dB SNR, the partial-band difference is small and its interval excludes zero.
+  Without a jammer, the LMMSE-based receivers give 0.21% BLER, against 0.62% for Sionna.
 
 ### 18.4 Recovery with the estimated noise power
 
-Pending (recovery runs in progress).
+The receiver and features use the noise power estimated in each slot from the empty DMRS
+comb. The fused U-Net is trained on the estimate (`train_nest`), and the block and power
+tests are calibrated on it. The TDL-C runs use 15 dB SNR, the same UE and jammer setup, and
+JSRs from -15 to +9 dB in 6 dB steps. Three seeds use up to 6 400 slots each (19 200 per
+point). The true-noise runs use different slots. BLER is in percent, with 95% Wilson
+intervals in brackets where shown.
+
+| Receiver | Conditions | Estimated noise power | True noise power |
+| --- | --- | --- | --- |
+| U-Net map, soft | No jammer | 0 | 0 |
+| U-Net map, soft | Nominal pilot, +9 dB | 0.057 | — |
+| U-Net map, soft | Nominal data, +9 dB | 0.089 | — |
+| U-Net map, soft | Nominal partial, +9 dB | 0.23 [0.18, 0.31] | 0.02 |
+| True map | Nominal partial, +9 dB | 0.20 [0.15, 0.28] | 0.02 |
+| Block-test map, soft | Nominal partial, +9 dB | 9.9 | 7.7 |
+| U-Net map, hard | Nominal data, -15 dB | 6.0 | 9.7 |
+| True map / no protection | Whole-allocation pilot, +3 dB | 54 / 53 | 4.1 (true map) |
+| True map / no protection | Whole-allocation pilot, +9 dB | 98 / 98 | — |
+
+**Reading.**
+
+- The soft U-Net map gives at most 0.23% BLER under nominal jamming. The true map has
+  a similar increase under partial-band jamming at +9 dB, where jamming on the DMRS symbol
+  of 4 of the 12 PRBs raises the noise estimate.
+- Hard use of the U-Net map costs less at -15 dB under data jamming because the detector
+  was trained on the estimate.
+- Whole-allocation pilot jamming contaminates every element of the empty comb. The estimate
+  fails, and the true map gives no recovery gain over the unprotected receiver.
 
 ## Caveats before these go into the paper
 
