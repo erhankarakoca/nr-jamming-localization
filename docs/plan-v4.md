@@ -10,8 +10,8 @@ test left.
 | 1 | **Pilot-comb jammer** (`SimConfig.jammer_pilot_comb`): on the DMRS symbol only the pilot subcarriers are jammed. Same damage to the channel estimate for half the energy. | Does detection rely on the power of the whole DMRS cell, or on what actually hurts the estimate? | CPU, minutes |
 | 2 | **Hopping jammer** (`SimConfig.jammer_hopping`): a new PRB block on every OFDM symbol. | Does the learned whole-PRB structure become a liability? | CPU, minutes |
 | 3 | **Attack-mixed training** (`train_atk` / `val_atk`, `experiments/attack_training`): the fused U-Net retrained on batches cycling through nominal, hopping and comb jammers. | Can diversity restore the detector, as mixed channels did for unseen channels? | CPU, ~1 h |
-| 4 | **Literature (Codex)**: noise uncertainty / SNR wall, RE-selective pilot jamming, hopping-jammer detection, any PRB x symbol interference localization that challenges the novelty claim. | Missing citations and novelty check. | Codex |
-| 5 | **Independent code review (Codex)** of the round-3 code. | Bugs and statistical mistakes before the numbers go into the paper. | Codex |
+| 4 | **Literature search**: noise uncertainty / SNR wall, RE-selective pilot jamming, hopping-jammer detection, any PRB x symbol interference localization that challenges the novelty claim. | Missing citations and novelty check. | independent reviewer |
+| 5 | **Independent code review** of the round-3 code. | Bugs and statistical mistakes before the numbers go into the paper. | independent reviewer |
 | 6 | Results, paper, README. | | |
 
 Still out of scope: multiple receive antennas (map-aware IRC) and a jammer that is not aligned to

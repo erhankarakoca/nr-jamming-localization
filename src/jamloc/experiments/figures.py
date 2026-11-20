@@ -18,10 +18,12 @@ import json
 import numpy as np
 import torch
 from matplotlib.colors import ListedColormap
+from matplotlib.figure import Figure
 from matplotlib.patches import Patch, Rectangle
+from matplotlib.ticker import MultipleLocator
 from sionna.phy import config
 
-from jamloc.baselines import evm_scores, residual_scores
+from jamloc.baselines import evm_scores
 from jamloc.config import SimConfig
 from jamloc.dataset import load
 from jamloc.evaluate import FA
@@ -230,90 +232,199 @@ SYSTEM_DIAGRAM_CAPTION = (
 )
 
 
+@paper_style()
+def timing():
+    """Show when the buffered grid becomes available and how the receiver uses it twice."""
+    fig, ax = new_figure(3.5, 2.78)
+    fig.set_layout_engine(None)
+    fig.subplots_adjust(left=0.025, right=0.975, top=0.99, bottom=0.01)
+    ax.set(xlim=(-0.1, 14.6), ylim=(0.6, 10))
+    ax.set_axis_off()
+    ax.text(0, 9.55, r"Physical slot $n$ (0.5 ms)", weight="bold", va="center")
+    ax.plot(11.35, 9.55, "s", color=DMRS_COLOR)
+    ax.text(11.7, 9.55, "DMRS", fontsize=7, va="center")
+
+    for symbol in range(CFG.num_symbols):
+        dmrs = symbol == CFG.dmrs_symbol
+        ax.add_patch(
+            Rectangle(
+                (symbol, 8.32),
+                1,
+                0.72,
+                facecolor=DMRS_COLOR if dmrs else ALLOC_COLOR,
+                edgecolor="white",
+                lw=0.7,
+            )
+        )
+        ax.text(
+            symbol + 0.5,
+            8.68,
+            str(symbol),
+            fontsize=7.5,
+            ha="center",
+            va="center",
+            color="white" if dmrs else "black",
+        )
+
+    # Only the end of symbol 13 feeds the buffer. The vertical branch supplies both passes.
+    ax.plot([13.55, 14, 14, 13.55], [9.12, 9.12, 8.02, 8.02], color="0.25", lw=0.8)
+    ax.text(13.45, 7.82, r"received grid of slot $n$ available", ha="right", fontsize=7.5)
+    ax.plot([14, 14], [8.02, 1.945], color="0.35", lw=0.75)
+    ax.text(0, 6.72, "Processing order (not to scale)", weight="bold")
+    height = 2.13
+    for bottom, title, steps in (
+        (
+            4.05,
+            "1  Detect",
+            "Channel estimation and equalization\n→ Features P, R, E → U-Net → map",
+        ),
+        (
+            0.88,
+            "2  Mitigate and decode the same buffered slot",
+            "Re-weighted pilot interpolation → re-equalization\n→ LLR scaling → LDPC decoding → CRC",
+        ),
+    ):
+        center = bottom + height / 2
+        ax.add_patch(Rectangle((0, bottom), 13.3, height, fc="#F4F8FB", ec="0.70", lw=0.6))
+        ax.text(0.35, bottom + height - 0.25, title, va="top", weight="bold", fontsize=7.5)
+        ax.text(0.35, bottom + height - 0.91, steps, va="top", fontsize=7.5, linespacing=1.35)
+        ax.annotate(
+            "",
+            (13.3, center),
+            (14, center),
+            arrowprops={
+                "arrowstyle": "-|>",
+                "color": "0.35",
+                "lw": 0.75,
+                "shrinkA": 0,
+                "shrinkB": 0,
+            },
+        )
+    ax.annotate(
+        "",
+        (6.65, 3.01),
+        (6.65, 4.05),
+        arrowprops={"arrowstyle": "-|>", "color": DMRS_COLOR, "lw": 1, "shrinkA": 0, "shrinkB": 0},
+    )
+    caption = (
+        "The receiver buffers all 14 OFDM symbols of slot n (0.5 ms), including the DMRS at "
+        "symbol 2. After channel estimation and equalization, it computes power (P), the pilot "
+        "residual (R) and error vector magnitude (E). The U-Net map guides a second pass through "
+        "the same received grid for decoding. On one Apple M1 Pro CPU thread with 24 allocated "
+        "PRBs, the median times for feature extraction and frozen U-Net inference summed to "
+        "0.48–0.68 ms across network widths. Timing starts after equalization and ends before "
+        "decoding."
+    )
+    return fig, caption
+
+
 # --- 3. How the DMRS residual works ----------------------------------------------------------
 
 
+@paper_style()
 def residual_explained():
-    fig, (ax_ls, ax_r) = new_figure(3.5, 2.7, nrows=2, sharex=True)
-    alloc_prbs = np.arange(ALLOC[0], sum(ALLOC))
-    prb_edges = np.arange(ALLOC[0], sum(ALLOC) + 1) - 0.5
-    jammed = (alloc_prbs >= JAM[0]) & (alloc_prbs < sum(JAM))
+    """Relate each complex pilot residual to the detector statistic of its own PRB."""
+    fig, (pilots, prbs) = new_figure(3.5, 2.7, nrows=2, sharex=True)
+    fig.set_layout_engine(None)
+    fig.subplots_adjust(left=0.15, right=0.985, bottom=0.155, top=0.79, hspace=0.57)
+    numbers = np.arange(ALLOC[0], sum(ALLOC))
+    edges = np.arange(ALLOC[0], sum(ALLOC) + 1) - 0.5
     seed = _example_seed("C")
-    benign = _example_batch("none", 0.0, 20.0, "C", seed=seed)
-    pilot = _example_batch("pilot", 0.0, 20.0, "C", seed=seed)
+    limits = 10 * np.log10([threshold(ALLOC[1], pos, fa=0.01) for pos in range(ALLOC[1])])
+    for ax in (pilots, prbs):
+        ax.axvspan(JAM[0] - 0.5, sum(JAM) - 0.5, color=JAM_COLOR, alpha=0.10, lw=0)
+        ax.grid(False)
+        ax.grid(axis="y", color="0.89", alpha=1, lw=0.5)
+        ax.tick_params(length=2, pad=2)
+    for edge in edges[1:-1]:
+        pilots.axvline(edge, color="0.80", lw=0.4, zorder=0)
 
-    # Use the same delay basis as the detector. Place each pilot within its PRB, with the
-    # integer tick at the PRB center in both panels.
-    h_ls, pilot_sc, _ = dmrs_ls(pilot.y_alloc, pilot.tx)
-    u = delay_subspace(pilot_sc, CFG.scs, CFG.tau_max).to(h_ls.dtype)
-    fit = (h_ls @ u.conj()) @ u.T
-    prb_of_pilot = ALLOC[0] - 0.5 + (pilot_sc.cpu().numpy() + 0.5) / 12
-    ax_ls.axvspan(JAM[0] - 0.5, sum(JAM) - 0.5, color=JAM_COLOR, alpha=0.12, lw=0)
-    ax_ls.plot(
-        prb_of_pilot,
-        h_ls[0].abs().cpu(),
-        "o",
-        ms=2.5,
-        color="#555555",
-        label="LS estimate",
-    )
-    ax_ls.plot(
-        prb_of_pilot,
-        fit[0].abs().cpu(),
-        color=CLEAN_COLOR,
-        lw=0.9,
-        label="Projection onto delay subspace",
-    )
-    ax_ls.set_ylabel("Magnitude")
-
-    r_db = {}
-    for role, batch, marker, color, offset in (
-        ("Benign", benign, "o", "#606060", -0.10),
-        ("Pilot jammed", pilot, "s", JAM_COLOR, 0.10),
+    leak_note = ""
+    for attack, label, mark, edge_color, face in (
+        ("none", "Benign", "o", "0.53", "none"),
+        ("pilot", "Pilot jammed", "s", JAM_COLOR, JAM_COLOR),
     ):
-        r = residual_map(batch, CFG)[0, alloc_prbs, CFG.dmrs_symbol].cpu().numpy()
-        r_db[role] = 10 * np.log10(r)
-        ax_r.plot(alloc_prbs + offset, r_db[role], marker, ms=3.3, color=color, label=role)
+        batch = _example_batch(attack, 0.0, 20.0, "C", seed)
+        h, sc, power = dmrs_ls(batch.y_alloc, batch.tx)
+        basis = delay_subspace(sc, CFG.scs, CFG.tau_max).to(h.dtype)
+        error = h - (h @ basis.conj()) @ basis.T
+        energy = error[0].abs().square() / (batch.no[0] / power)
+        x = edges[0] + (sc.cpu().numpy() + 0.5) / 12
+        db = 10 * np.log10(residual_map(batch, CFG)[0, numbers, CFG.dmrs_symbol].cpu().numpy())
+        style = {
+            "ls": "none",
+            "marker": mark,
+            "mec": edge_color,
+            "mfc": face,
+            "mew": 0.55,
+            "label": label,
+        }
+        pilots.plot(x, 10 * np.log10(energy.cpu().numpy()), ms=2.4, **style)
+        prbs.plot(numbers, db, ms=3.7, **style)
+        if attack == "pilot":
+            neighbors = (numbers == JAM[0] - 1) | (numbers == sum(JAM))
+            crossings = np.flatnonzero(neighbors & (db > limits))
+            if crossings.size:
+                k = crossings[np.argmax(db[crossings] - limits[crossings])]
+                prbs.annotate(
+                    "Leakage",
+                    (numbers[k], db[k]),
+                    xytext=(0, 8),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    arrowprops={"arrowstyle": "-", "color": "0.35", "lw": 0.6},
+                )
+                leak_note = (
+                    f" Leakage through the projection takes clean PRB {numbers[k]} above threshold."
+                )
 
-    # Proposition 1 gives a different threshold at each position within the allocation.
-    threshold_db = 10 * np.log10([threshold(ALLOC[1], pos) for pos in range(ALLOC[1])])
-    ax_r.stairs(
-        threshold_db,
-        prb_edges,
-        baseline=None,
-        color="black",
-        lw=0.8,
-        ls="--",
-        label="1% threshold",
+    prbs.yaxis.set_major_locator(MultipleLocator(10))
+    prbs.margins(y=0.12)
+    pilots.margins(y=0.09)
+    prbs.stairs(limits, edges, baseline=None, color="0.2", lw=0.9, ls="--", label="1% threshold")
+    # The bracket is above the data and spans the exact same bin as the PRB 11 statistic below.
+    transform = pilots.get_xaxis_transform()
+    pilots.plot(
+        [10.5, 10.5, 11.5, 11.5],
+        [1.01, 1.07, 1.07, 1.01],
+        transform=transform,
+        color="0.2",
+        lw=0.7,
+        clip_on=False,
     )
-    ax_r.set(xlabel="PRB", ylabel=r"$R_b$ [dB]", xticks=alloc_prbs)
-    # Leave a fraction of a PRB at both ends so the edge pilots' markers stay inside the axes.
-    ax_r.set_xlim(prb_edges[0] - 0.07, prb_edges[-1] + 0.07)
-    ax_r.margins(y=0.08)
-    for ax, panel, columns in ((ax_ls, "(a)", 2), (ax_r, "(b)", 3)):
-        ax.set_title(panel, loc="left", pad=3, fontsize=8)
-        ax.legend(
-            loc="lower right",
-            bbox_to_anchor=(1, 1.02),
-            borderaxespad=0,
-            ncols=columns,
-            columnspacing=1.0,
-            handletextpad=0.4,
-            frameon=False,
-            fontsize=7,
-        )
-        ax.grid(axis="x", visible=False)
-        ax.tick_params(length=2, width=0.6, pad=2)
-    ax_ls.tick_params(bottom=False)
+    pilots.text(
+        11, 1.10, "six pilots of PRB 11", transform=transform, ha="center", va="bottom", fontsize=7
+    )
+    pilots.tick_params(bottom=False)
+    pilots.set_ylabel("Pilot residual [dB]", fontsize=7.5)
+    prbs.set(
+        xlabel="PRB", ylabel=r"$R_b$ [dB]", xticks=numbers, xlim=(edges[0] - 0.07, edges[-1] + 0.07)
+    )
+    pilots.set_title("(a)", loc="left", fontsize=8, pad=2)
+    prbs.set_title("(b)", loc="left", fontsize=8, pad=2)
+    handles, labels = prbs.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.53, 1),
+        ncols=3,
+        frameon=False,
+        fontsize=7,
+        handlelength=1.3,
+        columnspacing=1,
+        handletextpad=0.4,
+    )
     caption = (
-        "DMRS residual for paired TDL-C slots at SNR 20 dB, with the same UE channel and noise. "
-        "(a) Magnitudes of the raw LS pilot estimates and their projection onto the delay "
-        "subspace in the pilot-jammed slot (JSR 0 dB, PRBs 10-13 shaded). "
-        "(b) Residual per PRB in both slots and the position-dependent 1% false-alarm "
-        "threshold from Proposition 1. The benign residual averages "
-        f"{_fmt_db(r_db['Benign'].mean())}; with pilot jamming the residual averages "
-        f"{_fmt_db(r_db['Pilot jammed'][jammed].mean())} within the block. The projection "
-        "also spreads some jamming energy onto nearby PRBs."
+        "Paired TDL-C slots share the same channel and noise at 20 dB SNR. One slot has pilot "
+        "jamming at 0 dB JSR on PRBs 10–13 (shaded). (a) The receiver subtracts the delay-subspace "
+        "projection from each complex LS pilot estimate. Each point shows the squared magnitude "
+        "of that difference relative to the LS noise variance, in dB. (b) For each PRB, the "
+        "receiver sums the six residual powers and divides by the noise power expected after "
+        "projection. The dashed step marks the analytic 1% false-alarm threshold for this ratio "
+        "at each PRB position." + leak_note
     )
     return fig, caption
 
@@ -494,146 +605,202 @@ def feature_distributions(split: str = "test"):
 # --- 6. What each detector outputs -----------------------------------------------------------
 
 
-# (attack, JSR) per row: weak pilot jamming shows what the residual adds, strong pilot jamming
-# shows the wrong-symbol effect of EVM, and the last two rows show data and partial-band jamming
-EXAMPLE_ROWS = (("pilot", -12.0), ("pilot", 3.0), ("data", -9.0), ("partial", -9.0))
+PD_DETECTORS = {
+    "fused": "U-Net P+R+E",
+    "no_residual": "U-Net P+E",
+    "power": "U-Net power",
+    "evm": "U-Net EVM",
+    "block_test": "Block test",
+    "evm_threshold": "EVM threshold",
+    "residual_cfar": "Residual p-value",
+}
 
 
-def _candidates(d: dict) -> list[np.ndarray]:
-    """Test slots for each example row: jammer block fully inside a wide allocation."""
-    alloc = d["features"][:, FEATURE_NAMES.index("alloc_mask")].max(axis=2) > 0
-    jammed = d["labels"].any(axis=2)
-    inside = (jammed & alloc).any(axis=1) & ~(jammed & ~alloc).any(axis=1)
-    out = []
-    for attack, jsr in EXAMPLE_ROWS:
-        rows = (d["attack"] == ATTACKS.index(attack)) & (d["jsr_db"] == jsr)
-        cand = np.flatnonzero(rows & inside & (d["alloc_size"] >= 10))
-        if cand.size == 0:  # tiny datasets (tests): relax the conditions
-            cand = np.flatnonzero(rows) if rows.any() else np.flatnonzero(d["attack"] > 0)
-        out.append(cand)
-    return out
+def _pilot_intervals(split):
+    """Read the seed-mean estimates and their paired batch-bootstrap limits in display order."""
+    path = results_dir() / "intervals" / f"{split}_pd_ci.csv"
+    if not path.is_file():
+        raise MissingInput(
+            f"needs {path.name}: python -m jamloc.experiments.intervals --split {split}"
+        )
+    with path.open(encoding="utf-8", newline="") as stream:
+        rows = [r for r in csv.DictReader(stream) if r["seed"] == "mean" and r["attack"] == "pilot"]
+    if not rows:
+        raise MissingInput(f"{path.name} has no seed means for pilot jamming")
+    jsr = min(float(r["jsr_db"]) for r in rows)
+    lowest = {r["detector"]: r for r in rows if float(r["jsr_db"]) == jsr}
+    missing = PD_DETECTORS.keys() - lowest.keys()
+    if missing:
+        raise MissingInput(f"{path.name} lacks {', '.join(sorted(missing))} at {jsr:g} dB")
+    values = [[float(lowest[d][key]) for key in ("pd", "pd_lo", "pd_hi")] for d in PD_DETECTORS]
+    return jsr, np.array(values), int(lowest["fused"]["n_seeds"])
 
 
-def _median_slot(cand: np.ndarray, values: np.ndarray) -> int:
-    return int(cand[np.argsort(values, kind="stable")[len(values) // 2]])
-
-
-def detector_outputs(split: str = "test", seed: int | None = None):
-    from jamloc.evaluate import available_seeds
+def _pilot_example(d, val, model):
+    """Select the original +3 dB example by the EVM false-alarm count, retaining its tie rule."""
     from jamloc.experiments.recovery import val_threshold
 
-    if seed is None:  # the first training seed that has every model
-        seed = (available_seeds() or [0])[0]
-    _require_models(("fused", "no_residual", "power"), seed)
-    d, val = _load_split(split), _load_split("val")
-    unets = (("fused", "U-Net P+R+E"), ("no_residual", "U-Net P+E"), ("power", "U-Net power only"))
-    models = {v: load_model(v, seed) for v, _ in unets}
-    thresholds = {v: val_threshold(v, models[v]) for v, _ in unets}
-
-    def predict(variant, idx):
-        x = select_inputs(torch.from_numpy(d["features"][idx]).to(config.device), variant)
-        with torch.no_grad():
-            return models[variant](x).cpu().numpy() > thresholds[variant]
-
-    evm_thr = threshold_at_fa(evm_scores(val["features"])[val["labels"] == 0], FA)
-    res_thr = threshold_at_fa(residual_scores(val["features"])[val["labels"] == 0], FA)
-
-    def hit_rate(p, idx):
-        lab = d["labels"][idx].astype(bool)
-        return (p & lab).sum(axis=(1, 2)) / np.maximum(lab.sum(axis=(1, 2)), 1)
-
-    # Example slots, each chosen by a stated rule rather than by hand. Row 1: the median
-    # advantage of the fused U-Net over the one without the residual. Row 2 (the wrong-symbol
-    # effect, which only some slots show): the median slot among those where the EVM threshold
-    # flags unjammed cells. Rows 3-4: the median detection rate of the fused U-Net.
-    cand = _candidates(d)
-    stats = {}
-    picks = []
-    for row, idx in enumerate(cand):
-        fused_pred = predict("fused", idx)
-        fused_rate = hit_rate(fused_pred, idx)
-        if row == 0:
-            pe_pred = predict("no_residual", idx)
-            lab = d["labels"][idx].astype(bool)
-            stats["fused"] = (fused_pred & lab).sum() / max(lab.sum(), 1)  # pooled over cells
-            stats["pe"] = (pe_pred & lab).sum() / max(lab.sum(), 1)
-            picks.append(_median_slot(idx, fused_rate - hit_rate(pe_pred, idx)))
-            continue
-        if row == 1:
-            lab = d["labels"][idx].astype(bool)
-            evm_fa = ((evm_scores(d["features"][idx]) > evm_thr) & ~lab).sum(axis=(1, 2))
-            stats["evm_fa"], stats["evm_share"] = evm_fa.mean(), (evm_fa > 0).mean()
-            if (evm_fa > 0).any():
-                picks.append(_median_slot(idx[evm_fa > 0], evm_fa[evm_fa > 0]))
-                continue
-        picks.append(_median_slot(idx, fused_rate))
-    stats["n"] = [len(c) for c in cand]
-
-    preds = {title: predict(v, picks) for v, title in unets}
-    preds["EVM threshold"] = evm_scores(d["features"][picks]) > evm_thr
-    preds["Residual threshold"] = residual_scores(d["features"][picks]) > res_thr
-    columns = ["true map", *preds]
-
-    # 0 outside the allocation, 1 inside and correctly not flagged, 2 hit, 3 miss, 4 false alarm
-    cmap = ListedColormap(["#FFFFFF", "#E3EEF8", "#009E73", "#E69F00", "#CC79A7"])
-    fig, axes = new_figure(
-        7.16, 5.4, nrows=len(picks), ncols=len(columns), sharex=True, sharey=True
+    idx = np.flatnonzero(
+        (d["attack"] == ATTACKS.index("pilot")) & (d["jsr_db"] == 3) & (d["alloc_size"] >= 10)
     )
-    counts = {}
-    for row, i in enumerate(picks):
-        truth = d["labels"][i].astype(bool)
-        inside = np.zeros_like(truth)
-        a0, n = int(d["alloc_start"][i]), int(d["alloc_size"][i])
-        inside[a0 : a0 + n] = True
-        for col, title in enumerate(columns):
-            p = truth if title == "true map" else preds[title][row]
-            img = np.select([p & truth, ~p & truth, p & ~truth, inside], [2, 3, 4, 1], 0)
-            counts[(row, title)] = (
-                int((p & truth).sum()),
-                int(truth.sum()),
-                int((p & ~truth).sum()),
-            )
-            ax = axes[row, col]
-            ax.imshow(
-                img,
-                cmap=cmap,
-                vmin=0,
-                vmax=4,
-                origin="lower",
-                aspect="auto",
-                interpolation="nearest",
-            )
-            ax.grid(False)
-            ax.set_xticks([0, 2, 13])
-            if row == 0:
-                ax.set_title(title, fontsize=7)
-            if col == 0:
-                attack, jsr = EXAMPLE_ROWS[row]
-                ax.set_ylabel(f"{attack}, {jsr:+.0f} dB\nPRB", fontsize=7)
-            if row == len(picks) - 1:
-                ax.set_xlabel("symbol")
-    legend = [
-        Patch(facecolor="#009E73", label="hit (jammed, flagged)"),
-        Patch(facecolor="#E69F00", label="miss (jammed, not flagged)"),
-        Patch(facecolor="#CC79A7", label="false alarm"),
-        Patch(facecolor="#E3EEF8", edgecolor="#999999", label="UE allocation"),
-    ]
-    fig.legend(handles=legend, loc="outside lower center", ncols=4, frameon=False)
+    labels = d["labels"][idx].astype(bool)
+    allocated = d["features"][idx, FEATURE_NAMES.index("alloc_mask")] > 0
+    inside = labels.any(axis=(1, 2)) & ~(labels & ~allocated).any(axis=(1, 2))
+    idx = idx[inside]
+    if not idx.size:
+        raise MissingInput(
+            "needs a +3 dB pilot-jamming slot with the block inside at least 10 allocated PRBs"
+        )
+    features = d["features"][idx]
+    truth = labels[inside]
+    evm_thr = threshold_at_fa(evm_scores(val["features"])[val["labels"] == 0], FA)
+    evm = evm_scores(features) > evm_thr
+    fused_thr = val_threshold("fused", model)
+    x = select_inputs(torch.from_numpy(features).to(config.device), "fused")
+    with torch.no_grad():
+        fused = model(x).cpu().numpy() > fused_thr
 
+    counts = (evm & ~truth).sum(axis=(1, 2))
+    pool = np.flatnonzero(counts > 0)
+    if pool.size:
+        statistic = counts[pool]
+        rule = (
+            "Among eligible slots with EVM false alarms, the example has the median "
+            "false-alarm count."
+        )
+    else:
+        pool = np.arange(len(idx))
+        statistic = (fused & truth).sum(axis=(1, 2)) / truth.sum(axis=(1, 2))
+        rule = (
+            "No eligible slot has an EVM false alarm. The example has the median "
+            "U-Net hit rate on jammed cells."
+        )
+    k = pool[np.argsort(statistic, kind="stable")[len(pool) // 2]]
+    return idx[k], evm[k], fused[k], rule
+
+
+@paper_style()
+def detector_outputs(split: str = "test", seed: int | None = None):
+    """Compare alarm placement in one slot with detection across all jammed scheduled pilots."""
+    from jamloc.evaluate import available_seeds
+
+    jsr, intervals, n_seeds = _pilot_intervals(split)
+    if seed is None:
+        seed = (available_seeds() or [0])[0]
+    _require_models(("fused",), seed)
+    d = _load_split(split)
+    i, evm, fused, rule = _pilot_example(d, _load_split("val"), load_model("fused", seed))
+    truth = d["labels"][i].astype(bool)
+    jammed_prbs = np.flatnonzero(truth[:, CFG.dmrs_symbol])
+    allocation = d["features"][i, FEATURE_NAMES.index("alloc_mask")] > 0
+    lo, size = int(d["alloc_start"][i]), int(d["alloc_size"][i])
+    dmrs = CFG.dmrs_symbol
+
+    fig = Figure(figsize=(7.1, 2.8))
+    grid = fig.add_gridspec(1, 3, left=0.066, right=0.602, wspace=0.085, bottom=0.29, top=0.775)
+    maps = grid.subplots(sharex=True, sharey=True).ravel()
+    cmap = ListedColormap(["white", ALLOC_COLOR, DMRS_COLOR])
+    hatch = {
+        "facecolor": "none",
+        "edgecolor": "0.55",
+        "hatch": "////",
+        "lw": 0,
+        "hatch_linewidth": 0.45,
+    }
+    for ax, title, flags in zip(
+        maps,
+        ("Injected interference", "EVM threshold flags", "U-Net P+R+E flags"),
+        (np.zeros_like(truth), evm, fused),
+        strict=True,
+    ):
+        ax.imshow(
+            np.where(flags, 2, allocation),
+            cmap=cmap,
+            vmin=0,
+            vmax=2,
+            aspect="auto",
+            origin="lower",
+            interpolation="nearest",
+        )
+        if ax is maps[1]:
+            # EVM exists only on scheduled data. Hatch contiguous areas so adjacent cells
+            # share a pattern without interior borders or double hatching at the DMRS.
+            for x0, y0, width, height in (
+                (0, 0, CFG.num_symbols, lo),
+                (0, lo + size, CFG.num_symbols, CFG.num_prb - lo - size),
+                (dmrs, lo, 1, size),
+            ):
+                if height:
+                    ax.add_patch(Rectangle((x0 - 0.5, y0 - 0.5), width, height, **hatch))
+        ax.add_patch(
+            Rectangle(
+                (dmrs - 0.5, jammed_prbs[0] - 0.5),
+                1,
+                len(jammed_prbs),
+                fill=False,
+                ec="black",
+                lw=1.15,
+            )
+        )
+        ax.set(title=title, xticks=[0, dmrs, 7, 13], yticks=[0, 6, 12, 18, 23])
+        ax.title.set_fontsize(7.5)
+        ax.grid(False)
+        ax.tick_params(length=2, width=0.6, pad=2)
+        tick = ax.get_xticklabels()[1]
+        tick.set_color(DMRS_COLOR)
+        tick.set_weight("bold")
+    maps[0].set_ylabel("PRB")
+    maps[1].set_xlabel("OFDM symbol (2 = DMRS)")
+    fig.text(0.066, 0.94, f"(a)  One {split} slot at +3 dB JSR", weight="bold", fontsize=8.5)
+    fig.legend(
+        handles=[
+            Patch(fill=False, edgecolor="black", label="Injected"),
+            Patch(facecolor=DMRS_COLOR, label="Flagged"),
+            Patch(facecolor=ALLOC_COLOR, label="Allocated"),
+            Patch(**hatch, label="Unscored"),
+        ],
+        loc="lower center",
+        bbox_to_anchor=(0.337, 0.015),
+        frameon=False,
+        ncols=4,
+        handlelength=1.25,
+        handletextpad=0.4,
+        columnspacing=1,
+        fontsize=7,
+    )
+
+    ax = fig.add_axes([0.790, 0.29, 0.187, 0.485])
+    y = np.arange(len(intervals))
+    mean, lower, upper = intervals.T
+    ax.hlines(y, lower, upper, color="0.25", lw=0.9)
+    for end in (lower, upper):
+        ax.vlines(end, y - 0.085, y + 0.085, color="0.25", lw=0.7)
+    ax.plot(mean, y, "o", color=DMRS_COLOR, ms=2.5, mew=0)
+    ax.xaxis.set_major_locator(MultipleLocator(0.2))
+    ax.set_yticks(y, PD_DETECTORS.values())
+    ax.set(
+        ylim=(len(y) - 0.5, -0.5),
+        xlim=(-0.02, min(1.02, max(0.2, upper.max()) + 0.04)),
+        xlabel=r"Detection probability $P_d$",
+    )
+    ax.grid(False)
+    ax.grid(axis="x", color="0.85", lw=0.6, alpha=1)
+    ax.spines[["top", "right", "left"]].set_visible(False)
+    ax.tick_params(axis="y", length=0, pad=3)
+    ax.tick_params(axis="x", length=2, pad=2)
+    fig.text(0.635, 0.94, f"(b)  Pilot jamming at {jsr:g} dB JSR", weight="bold", fontsize=8.5)
+    fig.text(0.635, 0.84, "Jammed scheduled DMRS cells", fontsize=8)
+    fig.text(0.635, 0.056, "Seed mean with 95% bootstrap interval", fontsize=7)
     caption = (
-        "What each detector reports on four test slots (jammer block inside the allocation), all "
-        "thresholded at 1% false alarm on the validation set. Green: jammed cells found; orange: "
-        "missed; pink: flagged although not jammed; light blue: the UE's allocation. Each row "
-        "is picked by a stated rule, not by hand: row 1 is the slot with the median advantage of "
-        "the fused U-Net over the U-Net without the residual, row 2 the median slot among those "
-        "where the EVM threshold flags unjammed cells, rows 3-4 the slot with the median "
-        "detection rate of the fused U-Net. Weak pilot jamming (row 1): over all "
-        f"{stats['n'][0]} such test slots the fused U-Net finds {stats['fused']:.0%} of the jammed "
-        f"DMRS cells and the U-Net without the residual {stats['pe']:.0%}. Strong pilot jamming "
-        f"(row 2): the EVM threshold never finds the jammed DMRS cells (it has no value there), "
-        f"and in {stats['evm_share']:.0%} of the {stats['n'][1]} slots it flags data cells that "
-        f"were never jammed ({stats['evm_fa']:.1f} per slot on average) - the wrong-symbol effect. "
-        "The residual threshold cannot see data jamming at all."
+        f"(a) Pilot jamming in one {split} slot at +3 dB JSR. The "
+        "jammed block lies within an allocation of at least 10 PRBs. " + rule + " The black "
+        "outline marks the injected cells on all three maps. Hatching marks cells the detector "
+        f"cannot score. The EVM threshold flags {evm.sum()} data cells and cannot score the DMRS. "
+        f"The U-Net flags {(fused & truth).sum()} of {truth.sum()} jammed cells. "
+        f"(b) At {jsr:g} dB JSR, each dot gives the fraction of jammed scheduled DMRS cells "
+        f"flagged across the {split} split, averaged over {n_seeds} seeds. Bars give 95% "
+        "batch-bootstrap intervals. Both panels use thresholds calibrated for a 1% false-alarm rate "
+        "on scored, unjammed validation cells."
     )
     return fig, caption
 
@@ -809,6 +976,7 @@ def constellations_with_map(seed: int | None = None, jsr_db: float = 6.0):
 
 
 FIGURES = {
+    "timing": timing,
     "attack_patterns": attack_patterns,
     "residual_explained": residual_explained,
     "constellations": constellations,

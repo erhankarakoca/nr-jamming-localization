@@ -74,7 +74,7 @@ import numpy as np
 import torch
 from sionna.phy import config
 
-from jamloc.baselines import block_test_scores
+from jamloc.baselines import block_test_scores, evm_scores, residual_scores
 from jamloc.config import SimConfig
 from jamloc.dataset import load
 from jamloc.evaluate import FA
@@ -190,6 +190,9 @@ def _power_scores(features: torch.Tensor) -> torch.Tensor:
 def _scores(detector: str, model, features: torch.Tensor) -> torch.Tensor:
     if detector == "power_threshold":
         return _power_scores(features)
+    if detector in ("evm_threshold", "residual_threshold"):
+        baseline = evm_scores if detector == "evm_threshold" else residual_scores
+        return torch.from_numpy(baseline(features.cpu().numpy())).to(features.device)
     variant = "fused" if detector in TRAINED_ON else detector
     return model(select_inputs(features, variant))
 
@@ -212,22 +215,26 @@ def val_threshold(detector: str, model=None, val_split: str | None = None) -> fl
     return threshold_at_fa(scores.numpy()[d["labels"] == 0], FA)
 
 
-def detector_cells(batch, cfg, detector: str, model, thr: float) -> torch.Tensor:
+def detector_cells(batch, cfg, detector: str, model, thr: float, *, return_scores=False):
     """Jamming map ``[B, 24, 14]`` of a detector. For the block test, ``model`` is the loaded
-    ``val`` split whose benign slots give its empirical nulls."""
+    ``val`` split whose benign slots give its empirical nulls. With ``return_scores``, also
+    expose the evidence behind the map as a pair (raw scores, decisions)."""
     with torch.no_grad():
         features = extract(batch, cfg)
-        if detector != "block_test":
-            return _scores(detector, model, features) > thr
-        n, sc = len(features), batch.scenario
-        d = {
-            "features": features.cpu().numpy(),
-            "alloc_start": np.full(n, sc.alloc_start),
-            "alloc_size": np.full(n, sc.alloc_size),
-            "snr_db": sc.snr_db.numpy(),
-            "snr_db_est": estimated_snr_db(batch.y_alloc, batch.no, cfg).cpu().numpy(),
-        }
-        return torch.from_numpy(block_test_scores(d, model) > thr).to(features.device)
+        if detector == "block_test":
+            n, sc = len(features), batch.scenario
+            d = {
+                "features": features.cpu().numpy(),
+                "alloc_start": np.full(n, sc.alloc_start),
+                "alloc_size": np.full(n, sc.alloc_size),
+                "snr_db": sc.snr_db.cpu().numpy(),
+                "snr_db_est": estimated_snr_db(batch.y_alloc, batch.no, cfg).cpu().numpy(),
+            }
+            scores = torch.from_numpy(block_test_scores(d, model)).to(features.device)
+        else:
+            scores = _scores(detector, model, features)
+        decisions = scores > thr
+        return (scores, decisions) if return_scores else decisions
 
 
 def coarsen_to_prb(cells: torch.Tensor, dmrs_symbol: int) -> torch.Tensor:

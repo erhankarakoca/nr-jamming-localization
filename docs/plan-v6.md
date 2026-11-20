@@ -163,7 +163,7 @@ Reproduce: <commands>
   - delay-domain noise estimation in DFT-based channel estimation;
   - Han et al. 2008.
 
-  Codex does the literature search for the noise-estimation precedent and checks every DOI.
+  A separate literature search covers the noise-estimation precedent and checks every DOI.
 - **Contribution at its true size.**
   - The allocation-dependent per-PRB law, with edge effects and leakage.
   - The distinction between attacked and damaged cells.
@@ -191,12 +191,12 @@ Reproduce: <commands>
 | --- | --- | --- | --- |
 | A | Branch, this plan, draft PR with the empty status table | | me |
 | B | Code with tests: comb energy, batch-16 splits, noise options, channel flag, recovery modes (W1, W3, W5, W7, W8) | laptop | me |
-| B' | In parallel: `ue` interferer and `neighbor` split (W4), 66k per-cell MLP, PRB metric and bootstrap tool (W5, W7) | git worktree | Codex |
+| B' | In parallel: `ue` interferer and `neighbor` split (W4), 66k per-cell MLP, PRB metric and bootstrap tool (W5, W7) | git worktree | parallel worker |
 | C | Regenerate all splits, retrain all models, mixed + spoofing training (W6) | Colab GPU | me |
 | D | All evaluations, intervals, `docs/results.md` section 17 | laptop | me |
 | E | Recovery redesign, BLER against SNR, margin at lower SNR (W1, W2) | Colab GPU | me |
-| F | Paper text and figures (W9 and the paper parts of W1-W8); literature search | Overleaf | me, Codex (search) |
-| G | Independent review of text and numbers; fixes; status table; PR ready for review | | Codex review, me |
+| F | Paper text and figures (W9 and the paper parts of W1-W8); literature search | Overleaf | me, literature search |
+| G | Independent review of text and numbers; fixes; status table; PR ready for review | | independent reviewer, me |
 
 Phases C to E replace every number in the paper, so the text (F) waits for them. Rough cost: two
 days of work, about 3-4 GPU hours on Colab.
@@ -212,7 +212,7 @@ and independent training data per seed.
 - [x] B / B'. Code with tests: noise options and per-slot estimator (`noise.py`), empty-comb
   feature and baselines, 16-slot grids with batch index and estimated SNR, new splits, recovery
   modes (`lmmse`, `slot`, block-test map, mixed-attack map, true map per PRB), margin at several
-  SNRs and slot false-alarm targets, full-chain calibration; Codex: neighbor-cell UE, intervals
+  SNRs and slot false-alarm targets, full-chain calibration; in parallel: neighbor-cell UE, intervals
   and PRB-level F1.
 - [x] C. Full rebuild on a Colab T4 (`experiments.paper_run`, 2 h 10 min, about 3 compute units).
 - [x] D. Evaluations, intervals, `docs/results.md` section 17.

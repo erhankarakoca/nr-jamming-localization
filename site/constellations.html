@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Constellations · NR Jamming Localization</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script type="module" src="assets/js/nav.js"></script>
+  <script type="module" src="assets/js/grid.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="wordmark" href="index.html">NR Jamming Localization</a>
+      <nav aria-label="Main navigation">
+        <a href="index.html">Overview</a>
+        <a href="walkthrough.html">Walkthrough</a>
+        <a href="explore.html">Explore</a>
+        <a href="constellations.html" aria-current="page">Constellations</a>
+        <a href="animations.html">Animations</a>
+        <a href="results.html">Results</a>
+      </nav>
+    </div>
+  </header>
+  <main class="shell" id="main" tabindex="-1">
+<header class="page-intro">
+  <h1>Constellations</h1>
+  <p class="lede">Compare equalized quadrature phase-shift keying (QPSK) symbols from the
+    PRBs touched by the jammer. The benign reference shows the full allocation. All
+    panels use the same axes and map larger absolute log-likelihood ratios to more opaque points.</p>
+  <p>Orange marks injected grid cells and any plotted data points from those cells.
+    Pilot interference can still move the data points by changing the channel estimate.
+    Each batch count includes all slots used to select the example.</p>
+</header>
+<div id="gallery" aria-busy="true">Loading the gallery…</div>
+  </main>
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <div><a href="https://github.com/erhankarakoca/nr-jamming-localization">Code repository</a><span>Paper in preparation</span></div>
+      <details>
+        <summary>How to cite this repository</summary>
+        <pre><code>@misc{karakoca_nr_jamming_localization,
+  author = {Erhan Karakoca},
+  title = {NR Jamming Localization},
+  howpublished = {Software repository},
+  url = {https://github.com/erhankarakoca/nr-jamming-localization}
+}</code></pre>
+      </details>
+    </div>
+  </footer>
+</body>
+</html>
