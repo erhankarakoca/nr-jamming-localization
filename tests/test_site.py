@@ -392,6 +392,34 @@ def test_build_showcase(tmp_path, monkeypatch):
             "first,second,metric,attack,jsr_db,seed,n_seeds,delta,delta_lo,delta_hi\n"
             "fused,no_residual,f1,all,,mean,3,0.005,0.004,0.007\n"
         ),
+        "dmrs_count/detection.csv": (
+            "dmrs_count,detector,seed,threshold,f1_pilot,pd_pilot_m15,f1_data,pd_data_m15,"
+            "f1_partial,f1_all,fa\n"
+            "2,fused,0,0.7,0.8,0.6,0.9,0.7,0.9,0.9,0.01\n"
+            "2,fused,1,0.7,0.9,0.8,0.9,0.7,0.9,0.9,0.01\n"
+            "2,block_test,,30,0.6,0.3,0.9,0.4,0.8,0.8,0.01\n"
+        ),
+        "receiver_study/recovery/recovery_C.csv": (
+            "receiver,jammer,noise_estimate,seed,attack,jsr_db,snr_db,ber,bler,block_errors,blocks\n"
+            + "".join(
+                f"{rx},nominal,true,{seed},pilot_whole_allocation,{jsr},15.0,0,0,{e},10\n"
+                for rx, e in (("p_r_e_soft", 4), ("p_r_e_soft_da", 2), ("lmmse_da", 3))
+                for jsr in (3.0, 9.0)
+                for seed in (0, 1)
+            )
+        ),
+        "receiver_study/recovery/recovery_C_paired.csv": (
+            "first,second,attack,jsr_db,slots,only_first,only_second,"
+            "bler_first,bler_second,delta,delta_lo,delta_hi\n"
+            "p_r_e_soft,p_r_e_soft_da,pilot_whole_allocation,9,20,4,0,0.4,0.2,0.2,0.1,0.3\n"
+        ),
+        "dmrs_count/recovery.csv": (
+            "dmrs_count,jammer_dmrs,seed,channel,snr_db,ue_prbs,jammed_prbs,attack,jsr_db,"
+            "receiver,block_errors,blocks,bler\n"
+            "2,first,0,C,15.0,12,4,pilot,9,standard,3,10,0.3\n"
+            "2,first,1,C,15.0,12,4,pilot,9,standard,1,10,0.1\n"
+            "2,first,1,C,15.0,12,4,pilot,3,standard,9,10,0.9\n"
+        ),
     }
     unselected = {}
     for suffix, jammer in (("", "nominal"), ("_pulsed", "pulsed"), ("_hopping", "hopping")):
@@ -445,12 +473,24 @@ def test_build_showcase(tmp_path, monkeypatch):
     assert len(recovery["paired"]) == 3 and all(r["slots"] == 10 for r in recovery["paired"])
     assert content["matched"]["rows"][0]["f1"] == 0.77
     assert content["matched"]["paired"][0]["jsr_db"] is None
+    dmrs = {(r["dmrs_count"], r["detector"]): r for r in content["dmrs"]["rows"]}
+    assert dmrs[2, "fused"]["n_seeds"] == 2
+    assert dmrs[2, "fused"]["pd_pilot_m15"] == pytest.approx(0.7)
+    assert dmrs[2, "block_test"]["n_seeds"] == 1
+    aided = {(r["jsr_db"], r["receiver"]): r for r in content["data_aided"]["rows"]}
+    row = aided[9.0, "p_r_e_soft_da"]
+    assert row["blocks"] == 20 and row["bler"] == 0.2
+    assert "from 40.0% to 20.0% at +9 dB" in content["data_aided"]["summary"]
+    (pooled,) = content["dmrs"]["recovery"]  # only the +9 dB rows, pooled over the seeds
+    assert pooled["jammer_dmrs"] == "first" and pooled["blocks"] == 20 and pooled["bler"] == 0.2
     for section in content.values():
         assert section["population"]
         for download in section["downloads"]:
             assert (build / download).is_file()
     for name in inputs:
-        assert (build / "downloads" / Path(name).name).read_bytes() == (papers / name).read_bytes()
+        prefix = "data_aided_" if name.startswith("receiver_study/") else ""
+        target = build / "downloads" / f"{prefix}{Path(name).name}"
+        assert target.read_bytes() == (papers / name).read_bytes()
     for name in unselected:
         assert not (build / "downloads" / Path(name).name).exists()
 

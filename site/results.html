@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Results · NR Jamming Localization</title>
   <link rel="stylesheet" href="assets/style.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
   <script type="module" src="assets/js/nav.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
   <script type="module" src="assets/js/results.js"></script>
 </head>
 <body>
@@ -16,10 +16,7 @@
       <a class="wordmark" href="index.html">NR Jamming Localization</a>
       <nav aria-label="Main navigation">
         <a href="index.html">Overview</a>
-        <a href="walkthrough.html">Walkthrough</a>
         <a href="explore.html">Explore</a>
-        <a href="constellations.html">Constellations</a>
-        <a href="animations.html">Animations</a>
         <a href="results.html" aria-current="page">Results</a>
       </nav>
     </div>
@@ -27,51 +24,69 @@
   <main class="shell" id="main" tabindex="-1">
 <header class="page-intro">
   <h1>Results</h1>
-  <p class="lede">The detection curves measure how often a detector flags jammed cells.
-    The margin compares slot detection with the onset of block errors. The recovery
-    results measure decoding on the same received slots.</p>
+  <p>Simulated single-antenna 5G NR PUSCH. Each section states its population; the data behind it can
+    be downloaded under "How this was measured".</p>
   <nav class="section-nav" aria-label="On this page">
-    <a href="#detection">Detection</a><a href="#margin">Margin</a>
-    <a href="#recovery">Recovery</a><a href="#matched">Matched false alarms</a><a href="#failures">Where it fails</a>
+    <a href="#detection">Detection</a><a href="#margin">Margin</a><a href="#recovery">Recovery</a>
+    <a href="#no-clean-pilot">No clean pilot</a><a href="#dmrs">Two DMRS symbols</a><a href="#failures">Where it fails</a><a href="#matched">Matched false alarms</a>
   </nav>
 </header>
 <div id="paper-results" aria-busy="true">
   <section class="panel" id="detection">
-    <h2>Detection probability vs. JSR</h2>
-    <p class="population"></p>
+    <h2>Detection probability</h2>
+    <p>For pilot jamming at −15 dB JSR, adding the residual to power and EVM raises the share of jammed
+      pilot cells detected from 39.4% to 57.4%.</p>
     <div class="controls"><label>Attack <select id="pd-attack" disabled></select></label></div>
     <div id="pd-chart" class="plot" role="group" aria-label="Detection probability chart"></div>
-    <details><summary>Detection data table</summary><div id="pd-table"></div></details>
-    <div class="downloads" aria-label="Detection CSV downloads"></div>
+    <details class="more"><summary>How this was measured</summary><p class="population"></p>
+      <div id="pd-table"></div><div class="downloads" aria-label="Detection CSV downloads"></div></details>
   </section>
   <section class="panel" id="margin">
-    <h2>Smallest detection margin vs. SNR</h2>
-    <p class="population"></p>
+    <h2>Detection margin</h2>
+    <p>JSR at which the standard receiver reaches 10% BLER minus the JSR at which 90% of jammed slots are
+      detected: positive means the detector warns first. It is positive at 15, 11 and 8 dB SNR and
+      negative at 5 dB. Open markers are upper bounds.</p>
     <div id="margin-chart" class="plot" role="group" aria-label="Smallest detection margin chart"></div>
-    <details><summary>Margin estimates and intervals</summary><div id="margin-table"></div></details>
-    <div class="downloads" aria-label="Margin CSV downloads"></div>
+    <details class="more"><summary>How this was measured</summary><p class="population"></p>
+      <div id="margin-table"></div><div class="downloads" aria-label="Margin CSV downloads"></div></details>
   </section>
   <section class="panel" id="recovery">
     <h2>Block error rate at +9 dB JSR</h2>
-    <p class="population"></p>
+    <p>Against the nominal jammer the U-Net map leaves at most 0.06% BLER (TDL-C, 15 dB SNR, known
+      noise power). Against a hopping jammer the nominally trained map leaves 21.2% (data) and 31.3%
+      (partial-band); the map trained on mixed attacks leaves 0% and 0.25%.</p>
     <div class="controls"><label>Jammer <select id="recovery-jammer" disabled></select></label></div>
     <div id="recovery-table"></div>
-    <details><summary>Paired BLER differences</summary><div id="recovery-paired"></div></details>
-    <div class="downloads" aria-label="Recovery CSV downloads"></div>
+    <details class="more"><summary>How this was measured</summary><p class="population"></p>
+      <div id="recovery-all"></div><div id="recovery-paired"></div>
+      <div class="downloads" aria-label="Recovery CSV downloads"></div></details>
+  </section>
+  <section class="panel" id="no-clean-pilot">
+    <h2>When every pilot is jammed</h2>
+    <div id="data-aided" aria-live="polite">Loading…</div>
+    <details class="more"><summary>How this was measured</summary><p class="population"></p>
+      <div id="data-aided-table"></div><div class="downloads" aria-label="Data-aided CSV downloads"></div></details>
+  </section>
+  <section class="panel" id="dmrs">
+    <h2>One or two DMRS symbols</h2>
+    <p>With a second DMRS symbol, pilot jamming is detected more often and the standard and LMMSE
+      receivers lose fewer blocks; the receiver with the U-Net map stays at a few errors in 4,800.</p>
+    <div id="dmrs-table"></div>
+    <details class="more"><summary>How this was measured</summary><p class="population"></p>
+      <div class="downloads" aria-label="DMRS CSV downloads"></div></details>
+  </section>
+  <section class="panel" id="failures" aria-labelledby="failure-title">
+    <h2 id="failure-title">Where it fails</h2>
+    <div id="failure-results" class="numbers" aria-live="polite">Loading the failure cases…</div>
   </section>
   <section class="panel" id="matched">
     <h2>Detectors at matched false-alarm rates</h2>
-    <p class="population"></p>
     <div class="controls"><label>Attack <select id="matched-attack" disabled></select></label></div>
     <div id="matched-table"></div>
-    <details><summary>Paired detector differences</summary><div id="matched-paired"></div></details>
-    <div class="downloads" aria-label="Matched false-alarm CSV downloads"></div>
+    <details class="more"><summary>How this was measured</summary><p class="population"></p>
+      <div id="matched-paired"></div><div class="downloads" aria-label="Matched false-alarm CSV downloads"></div></details>
   </section>
 </div>
-<section id="failures" aria-labelledby="failure-title">
-  <h2 id="failure-title">Where it fails</h2>
-  <div id="failure-results" class="findings" aria-live="polite">Loading the failure cases…</div>
-</section>
   </main>
   <footer class="site-footer">
     <div class="shell footer-inner">
