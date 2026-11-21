@@ -28,7 +28,7 @@
     be downloaded under "How this was measured".</p>
   <nav class="section-nav" aria-label="On this page">
     <a href="#detection">Detection</a><a href="#margin">Margin</a><a href="#recovery">Recovery</a>
-    <a href="#no-clean-pilot">No clean pilot</a><a href="#dmrs">Two DMRS symbols</a><a href="#failures">Where it fails</a><a href="#matched">Matched false alarms</a>
+    <a href="#width">Jammer width</a><a href="#no-clean-pilot">No clean pilot</a><a href="#dmrs">Two DMRS symbols</a><a href="#failures">Where it fails</a><a href="#matched">Matched false alarms</a>
   </nav>
 </header>
 <div id="paper-results" aria-busy="true">
@@ -60,6 +60,19 @@
     <details class="more"><summary>How this was measured</summary><p class="population"></p>
       <div id="recovery-all"></div><div id="recovery-paired"></div>
       <div class="downloads" aria-label="Recovery CSV downloads"></div></details>
+  </section>
+  <section class="panel" id="width">
+    <h2>How wide can the jammer be?</h2>
+    <div id="width-summary" aria-live="polite">Loading…</div>
+    <div class="controls">
+      <label>Attack <select id="width-attack" disabled></select></label>
+      <label>Jammer power <select id="width-jsr" disabled></select></label>
+    </div>
+    <div id="width-chart" class="plot" role="group" aria-label="Block error rate against the jammer's width"></div>
+    <p>Detection against the width of the test set's jammer blocks (anywhere on the 24-PRB carrier):</p>
+    <div id="width-pd-chart" class="plot" role="group" aria-label="Detection probability against the jammer's width"></div>
+    <details class="more"><summary>How this was measured</summary><p class="population"></p>
+      <div id="width-table"></div><div class="downloads" aria-label="Width sweep CSV downloads"></div></details>
   </section>
   <section class="panel" id="no-clean-pilot">
     <h2>When every pilot is jammed</h2>
