@@ -105,10 +105,10 @@ def _example_seed(channel: str) -> int:
 # The jammer does not know the allocation, so its block (2-12 PRBs) lands anywhere: blocks of
 # different widths inside the allocation, across its edges, or (scheduling-aware) exactly on it.
 PATTERN_EXAMPLES = (
-    ("(a) Pilot", "pilot", 10, 4),
-    ("(b) Data", "data", 15, 6),
-    ("(c) Partial-band", "partial", 2, 8),
-    ("(d) Pilot, whole allocation", "pilot", ALLOC[0], ALLOC[1]),
+    ("Pilot", "pilot", 10, 4),
+    ("Data", "data", 15, 6),
+    ("Partial-band", "partial", 2, 8),
+    ("All pilots", "pilot", ALLOC[0], ALLOC[1]),
 )
 EMPTY_COLOR = "#F2F2F2"
 
@@ -138,12 +138,13 @@ def _cell_grid(ax, codes, colors):
 
 
 def attack_patterns():
-    fig, axes = new_figure(3.5, 3.0, nrows=2, ncols=2, sharex=True, sharey=True)
-    fig.set_layout_engine(None)
-    fig.subplots_adjust(left=0.115, right=0.985, bottom=0.235, top=0.925, hspace=0.38, wspace=0.1)
+    """The attack patterns on one slot, one row of grids in the style of the slot figure."""
+    width, height = 3.5, 1.72
+    fig = Figure(figsize=(width, height))
     colors = [EMPTY_COLOR, ALLOC_COLOR, DMRS_COLOR, JAM_COLOR]  # empty, data, DMRS, attacked
     data_symbols = [s for s in range(CFG.num_symbols) if s != CFG.dmrs_symbol]
-    for ax, (title, attack, start, size) in zip(axes.flat, PATTERN_EXAMPLES, strict=True):
+    for i, (name, attack, start, size) in enumerate(PATTERN_EXAMPLES):
+        ax = fig.add_axes(((0.32 + 0.8 * i) / width, 0.66 / height, 0.7 / width, 1.0 / height))
         codes = np.zeros((CFG.num_prb, CFG.num_symbols), dtype=int)
         codes[ALLOC[0] : sum(ALLOC)] = 1
         codes[ALLOC[0] : sum(ALLOC), CFG.dmrs_symbol] = 2
@@ -169,13 +170,16 @@ def attack_patterns():
                         zorder=3,
                     )
                 )
-        ax.set_title(title, loc="left", pad=2.5, fontsize=7)
-    for ax in axes[0]:
-        ax.tick_params(bottom=False)
-    for ax in axes[:, 1]:
-        ax.tick_params(left=False)
-    fig.supylabel("PRB", x=0.02, y=0.58, fontsize=8)
-    fig.supxlabel("OFDM symbol", y=0.135, fontsize=8)
+        ax.tick_params(direction="in", length=2, width=0.5, pad=1.5)
+        ax.set_xlabel("Symbol", labelpad=1)
+        if i:
+            ax.tick_params(labelleft=False)
+        else:
+            ax.set_ylabel("PRB", labelpad=1)
+        box = ax.get_position()
+        fig.text(
+            (box.x0 + box.x1) / 2, 0.24 / height, f"({'abcd'[i]}) {name}", ha="center", fontsize=7.5
+        )
     legend = [
         Patch(facecolor=ALLOC_COLOR, label="Allocation"),
         Patch(facecolor=DMRS_COLOR, label="DMRS"),
@@ -185,22 +189,17 @@ def attack_patterns():
     fig.legend(
         handles=legend,
         loc="lower center",
-        bbox_to_anchor=(0.5, 0.0),
-        ncols=2,
+        bbox_to_anchor=(0.53, 0.0),
+        ncols=4,
         frameon=False,
-        fontsize=7,
-        handlelength=1.4,
-        columnspacing=1.2,
+        handlelength=1.2,
+        columnspacing=0.9,
+        handletextpad=0.4,
     )
     caption = (
-        "Resource grid of one slot (24 PRBs by 14 OFDM symbols) with the UE on PRBs 6-17 and "
-        "its DMRS on symbol 2. The jammer does not know the allocation, so its block of 2-12 "
-        "PRBs can cover part of it or extend beyond it: (a) pilot jamming on 4 PRBs inside the "
-        "allocation, (b) data jamming on 6 PRBs across its upper edge, (c) partial-band jamming "
-        "on 8 PRBs across its lower edge, and (d) a scheduling-aware jammer on the DMRS of all "
-        "12 scheduled PRBs. Orange cells are the "
-        "attacked cells, which are the labels. Hatched cells are unjammed data cells whose EVM "
-        "rises under pilot jamming, because they are equalized with a corrupted channel estimate."
+        "Attack patterns on a slot with the UE on PRBs 6-17 and the DMRS on symbol 2: (a) pilot "
+        "jamming on 4 PRBs, (b) data jamming on 6 PRBs, (c) partial-band jamming on 8 PRBs, (d) "
+        "pilot jamming of the whole allocation. Hatched: unjammed cells whose EVM rises."
     )
     return fig, caption
 
