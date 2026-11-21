@@ -196,6 +196,11 @@ class JammedPUSCHLink:
             labels = pulse_mask(labels, cfg.jammer_duty, self.jammer.torch_rng)
         # (the pilot-spoofing waveform replays the UE's pilots, so the jammer gets the UE grid)
         z = self.jammer(labels, sc.jsr_db, x)
+        if cfg.dmrs_additional_position:
+            # Label the transmitted support. For example, the tones of a sparse jammer can
+            # miss the active comb entirely in a PRB. Keep the historical one-DMRS labels.
+            z_cells = z[:, 0, 0].reshape(sc.batch_size, cfg.num_symbols, cfg.num_prb, 12)
+            labels = z_cells.ne(0).any(dim=-1).transpose(1, 2)
         y_jam = self.jammer_channel[sc.channel](z)
 
         # Receiver noise (UE data REs have unit energy, so no = 10^(-SNR/10))

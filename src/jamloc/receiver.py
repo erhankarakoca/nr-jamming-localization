@@ -40,7 +40,8 @@ class PUSCHReceiverChain(Block):
         rg = tx.resource_grid
         sm = StreamManagement(np.ones([1, 1], bool), 1)  # one UE, one layer
 
-        # The private attributes below are the ones Sionna's own PUSCHReceiver reads.
+        # Use the transmitter's DMRS configuration (including additional symbols), as
+        # Sionna's own PUSCHReceiver does.
         self.channel_estimator = PUSCHLSChannelEstimator(
             rg,
             tx._dmrs_length,

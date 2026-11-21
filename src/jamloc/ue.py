@@ -21,7 +21,8 @@ def make_pusch_config(cfg: SimConfig, num_prb: int) -> PUSCHConfig:
     pc.n_size_bwp = num_prb
     pc.dmrs.config_type = 1  # comb-2
     pc.dmrs.length = 1  # single-symbol DMRS
-    pc.dmrs.additional_position = 0  # front-loaded only
+    pc.dmrs.type_a_position = cfg.dmrs_symbol
+    pc.dmrs.additional_position = cfg.dmrs_additional_position
     pc.tb.mcs_index = cfg.mcs_index
     return pc
 

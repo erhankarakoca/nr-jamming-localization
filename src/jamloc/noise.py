@@ -9,12 +9,13 @@ estimated N0:
 * **A set error** (``SimConfig.noise_estimate = "true"``): the receiver uses N0 times
   ``10^(e/10)``, with ``e`` the per-slot ``noise_error_db`` of the scenario.
 * **A per-slot estimate** (``"comb"``): type-1 DMRS with two CDM groups without data leaves the
-  other comb of the DMRS symbol empty, so every scheduled PRB has 6 resource elements that carry
-  only noise, plus jamming if the jammer hits them. Without jamming, ``|y|^2 / N0`` of such an
-  element is a unit exponential. The estimate is the median of ``|y|^2`` over the empty comb of
+  other comb of each DMRS symbol empty, so every scheduled PRB has 6 resource elements per DMRS
+  symbol that carry only noise, plus jamming if the jammer hits them. Without jamming,
+  ``|y|^2 / N0`` of such an element is a unit exponential. The estimate is the median of
+  ``|y|^2`` over the empty comb of
   the allocation, divided by the expected median of as many unit exponentials. The median ignores
-  jammed elements as long as they are fewer than half of the comb; a jammer on the whole DMRS
-  symbol of the whole allocation biases it upward. Only elements inside the allocation are used,
+  jammed elements as long as they are fewer than half of the comb. A jammer on every DMRS
+  symbol across the whole allocation biases it upward. Only elements inside the allocation are used,
   because in a loaded cell the other PRBs belong to other UEs.
 
 The received SNR that the block test and the SNR-binned thresholds need is estimated from the
@@ -54,7 +55,7 @@ def _median_of_exponentials(m: int) -> float:
 def estimate_noise_comb(y_alloc: torch.Tensor, tx: PUSCHTransmitter) -> torch.Tensor:
     """Per-slot noise power ``[B]`` from the empty DMRS comb of the allocation (see above)."""
     sym, sc = empty_comb(tx)
-    energy = y_alloc[:, 0, 0, sym, sc].abs() ** 2  # [B, 6 n]
+    energy = y_alloc[:, 0, 0, sym, sc].abs() ** 2  # [B, num_dmrs * 6 n]
     return torch.quantile(energy, 0.5, dim=1) / _median_of_exponentials(energy.shape[1])
 
 
@@ -82,6 +83,5 @@ def estimated_snr_db(y_alloc: torch.Tensor, no: torch.Tensor, cfg: SimConfig) ->
     1 + N0, and divided by N0 it is the SNR plus one: the estimate is ``mean |y|^2 / N0 - 1``.
     Jamming on the data symbols raises it, as it would in a real receiver.
     """
-    data_symbols = [s for s in range(cfg.num_symbols) if s != cfg.dmrs_symbol]
-    energy = (y_alloc[:, 0, 0, data_symbols].abs() ** 2).mean(dim=(1, 2))
+    energy = (y_alloc[:, 0, 0, cfg.data_symbols].abs() ** 2).mean(dim=(1, 2))
     return 10 * torch.log10((energy / no - 1).clamp_min(1e-3))

@@ -1,11 +1,13 @@
 """Map-aware receiver: use the jamming map to protect decoding.
 
 The standard receiver trusts every pilot and every data symbol. With a jamming map the gNB can
-treat the flagged cells differently. Two ways are implemented (``mode``):
+treat the flagged cells differently. The channel is assumed constant over the slot, so all DMRS
+symbols contribute to one LMMSE estimate. Repeated observations of a subcarrier share its prior
+correlation and have separate noise variances. Two ways to use the map are implemented:
 
 **hard** (as in the classic literature, e.g. Li et al., MILCOM 2012):
 
-1. *Repair the channel estimate.* Pilots in PRBs whose DMRS is flagged are dropped, and the
+1. *Repair the channel estimate.* Pilots in flagged DMRS cells are dropped, and the
    channel on every subcarrier is interpolated from the clean pilots with an LMMSE filter. The
    filter uses the same channel model as the DMRS residual feature (delays spread uniformly up to
    ``tau_max``), so one model both detects the attack and repairs it.
@@ -14,8 +16,8 @@ treat the flagged cells differently. Two ways are implemented (``mode``):
 
 **soft**: the map says *where*, the receiver estimates *how strong* from the flagged cells:
 
-1. Pilots of a flagged PRB are kept, but the LMMSE filter is told their noise is larger: the
-   PRB's DMRS residual ``R`` (about 1 without jamming, ``1 + JNR`` under jamming) multiplies their
+1. Pilots of a flagged DMRS cell are kept, but the LMMSE filter is told their noise is larger: the
+   cell's residual ``R`` (about 1 without jamming, ``1 + JNR`` under jamming) multiplies their
    noise variance. Strongly jammed pilots are effectively ignored; a false alarm (``R`` about 1)
    costs nothing.
 2. The jamming power on the flagged data cells of each PRB is estimated from their excess
@@ -23,10 +25,10 @@ treat the flagged cells differently. Two ways are implemented (``mode``):
    noise variance of those symbols before demapping. The LLRs shrink by exactly the right amount:
    to almost 0 under strong jamming, hardly at all after a false alarm.
 
-**dmrs** (no map, what a receiver can do with its DMRS alone): a PRB is declared interfered if its
+**dmrs** (no map, what a receiver can do with its DMRS alone): a DMRS cell is declared interfered if its
 DMRS residual exceeds the analytic 1% threshold (``jamloc.theory``); its pilots are down-weighted
-as in *soft*, and the interference estimated on the DMRS is assumed to last the whole slot, so all
-data symbols of the PRB get the extra noise variance. This is blind to data-only jamming, and it
+as in *soft*, and the mean interference across its DMRS symbols is assumed to last the whole slot,
+so all data symbols of the PRB get the extra noise variance. This is blind to data-only jamming, and it
 wrongly penalizes the clean data of a pilot-jammed PRB.
 
 Two more references without a map separate what the map adds from what the rest of the receiver
@@ -36,10 +38,9 @@ adds:
 receiver, and plain demapping. It differs from the standard receiver (Sionna's LS estimate with
 linear interpolation) only in the interpolator.
 
-**slot**: an interference-aware receiver that measures noise plus interference once per slot, as
-receivers without any localization do: every pilot's noise variance is multiplied by the mean
-DMRS residual of the allocation, and the mean excess energy over all data symbols of the slot is
-added to the noise variance of every data symbol.
+**slot**: an interference-aware receiver without per-PRB localization: each pilot's variance is
+multiplied by the mean residual over the allocation on its own DMRS symbol, and the mean excess
+energy over all data symbols of the slot is added to the variance of every data symbol.
 
 Why LMMSE and not a least-squares fit: dropping a block of pilots leaves a gap, and a plain fit
 across the gap amplifies the noise enormously. LMMSE also gives an error variance for every
@@ -64,7 +65,7 @@ from sionna.phy.ofdm import LMMSEEqualizer
 
 from jamloc import theory
 from jamloc.config import SimConfig
-from jamloc.features import dmrs_ls, residual_per_prb
+from jamloc.features import dmrs_ls, dmrs_residuals
 from jamloc.receiver import data_positions
 
 
@@ -82,6 +83,7 @@ def lmmse_interpolation(
     ``h_ls`` ``[B, N_p]``: LS estimates at the pilots (subcarriers ``pilot_sc``). ``clean``
     ``[B, N_p]``: which pilots to use. ``s2``: LS noise variance, ``[B]`` (the same on every
     pilot) or ``[B, N_p]`` (per pilot).
+    Repeated indices in ``pilot_sc`` are observations of the same channel on different symbols.
     Returns ``h_hat`` ``[B, num_sc]`` and its error variance ``[B, num_sc]`` (channel power 1).
     """
     # Everything below runs on the CPU and the results go back to the input's device. On CUDA,
@@ -137,6 +139,7 @@ class MapAwareReceiver(Block):
         self.tx = tx
         self.cfg = cfg or SimConfig()
         rg = tx.resource_grid
+        self.dmrs_symbols = tuple(rg.pilot_pattern.mask[0, 0].any(-1).nonzero().flatten().tolist())
         sm = StreamManagement(np.ones([1, 1], bool), 1)
         self.standard_estimator = PUSCHLSChannelEstimator(
             rg,
@@ -176,23 +179,29 @@ class MapAwareReceiver(Block):
                     f"{tuple(cells.shape)} (cut a carrier map to the scheduled PRBs first)"
                 )
 
-        # 1. LS estimates at the DMRS pilots and the residual of every PRB
+        # 1. Stack the LS observations in symbol order. The frequency indices repeat, so
+        # indexing the prior by them gives the same frequency correlation within and between
+        # DMRS symbols. Each observation still has its own diagonal noise variance.
         h_ls, pilot_sc, pilot_power = dmrs_ls(y, self.tx)
+        num_dmrs = len(self.dmrs_symbols)
         pilot_prb = pilot_sc // 12
         s2 = no / pilot_power  # LS noise variance per pilot without jamming
+        clean = torch.ones_like(h_ls, dtype=torch.bool)
+        pilot_var = s2
         r, interfered = None, None
+        pilot_dmrs = torch.arange(num_dmrs, device=y.device).repeat_interleave(
+            pilot_sc.numel() // num_dmrs
+        )
+        if mode in ("hard", "soft"):
+            flagged = cells[:, :, self.dmrs_symbols].transpose(1, 2)  # [B, num_dmrs, n]
         if mode == "hard":
-            clean = ~cells[:, pilot_prb, cfg.dmrs_symbol]  # pilots of unflagged PRBs only
-            pilot_var = s2
-        elif mode == "lmmse":
-            clean = torch.ones_like(h_ls, dtype=torch.bool)  # every pilot, equally trusted
-            pilot_var = s2
-        else:
-            r = residual_per_prb(h_ls, pilot_sc, no, pilot_power, cfg).clamp_min(1)  # [B, n]
-            if mode == "slot":  # one level for the whole allocation: the mean residual
-                r = r.mean(dim=1, keepdim=True).expand_as(r)
+            clean = ~flagged[:, pilot_dmrs, pilot_prb]
+        elif mode != "lmmse":
+            r = dmrs_residuals(h_ls, pilot_sc, no, pilot_power, cfg, num_dmrs).clamp_min(1)
+            if mode == "slot":  # one allocation-wide level per DMRS symbol
+                r = r.mean(dim=-1, keepdim=True).expand_as(r)
                 interfered = torch.ones_like(r, dtype=torch.bool)
-            elif mode == "dmrs":  # interfered PRBs: residual above the analytic 1% threshold
+            elif mode == "dmrs":  # interfered cells: residual above the analytic 1% threshold
                 thr = torch.tensor(
                     [theory.threshold(num_prb, b, 0.01, cfg) for b in range(num_prb)],
                     device=r.device,
@@ -200,10 +209,9 @@ class MapAwareReceiver(Block):
                 )
                 interfered = r > thr
             else:
-                interfered = cells[:, :, cfg.dmrs_symbol]
-            inflate = torch.where(interfered, r, torch.ones_like(r))  # [B, n]
-            clean = torch.ones_like(h_ls, dtype=torch.bool)  # every pilot, weighted
-            pilot_var = s2[:, None] * inflate[:, pilot_prb]
+                interfered = flagged
+            inflate = torch.where(interfered, r, torch.ones_like(r))
+            pilot_var = s2[:, None] * inflate[:, pilot_dmrs, pilot_prb]
 
         # 2. Repair: LMMSE interpolation, the same on all 14 symbols
         h_sc, err_sc = lmmse_interpolation(
@@ -260,15 +268,16 @@ class MapAwareReceiver(Block):
             excess = self._excess_energy(y, no, h_sc, err_sc)
             return excess.mean(dim=1, keepdim=True).clamp_min(0).expand_as(excess)
         if mode == "dmrs":
-            # Interference measured on the DMRS, assumed to last the whole slot:
-            # residual R = 1 + JNR, so the jamming power is N0 (R - 1)
-            per_prb = torch.where(interfered, no[:, None] * (r - 1), torch.zeros_like(r))
+            # Residual R = 1 + JNR. Average the estimated interference, including zero for
+            # clean DMRS cells, before extending it to the PRB's data symbols.
+            per_dmrs = torch.where(interfered, no[:, None, None] * (r - 1), torch.zeros_like(r))
+            per_prb = per_dmrs.mean(dim=1)
             return per_prb[:, data_prb]
 
         excess = self._excess_energy(y, no, h_sc, err_sc)
         flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]
-        # Average over the flagged data symbols of each PRB (about 156 symbols per jammed PRB)
-        num_prb = r.shape[1]
+        # Average over the flagged data REs of each PRB.
+        num_prb = y.shape[-1] // 12
         total = excess.new_zeros(excess.shape[0], num_prb).index_add_(
             1, data_prb, torch.where(flagged, excess, torch.zeros_like(excess))
         )

@@ -28,15 +28,14 @@ them can see jamming outside the allocation. The block test is the strongest cla
 we could build from the same features:
 
 * Block test (training-free): every cell of the carrier gets the ``-log10`` p-value of the
-  statistic that matches the attack structure. Jammers hit whole PRBs on the DMRS symbol, on the
-  13 other symbols, or on both, so the statistic of a data cell is averaged over the 13 data
-  symbols of its PRB:
+  statistic that matches the attack structure. The test scores DMRS cells separately and
+  averages the statistic of a data cell over the PRB's ``m`` data symbols:
 
   ===============  ==========================================  =====================================
   cell             statistic                                   null distribution (no jamming)
   ===============  ==========================================  =====================================
   unscheduled DMRS power P                                     mean of 12 unit exponentials (exact)
-  unscheduled data P averaged over the PRB's 13 data symbols   mean of 156 unit exponentials (exact)
+  unscheduled data P averaged over the PRB's data symbols      mean of 12 m unit exponentials (exact)
   scheduled DMRS   residual R                                  weighted exponentials (exact, theory)
   scheduled data   EVM averaged over the PRB's data symbols    benign ``val`` PRBs, same SNR bin
   ===============  ==========================================  =====================================
@@ -51,7 +50,7 @@ we could build from the same features:
 
   Pilot jamming raises the EVM of the scheduled data symbols through the corrupted channel
   estimate. A rule separates it from partial-band jamming, which also raises the residual: the
-  DMRS cell and the data cells of a PRB see the same channel, so their power ratio is near 1
+  DMRS and data cells of a PRB see the same channel, so the ratio of their mean powers is near 1
   without jamming and under partial-band jamming, and above 1 when only the pilots are jammed.
   When the residual and this ratio are both significant at 1% (thresholds fixed in advance, not
   tuned), the PRB's data cells get p = 1 (score 0): they stay among the scored cells but are not
@@ -107,24 +106,28 @@ def comb_scores(features: np.ndarray) -> np.ndarray:
     return np.where(features[:, _IDX["dmrs_mask"]] > 0, -_log10_gamma_sf(comb, 6), -np.inf)
 
 
+def _dmrs_symbols(features: np.ndarray) -> np.ndarray:
+    """DMRS rows of a split, including the unallocated PRBs on those same rows."""
+    return np.flatnonzero(features[:, _IDX["dmrs_mask"]].any(axis=(0, 1)))
+
+
 def residual_cfar_scores(d: dict) -> np.ndarray:
     """``[N, 24, 14]``: ``-log10`` of the no-jamming tail probability of each DMRS cell's residual.
 
     ``d`` is a loaded split (needs ``features``, ``alloc_start`` and ``alloc_size``).
     """
-    from jamloc.config import SimConfig
     from jamloc.theory import log10_pvalue
 
-    dmrs = SimConfig().dmrs_symbol
     features = d["features"]
+    dmrs = _dmrs_symbols(features)
     out = np.full((len(features), features.shape[2], features.shape[3]), -np.inf)
-    r = 10 ** (features[:, _IDX["residual_db"], :, dmrs] / 10)  # [N, 24]
+    r = 10 ** (features[:, _IDX["residual_db"]][..., dmrs] / 10)  # [N, 24, num_dmrs]
     for n in np.unique(d["alloc_size"]):
         for start in np.unique(d["alloc_start"][d["alloc_size"] == n]):
             rows = np.flatnonzero((d["alloc_size"] == n) & (d["alloc_start"] == start))
             for pos in range(int(n)):
                 prb = int(start) + pos
-                out[rows, prb, dmrs] = -log10_pvalue(r[rows, prb], int(n), pos)
+                out[rows[:, None], prb, dmrs] = -log10_pvalue(r[rows, prb], int(n), pos)
     return out
 
 
@@ -168,15 +171,15 @@ def _evm_groups(d: dict) -> np.ndarray:
     return 2 * np.digitize(snr, EVM_SNR_EDGES_DB)[:, None] + edge
 
 
-def _pilot_to_data_power(features: np.ndarray, dmrs: int) -> np.ndarray:
-    """``[N, 24]``: log of the DMRS cell's power over the PRB's mean data-symbol power.
+def _pilot_to_data_power(features: np.ndarray, dmrs: np.ndarray) -> np.ndarray:
+    """``[N, 24]``: log of the ratio of mean DMRS power to mean data power in a PRB.
 
     Both see the same channel at low mobility (the DMRS comb carries twice the energy on half the
     subcarriers, so the cell means match), so the ratio is near 0 without jamming and under
     partial-band jamming, and positive when only the pilots are jammed."""
     power = 10 ** (features[:, _IDX["power_db"]] / 10)
-    data_symbols = np.arange(features.shape[3]) != dmrs
-    return np.log(power[:, :, dmrs] / power[:, :, data_symbols].mean(-1))
+    data_symbols = ~np.isin(np.arange(features.shape[3]), dmrs)
+    return np.log(power[:, :, dmrs].mean(-1) / power[:, :, data_symbols].mean(-1))
 
 
 def _empirical_scores(d: dict, null: dict, statistic) -> np.ndarray:
@@ -211,20 +214,18 @@ def block_test_scores(d: dict, null: dict, use_comb: bool = False) -> np.ndarray
     ``d`` is a loaded split; ``null`` the split whose benign slots give the EVM and power-ratio
     nulls (``val``). ``use_comb`` adds the empty-comb test to the scheduled DMRS cells.
     """
-    from jamloc.config import SimConfig
-
-    dmrs = SimConfig().dmrs_symbol
     features = d["features"]
-    data_symbols = np.arange(features.shape[3]) != dmrs
-    scheduled = features[:, _IDX["alloc_mask"], :, dmrs] > 0  # [N, 24]
+    dmrs = _dmrs_symbols(features)
+    data_symbols = ~np.isin(np.arange(features.shape[3]), dmrs)
+    scheduled = features[:, _IDX["alloc_mask"], :, dmrs[0]] > 0  # [N, 24]
     power = 10 ** (features[:, _IDX["power_db"]] / 10)
 
-    # One score for the DMRS cell and one for the data cells of every PRB: [N, 24] each
+    # One score per DMRS cell [N, 24, num_dmrs], one for the data cells of each PRB [N, 24]
     pilot_scheduled = residual_cfar_scores(d)[:, :, dmrs]
     if use_comb:  # smaller of the two p-values, times 2 (Bonferroni)
         comb = comb_scores(features)[:, :, dmrs]
         pilot_scheduled = np.maximum(pilot_scheduled, comb) - np.log10(2)
-    pilot = np.where(scheduled, pilot_scheduled, -_log10_gamma_sf(power[:, :, dmrs], 12))
+    pilot = np.where(scheduled[..., None], pilot_scheduled, -_log10_gamma_sf(power[:, :, dmrs], 12))
     data = np.where(
         scheduled,
         _empirical_scores(d, null, prb_data_evm),
@@ -234,7 +235,7 @@ def block_test_scores(d: dict, null: dict, use_comb: bool = False) -> np.ndarray
     # Pilot-only rule: if the residual and the DMRS-to-data power ratio are both significant, the
     # PRB's EVM rise comes from the corrupted channel estimate, not from jammed data symbols
     ratio = _empirical_scores(d, null, lambda f: _pilot_to_data_power(f, dmrs))
-    pilot_only = scheduled & (pilot > _RULE) & (ratio > _RULE)
+    pilot_only = scheduled & (pilot > _RULE).any(-1) & (ratio > _RULE)
     data = np.where(pilot_only, 0.0, data)  # p = 1: scored (counted as tested), never flagged
 
     out = np.empty(power.shape)

@@ -237,11 +237,11 @@ def detector_cells(batch, cfg, detector: str, model, thr: float, *, return_score
         return (scores, decisions) if return_scores else decisions
 
 
-def coarsen_to_prb(cells: torch.Tensor, dmrs_symbol: int) -> torch.Tensor:
-    """A map ``[B, n, 14]`` at the block test's resolution: the DMRS cell of each PRB as it is,
-    and all data cells of the PRB flagged if any of them is."""
+def coarsen_to_prb(cells: torch.Tensor, dmrs_symbols: int | tuple[int, ...]) -> torch.Tensor:
+    """A map at the block test's resolution: preserve each DMRS cell and flag every data
+    cell of the PRB if any of its data cells is flagged."""
     data = torch.ones(cells.shape[-1], dtype=torch.bool, device=cells.device)
-    data[dmrs_symbol] = False
+    data[list(dmrs_symbols) if isinstance(dmrs_symbols, tuple) else dmrs_symbols] = False
     out = cells.clone()
     out[:, :, data] = cells[:, :, data].any(dim=-1, keepdim=True).expand(-1, -1, int(data.sum()))
     return out
@@ -290,7 +290,7 @@ def simulate_point(
             continue
         map_aware = map_aware or MapAwareReceiver(out.tx, cfg)
         maps = {"true": out.labels[:, alloc]}
-        maps["true_prb"] = coarsen_to_prb(maps["true"], cfg.dmrs_symbol)
+        maps["true_prb"] = coarsen_to_prb(maps["true"], cfg.dmrs_symbols)
         needed = {RECEIVERS[rx][0] for rx in active}
         for det, (model, thr) in detectors.items():
             if det in needed:

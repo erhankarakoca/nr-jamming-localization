@@ -127,13 +127,14 @@ PLOT_DETECTORS = (
 )
 
 
-def available_seeds() -> list[int]:
+def available_seeds(data: str = "") -> list[int]:
     """Training seeds for which every U-Net variant has a checkpoint."""
     seeds = None
+    suffix = f"_{data}" if data else ""
     for variant in VARIANTS:
         found = {
             int(path.stem.rsplit("_seed", 1)[1])
-            for path in (results_dir() / "models").glob(f"{variant}_seed*.pt")
+            for path in (results_dir() / "models").glob(f"{variant}{suffix}_seed*.pt")
         }
         seeds = found if seeds is None else seeds & found
     return sorted(seeds or [])
@@ -148,29 +149,30 @@ def _logits(model, variant: str, features: torch.Tensor) -> np.ndarray:
     return torch.cat(logits).numpy()
 
 
-def score_split(d: dict, seed: int, null: dict) -> dict[str, np.ndarray]:
+def score_split(d: dict, seed: int, null: dict, *, data: str = "") -> dict[str, np.ndarray]:
     """Scores ``[N, 24, 14]`` of every detector on one loaded split.
 
-    ``null`` is the split whose benign slots calibrate the block test's EVM and power-ratio
-    statistics: always ``val``, also when ``d`` is a test split. The per-cell MLPs, the U-Net
+    ``null`` is the validation split whose benign slots calibrate the block test's EVM and
+    power-ratio statistics. ``data`` selects the corresponding models. The per-cell MLPs, the U-Net
     trained with noise jitter and the extra U-Net variants are included when their checkpoints
     exist.
     """
     features = torch.from_numpy(d["features"])
     scores = {
-        variant: _logits(load_model(variant, seed), variant, features) for variant in VARIANTS
+        variant: _logits(load_model(variant, seed, data=data), variant, features)
+        for variant in VARIANTS
     }
     for variant in EXTRA_VARIANTS:
-        if checkpoint_path(variant, seed).is_file():
-            scores[variant] = _logits(load_model(variant, seed), variant, features)
+        if checkpoint_path(variant, seed, data=data).is_file():
+            scores[variant] = _logits(load_model(variant, seed, data=data), variant, features)
     optional = {
         "fused_pixel": {"arch": "pixel"},
         "fused_pixel_wide": {"arch": "pixel", "hidden": PIXEL_HIDDEN_MATCHED},
         "fused_nj1": {"jitter": 1.0},
     }
     for name, kw in optional.items():
-        if checkpoint_path("fused", seed, **kw).is_file():
-            scores[name] = _logits(load_model("fused", seed, **kw), "fused", features)
+        if checkpoint_path("fused", seed, data=data, **kw).is_file():
+            scores[name] = _logits(load_model("fused", seed, data=data, **kw), "fused", features)
     scores["evm_threshold"] = evm_scores(d["features"])
     scores["residual_threshold"] = residual_scores(d["features"])
     scores["residual_cfar"] = residual_cfar_scores(d)
@@ -302,12 +304,21 @@ def main(argv=None):
     )
     args = p.parse_args(argv)
 
-    seeds = available_seeds()
+    data = "dmrs2" if args.split.endswith("_dmrs2") else ""
+    seeds = available_seeds(data)
     if not seeds:
-        raise SystemExit("No trained models in results/models: run python -m jamloc.train first.")
+        train_cmd = "python -m jamloc.train --variant all"
+        if data:
+            train_cmd += f" --data {data}"
+        raise SystemExit(f"No complete set of trained models. Run {train_cmd} first.")
 
-    val, test = load("val"), load(args.split)
-    titles = {"test": "test set", "sched": "scheduling-aware jammer"}
+    val, test = load(f"val_{data}" if data else "val"), load(args.split)
+    titles = {
+        "test": "test set",
+        "sched": "scheduling-aware jammer",
+        "test_dmrs2": "test set with two DMRS symbols",
+        "sched_dmrs2": "scheduling-aware jammer with two DMRS symbols",
+    }
     name, what = args.split, titles.get(args.split) or SPLITS[args.split]["title"]
     if args.snr_db:
         lo, hi = args.snr_db
@@ -318,7 +329,8 @@ def main(argv=None):
 
     pd_rows, f1_rows = [], []
     for seed in seeds:
-        s_val, s_test = score_split(val, seed, null=val), score_split(test, seed, null=val)
+        s_val = score_split(val, seed, null=val, data=data)
+        s_test = score_split(test, seed, null=val, data=data)
         scores = {det: (s_val[det], s_test[det]) for det in s_val}
         pd_seed, f1_seed = evaluate_scores(scores, val, test)
         pd_rows += [{**r, "seed": seed} for r in pd_seed]
