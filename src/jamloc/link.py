@@ -129,6 +129,7 @@ class SlotBatch:
     b: torch.Tensor  # transmitted information bits
     tx: PUSCHTransmitter  # transmitter used for this batch
     no_true: torch.Tensor | None = None  # true noise variance [B]
+    h_ue: torch.Tensor | None = None  # UE frequency response on the allocation [B, 14, 12 n]
 
 
 class JammedPUSCHLink:
@@ -163,16 +164,33 @@ class JammedPUSCHLink:
             self._receivers[num_prb] = PUSCHReceiverChain(self.ue.transmitter(num_prb))
         return self._receivers[num_prb]
 
-    def __call__(self, scenario: Scenario, decode: bool = False, receive: bool = True) -> SlotBatch:
+    def __call__(
+        self,
+        scenario: Scenario,
+        decode: bool = False,
+        receive: bool = True,
+        *,
+        keep_channel: bool = False,
+    ) -> SlotBatch:
         """One batch of slots. ``receive=False`` skips the receiver chain (``rx`` is then empty):
-        the random draws are the same, so a run can be replayed while decoding only some of it."""
+        the random draws are the same, so a run can be replayed while decoding only some of it.
+        ``keep_channel=True`` retains the UE channel response used in this very draw."""
         cfg, sc = self.cfg, scenario
         tx = self.ue.transmitter(sc.alloc_size)
 
         # UE: PUSCH slot on its allocation, placed on the carrier, through its channel
         x, b = tx(sc.batch_size)
         x = place_on_carrier(x, sc.alloc_start, cfg)
-        y_ue = self.ue_channel[sc.channel](x)
+        channel = self.ue_channel[sc.channel]
+        h_ue = None
+        if keep_channel:
+            # The same two blocks as OFDMChannel.call, retaining the response before adding
+            # jamming and noise. There is still just one draw of the UE channel.
+            h_freq = channel.generate(x.shape[0])
+            y_ue = channel.apply(x, h_freq)
+            h_ue = take_allocation(h_freq[:, 0, 0, 0, 0], sc.alloc_start, sc.alloc_size)
+        else:
+            y_ue = channel(x)
 
         # Jammer: Gaussian noise on the attacked cells, through its own channel
         hop_start = None
@@ -223,6 +241,7 @@ class JammedPUSCHLink:
             b=b,
             tx=tx,
             no_true=no,
+            h_ue=h_ue,
         )
 
 

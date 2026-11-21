@@ -7,6 +7,7 @@ from jamloc.experiments.recovery import ALLOC, JAMMERS, NEST_DETECTORS, TRAINED_
 
 NOMINAL = ("fused", "no_residual", "power", "block_test", "evm_threshold", "residual_threshold")
 DETECTORS = (*NOMINAL, "power_threshold", *TRAINED_ON, "fused_atk2")
+AIDED_RECEIVER = "fused_soft_da"
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,8 @@ class Case:
     decode_maps: tuple[str, ...] = ("fused",)
     selection_rule: str = "median_hit_rate"
     batch_size: int = 64
+    include_channel: bool = False
+    iterations: int = 0
 
     @property
     def detectors(self):
@@ -41,7 +44,7 @@ class Case:
         return SimConfig(noise_estimate=self.noise_estimate, **options)
 
 
-_PILOT = Case("pilot", "Pilot jamming, +3 dB", "pilot", 3)
+_PILOT = Case("pilot", "Pilot jamming, +3 dB", "pilot", 3, include_channel=True)
 CASES = {
     case.name: case
     for case in (
@@ -94,6 +97,16 @@ CASES = {
             name="walkthrough_flip",
             title="Pilot jamming with a recovered CRC",
             selection_rule="first_crc_flip",
+        ),
+        Case(
+            "aided_flip",
+            "Whole-allocation pilot jamming recovered with data-aided passes",
+            "pilot",
+            9,
+            jam=ALLOC,
+            selection_rule="first_aided_crc_flip",
+            include_channel=True,
+            iterations=3,
         ),
     )
 }

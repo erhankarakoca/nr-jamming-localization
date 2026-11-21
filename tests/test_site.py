@@ -9,7 +9,7 @@ def test_case_definitions():
     from jamloc.jammer import ATTACKS
     from jamloc.site.cases import CASES, DETECTORS
 
-    assert len(CASES) == 12
+    assert len(CASES) == 13
     for name, case in CASES.items():
         assert name == case.name and case.title
         assert case.attack in ATTACKS
@@ -20,6 +20,9 @@ def test_case_definitions():
     assert CASES["spoof"].config().jammer_waveform == "dmrs"
     assert CASES["pilot_whole_comb"].config().noise_estimate == "comb"
     assert set(CASES["pilot_whole_comb"].detectors) == set(NEST_DETECTORS)
+    aided = CASES["aided_flip"]
+    assert aided.attack == "pilot" and aided.jam == aided.alloc == (6, 12)
+    assert (aided.channel, aided.snr_db, aided.jsr_db, aided.noise_estimate) == ("C", 15, 9, "true")
 
 
 @pytest.fixture(scope="module")
@@ -70,6 +73,16 @@ def test_same_received_grid_and_selection(tiny_models, monkeypatch):
     assert run.selection["slot"] == int((rates - median).abs().argmin())
     assert run.selection["batch_median"] == float(median)
     document = payload(run)
+    channel = document["channel"]
+    assert channel["dmrs_symbol"] == 2 and channel["num_sc"] == 144
+    assert channel["pilot_sc"] == list(range(0, 144, 2))
+    assert channel["pilot_jammed"] == [48 <= sc < 96 for sc in channel["pilot_sc"]]
+    assert channel["ls"] == document["pilots"]["ls"]
+    assert channel["fit"] == document["pilots"]["projection"]
+    assert channel["residual_prb"] == document["prb"]["r_b"]
+    assert channel["threshold_prb"] == document["prb"]["threshold"]
+    for source in ("true", "standard", "map"):
+        assert len(channel[source]) == 144 and all(len(row) == 2 for row in channel[source])
     counts = document["metadata"]["batch_crc"]
     assert counts.keys() == document["receivers"].keys() == run.receivers.keys()
     for name, rx in run.receivers.items():
@@ -93,6 +106,59 @@ def test_flip_selection():
     assert choice["flip_count"] == 2 and choice["flip_frequency"] == 0.5
     with pytest.raises(ValueError, match="no CRC flip"):
         _select(CASES["walkthrough_flip"], truth, truth, {**crc, "fused_soft": standard})
+
+
+def test_aided_flip_selects_first_soft_crc_recovered_by_passes():
+    import torch
+
+    from jamloc.site.cases import CASES
+    from jamloc.site.export import _select
+
+    truth = torch.ones((4, 1, 1), dtype=torch.bool)
+    plain = torch.tensor([False, True, False, False])
+    aided = torch.tensor([False, True, True, True])
+    choice = _select(
+        CASES["aided_flip"], truth, truth, {"fused_soft": plain, "fused_soft_da": aided}
+    )
+    assert choice["rule"] == "first_aided_crc_flip"
+    assert choice["slot"] == 2
+    assert choice["flip_count"] == 2 and choice["flip_frequency"] == 0.5
+    assert choice["seed"] == CASES["aided_flip"].seed
+
+
+def test_aided_payload_records_passes(tiny_models, monkeypatch):
+    from dataclasses import replace
+
+    from jamloc.site import export as exporter
+    from jamloc.site.cases import CASES
+
+    definition = replace(CASES["aided_flip"], batch_size=16)
+    tried = []
+    select = exporter._select
+
+    def without_first_flip(case, truth, flags, crc):
+        tried.append(case.seed)
+        if case.seed == definition.seed:
+            # Suppress qualifying slots in the initial batch to exercise the next-seed path.
+            crc = {**crc, "fused_soft_da": crc["fused_soft"]}
+        return select(case, truth, flags, crc)
+
+    monkeypatch.setattr(exporter, "_select", without_first_flip)
+    run = exporter.simulate_case(definition)
+    case = exporter.payload(run)
+    selection = case["metadata"]["selection"]
+    assert len(tried) >= 2 and tried == list(range(definition.seed, tried[-1] + 1))
+    assert selection["seed"] == case["metadata"]["seed"] == tried[-1]
+    assert case["channel"]["pilot_jammed"] == [True] * 72
+    assert 2 <= len(case["passes"]) <= 4
+    assert case["passes"][0]["h"] == case["channel"]["map"]
+    assert case["passes"][0]["x_hat"] == case["receivers"]["fused_soft"]["x_hat"]
+    assert case["passes"][0]["crc"] is case["receivers"]["fused_soft"]["crc"] is False
+    assert case["receivers"]["fused_soft_da"]["crc"] is True
+    assert any(step["crc"] for step in case["passes"][1:])
+    for step in case["passes"]:
+        assert len(step["h"]) == 144 and all(len(row) == 2 for row in step["h"])
+        assert len(case["x_hat"][step["x_hat"]]) == len(case["abs_llr"][step["abs_llr"]]) == 1872
 
 
 def test_pilot_whole_comb_selects_first_true_soft_failure():
@@ -248,6 +314,8 @@ def _write_case_data(data):
             "true_prb_soft",
             *(f"{name}_soft" for name in case.decode_maps),
         }
+        if case.name == "aided_flip":
+            receivers.add("fused_soft_da")
         pilots = {
             "subcarrier": list(range(0, width * 12, 2)),
             "residual_power": [0] * (width * 6),
@@ -265,6 +333,8 @@ def _write_case_data(data):
                     "batch_median": 0,
                     "slot": 0,
                     "flip_count": 1,
+                    "flip_frequency": 1 / 64,
+                    "seed": case.seed,
                     "failure_count": 1,
                 },
                 "thresholds": {
@@ -301,6 +371,28 @@ def _write_case_data(data):
             document["sweep"] = [
                 {"jsr_db": db, "pilots": pilots, "r_b": [0] * width} for db in range(-15, 10, 3)
             ]
+        if case.name in ("pilot", "walkthrough_flip", "aided_flip"):
+            document["channel"] = {
+                "dmrs_symbol": cfg.dmrs_symbol,
+                "num_sc": width * 12,
+                "pilot_sc": pilots["subcarrier"],
+                "pilot_jammed": [False] * (width * 6),
+                "ls": pilots["ls"],
+                "fit": pilots["projection"],
+                **{name: [[0, 0]] * (width * 12) for name in ("true", "standard", "map")},
+                "residual_prb": [0] * width,
+                "threshold_prb": [1] * width,
+            }
+        if case.name == "aided_flip":
+            document["passes"] = [
+                {
+                    "h": document["channel"]["map"],
+                    "x_hat": "shared",
+                    "abs_llr": "shared",
+                    "crc": crc,
+                }
+                for crc in (False, True)
+            ]
         path = data / f"{case.name}.json"
         path.write_text(json.dumps(document), encoding="utf-8")
         entries.append({"name": case.name, "title": case.title, "file": path.name})
@@ -321,7 +413,9 @@ def test_check_build_requires_page_cases(tmp_path):
     manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["cases"] = [entry for entry in manifest["cases"] if entry["name"] == "pilot"]
     path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(ValueError, match=r"manifest\.json.*hopping.*jsr_sweep.*walkthrough_flip"):
+    with pytest.raises(
+        ValueError, match=r"manifest\.json.*aided_flip.*hopping.*jsr_sweep.*walkthrough_flip"
+    ):
         check_build(tmp_path)
 
 
@@ -336,6 +430,10 @@ def test_check_build_requires_page_cases(tmp_path):
         ("hopping", ("metadata", "batch_crc", "fused_atk_soft")),
         ("pilot", ("x_hat", "shared")),
         ("jsr_sweep", ("sweep", 0, "pilots", "residual_power")),
+        ("pilot", ("channel", "fit", 0)),
+        ("walkthrough_flip", ("channel", "standard", 0, 1)),
+        ("aided_flip", ("passes", 0, "x_hat")),
+        ("aided_flip", ("passes", 0, "h", 0)),
     ],
 )
 def test_check_build_requires_case_fields(tmp_path, name, keys):
@@ -354,7 +452,24 @@ def test_check_build_requires_case_fields(tmp_path, name, keys):
         parent = parent[key]
     del parent[keys[-1]]
     path.write_text(json.dumps(document), encoding="utf-8")
-    with pytest.raises(ValueError, match=rf"{name}\.json.*{re.escape(keys[-1])}"):
+    field = next(key for key in reversed(keys) if isinstance(key, str))
+    with pytest.raises(ValueError, match=rf"{name}\.json.*{re.escape(field)}"):
+        check_build(tmp_path)
+
+
+def test_check_build_rejects_nested_channel_residual(tmp_path):
+    import json
+
+    from jamloc.site.build import check_build
+
+    data = tmp_path / "data"
+    _write_case_data(data)
+    (data / "results.json").write_text("{}", encoding="utf-8")
+    path = data / "pilot.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["channel"]["residual_prb"][0] = [0]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"pilot\.json.*channel.residual_prb"):
         check_build(tmp_path)
 
 
@@ -412,6 +527,20 @@ def test_build_showcase(tmp_path, monkeypatch):
             "first,second,attack,jsr_db,slots,only_first,only_second,"
             "bler_first,bler_second,delta,delta_lo,delta_hi\n"
             "p_r_e_soft,p_r_e_soft_da,pilot_whole_allocation,9,20,4,0,0.4,0.2,0.2,0.1,0.3\n"
+        ),
+        "recovery_pr9/recovery_C.csv": (
+            "receiver,jammer,seed,attack,jsr_db,snr_db,ber,bler,block_errors,blocks\n"
+            "standard,nominal,0,pilot,-15,15,0,0.2,2,10\n"
+            "standard,nominal,1,pilot,-15,15,0,0.05,1,20\n"
+            "standard,nominal,2,pilot,-15,15,0,0.1,3,30\n"
+            "true_soft,nominal,0,pilot,9,15,0,0.1,1,10\n"
+            "lmmse,nominal,0,none,nan,15,0,0,0,10\n"
+            "lmmse,nominal,1,none,nan,15,0,0,0,20\n"
+            "standard,nominal,3,pilot,-15,15,0,0.1,1,10\n"
+            "standard,nominal,0,pilot,12,15,0,0.1,1,10\n"
+            "standard,nominal,0,pilot,-15,8,0,0.1,1,10\n"
+            "standard,hopping,0,pilot,-15,15,0,0.1,1,10\n"
+            "fused_hard,nominal,0,pilot,9,15,0,0.1,1,10\n"
         ),
         "dmrs_count/recovery.csv": (
             "dmrs_count,jammer_dmrs,seed,channel,snr_db,ue_prbs,jammed_prbs,attack,jsr_db,"
@@ -471,6 +600,15 @@ def test_build_showcase(tmp_path, monkeypatch):
     assert {r["jammer"] for r in recovery["rows"]} == {"nominal", "pulsed", "hopping"}
     assert all(r["bler"] == 9 / 30 and r["blocks"] == 30 for r in recovery["rows"])
     assert len(recovery["paired"]) == 3 and all(r["slots"] == 10 for r in recovery["paired"])
+    curves = {
+        (r["attack"], r["jsr_db"], r["receiver"]): (r["block_errors"], r["blocks"], r["bler"])
+        for r in content["recovery_curves"]["rows"]
+    }
+    assert curves == {
+        ("pilot", -15, "standard"): (6, 60, 0.1),
+        ("pilot", 9, "true_soft"): (1, 10, 0.1),
+        ("none", None, "lmmse"): (0, 30, 0),
+    }
     assert content["matched"]["rows"][0]["f1"] == 0.77
     assert content["matched"]["paired"][0]["jsr_db"] is None
     dmrs = {(r["dmrs_count"], r["detector"]): r for r in content["dmrs"]["rows"]}
@@ -488,7 +626,10 @@ def test_build_showcase(tmp_path, monkeypatch):
         for download in section["downloads"]:
             assert (build / download).is_file()
     for name in inputs:
-        prefix = "data_aided_" if name.startswith("receiver_study/") else ""
+        folder = Path(name).parts[0]
+        prefix = {"receiver_study": "data_aided_", "recovery_pr9": "recovery_curves_"}.get(
+            folder, ""
+        )
         target = build / "downloads" / f"{prefix}{Path(name).name}"
         assert target.read_bytes() == (papers / name).read_bytes()
     for name in unselected:

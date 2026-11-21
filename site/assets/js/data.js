@@ -108,6 +108,9 @@ export function selectionText(slot) {
   if (s.rule === "first_crc_flip") {
     return `Standard decoding failed and U-Net soft decoding passed in ${s.flip_count} of ${size} slots; this is the first of them.`;
   }
+  if (s.rule === "first_aided_crc_flip") {
+    return `The receiver with the U-Net map failed and its data-aided passes rescued the block in ${s.flip_count} of ${size} slots; this is the first of them.`;
+  }
   if (s.rule === "first_true_soft_failure") {
     return `Decoding failed even with the true map in ${s.failure_count} of ${size} slots; this is the first of them.`;
   }

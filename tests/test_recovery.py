@@ -122,10 +122,13 @@ def test_true_map_beats_unprotected():
 def test_no_clean_pilot_falls_back():
     sc = _scenario(PILOT, -10.0, 15.0, n=16, jam=ALLOC)  # every DMRS cell of the allocation
     out = link(sc, decode=True)
-    protected = MapAwareReceiver(out.tx)(out.y_alloc, out.no, _cells(out))
+    protected = MapAwareReceiver(out.tx)(out.y_alloc, out.no, _cells(out), history=True)
     standard = PUSCHReceiverChain(out.tx)(out.y_alloc, out.no)
     assert torch.isfinite(protected["llr"]).all()
     assert torch.equal(protected["b_hat"], standard["b_hat"])
+    (first,) = protected["history"]
+    assert torch.equal(first["h_sc"], standard["h_hat"][:, 0, 0, 0, 0, cfg.dmrs_symbol])
+    assert torch.equal(first["err_var"], standard["err_var"][:, 0, 0, 0, 0, cfg.dmrs_symbol])
 
 
 def test_carrier_sized_map_is_rejected():
@@ -224,6 +227,38 @@ def test_data_aided_passes_rescue_blocks_without_clean_pilots():
     assert aided["tb_crc"].sum() > first["tb_crc"].sum()  # and some failed ones are rescued
     passed = first["tb_crc"].reshape(-1)
     assert torch.equal(aided["b_hat"][passed], first["b_hat"][passed])
+
+
+def test_history_records_each_data_aided_pass():
+    sc = _scenario(PILOT, 9.0, 15.0, n=8, jam=ALLOC)
+    batch = link(sc, decode=True)
+    rx = MapAwareReceiver(batch.tx)
+    args = batch.y_alloc, batch.no, _cells(batch)
+    recorded = rx(*args, mode="soft", iterations=3, history=True)
+    plain = rx(*args, mode="soft", iterations=3)
+    assert recorded.keys() - plain.keys() == {"history"}
+    assert all(torch.equal(recorded[k], plain[k]) for k in plain)
+
+    history = recorded["history"]
+    assert 1 < len(history) <= 4
+    for index, step in enumerate(history):
+        current = rx(*args, mode="soft", iterations=index)
+        assert step["h_sc"].shape == step["err_var"].shape == (8, 144)
+        assert step["x_hat"].shape == (8, 1872) and step["tb_crc"].shape == (8,)
+        for key in ("x_hat", "llr"):
+            assert torch.equal(step[key], current[key])
+        for key, grid in (("h_sc", "h_hat"), ("err_var", "err_var")):
+            assert torch.equal(step[key], current[grid][:, 0, 0, 0, 0, cfg.dmrs_symbol])
+        cumulative = torch.stack([p["tb_crc"] for p in history[: index + 1]]).any(0)
+        assert torch.equal(cumulative, current["tb_crc"].flatten())
+
+
+def test_history_stops_when_all_slots_pass():
+    out = link(_scenario(NONE, 0.0, 25.0, n=2), decode=True)
+    rx = MapAwareReceiver(out.tx)
+    decoded = rx(out.y_alloc, out.no, _cells(out), mode="soft", iterations=3, history=True)
+    assert decoded["tb_crc"].all()
+    assert len(decoded["history"]) == 1
 
 
 def test_data_aided_passes_need_decoding():

@@ -31,6 +31,23 @@ def test_same_seed_same_output():
     assert torch.equal(ys[0], ys[1])
 
 
+def test_keep_channel_replays_the_same_slot():
+    def run(**kwargs):
+        rng = seed_everything(5)
+        sc = draw_scenario(rng, 4, cfg, "C", attacks=(PILOT,), alloc=(6, 12))
+        return JammedPUSCHLink(cfg)(sc, decode=True, **kwargs)
+
+    ordinary, recorded = run(), run(keep_channel=True)
+    assert ordinary.h_ue is None
+    assert recorded.h_ue.shape == (4, cfg.num_symbols, 144)
+    assert recorded.h_ue.is_complex() and recorded.h_ue.isfinite().all()
+    for field in ("y", "y_alloc", "labels", "b", "no", "no_true"):
+        assert torch.equal(getattr(ordinary, field), getattr(recorded, field)), field
+    assert ordinary.rx.keys() == recorded.rx.keys()
+    for field in ordinary.rx:
+        assert torch.equal(ordinary.rx[field], recorded.rx[field]), field
+
+
 def test_benign_high_snr_decodes():
     rng = seed_everything(1)
     sc = draw_scenario(rng, 32, cfg, "A", attacks=(0,), snr_db=25.0)

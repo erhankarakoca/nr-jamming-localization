@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from urllib.parse import unquote, urljoin, urlsplit
 
 from jamloc.paths import REPO_ROOT, results_dir
-from jamloc.site.cases import CASES
+from jamloc.site.cases import AIDED_RECEIVER, CASES
 from jamloc.site.results import write_results
 
 PLOTLY_URL = "https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"
@@ -76,6 +76,13 @@ def _require_shape(array, location, size, columns=None):
         raise ValueError(f"{location}: expected {columns} entries per row")
 
 
+def _require_numeric_shape(array, location, size, columns=None):
+    _require_shape(array, location, size, columns)
+    values = array if columns is None else (value for row in array for value in row)
+    if any(type(value) not in _NULLABLE_NUMBER for value in values):
+        raise ValueError(f"{location}: expected numbers or null")
+
+
 def _check_sweep(document, location, width):
     _require_fields(document, location, prb=dict, benign=dict, sweep=list)
     _require_fields(document["prb"], f"{location}.prb", threshold=list)
@@ -95,6 +102,60 @@ def _check_sweep(document, location, width):
             _require_shape(pilots[field], f"{label}.pilots.{field}", width * 6)
     if document["metadata"]["jsr_db"] not in [frame["jsr_db"] for frame in frames]:
         raise ValueError(f"{location}.sweep: missing the selection JSR frame")
+
+
+def _check_channel(channel, location, width, dmrs_symbol):
+    _require_fields(
+        channel,
+        location,
+        dmrs_symbol=int,
+        num_sc=int,
+        pilot_sc=list,
+        pilot_jammed=list,
+        ls=list,
+        fit=list,
+        true=list,
+        standard=list,
+        map=list,
+        residual_prb=list,
+        threshold_prb=list,
+    )
+    num_sc, num_pilots = width * 12, width * 6
+    if channel["dmrs_symbol"] != dmrs_symbol or channel["num_sc"] != num_sc:
+        raise ValueError(f"{location}: DMRS symbol or subcarrier count differs from the grid")
+    for field in ("pilot_sc", "pilot_jammed"):
+        _require_shape(channel[field], f"{location}.{field}", num_pilots)
+    if any(type(sc) is not int or not 0 <= sc < num_sc for sc in channel["pilot_sc"]):
+        raise ValueError(f"{location}.pilot_sc: expected allocation-relative subcarriers")
+    if any(type(jammed) is not bool for jammed in channel["pilot_jammed"]):
+        raise ValueError(f"{location}.pilot_jammed: expected booleans")
+    for field in ("ls", "fit"):
+        _require_numeric_shape(channel[field], f"{location}.{field}", num_pilots, 2)
+    for field in ("true", "standard", "map"):
+        _require_numeric_shape(channel[field], f"{location}.{field}", num_sc, 2)
+    for field in ("residual_prb", "threshold_prb"):
+        _require_numeric_shape(channel[field], f"{location}.{field}", width)
+
+
+def _check_symbol_refs(document, location, receiver, label, num_points):
+    _require_fields(receiver, label, crc=bool, x_hat=str, abs_llr=str)
+    for field, columns in (("x_hat", 2), ("abs_llr", None)):
+        key = receiver[field]
+        _require_numeric_shape(
+            document[field].get(key), f"{location}.{field}.{key}", num_points, columns
+        )
+
+
+def _check_passes(document, location, width, num_points, iterations):
+    _require_fields(document, location, passes=list)
+    passes = document["passes"]
+    if not passes or (iterations and not 2 <= len(passes) <= iterations + 1):
+        raise ValueError(f"{location}.passes: invalid number of decoding passes")
+    for index, step in enumerate(passes):
+        label = f"{location}.passes[{index}]"
+        _require_fields(step, label, h=list)
+        _require_numeric_shape(step["h"], f"{label}.h", width * 12, 2)
+        _check_symbol_refs(document, location, step, label, num_points)
 
 
 def _check_case(document, location, name):
@@ -154,9 +215,15 @@ def _check_case(document, location, name):
         hit_rate=_NULLABLE_NUMBER,
         batch_median=_NULLABLE_NUMBER,
     )
-    selection_fields = {"first_crc_flip": "flip_count", "first_true_soft_failure": "failure_count"}
+    selection_fields = {
+        "first_crc_flip": "flip_count",
+        "first_aided_crc_flip": "flip_count",
+        "first_true_soft_failure": "failure_count",
+    }
     if field := selection_fields.get(selection["rule"]):
         _require_fields(selection, f"{label}.selection", **{field: int})
+    if selection["rule"] == "first_aided_crc_flip":
+        _require_fields(selection, f"{label}.selection", seed=int, flip_frequency=_NUMBER)
     _require_fields(meta["thresholds"], f"{label}.thresholds", fused=dict)
     _require_fields(
         meta["thresholds"]["fused"],
@@ -185,25 +252,26 @@ def _check_case(document, location, name):
 
     receivers = document["receivers"]
     decode_maps = definition.decode_maps if definition else ("fused",)
+    iterations = definition.iterations if definition else 0
     required_receivers = (
         "standard",
         "true_soft",
         "true_prb_soft",
         *(f"{m}_soft" for m in decode_maps),
+        *((AIDED_RECEIVER,) if iterations else ()),
     )
     _require_fields(receivers, f"{location}.receivers", **dict.fromkeys(required_receivers, dict))
+    num_points = width * 12 * (symbols - 1 - cfg.get("dmrs_additional_position", 0))
     for rx, receiver in receivers.items():
-        _require_fields(receiver, f"{location}.receivers.{rx}", crc=bool, x_hat=str, abs_llr=str)
+        _check_symbol_refs(document, location, receiver, f"{location}.receivers.{rx}", num_points)
         counts = meta["batch_crc"].get(rx)
         _require_fields(counts, f"{location}.metadata.batch_crc.{rx}", slots=int, failures=int)
-        for field, columns in (("x_hat", 2), ("abs_llr", None)):
-            key = receiver[field]
-            _require_shape(
-                document[field].get(key),
-                f"{location}.{field}.{key}",
-                width * 12 * (symbols - 1),
-                columns,
-            )
+
+    if "channel" in document or (definition and definition.include_channel):
+        _require_fields(document, location, channel=dict)
+        _check_channel(document["channel"], f"{location}.channel", width, cfg["dmrs_symbol"])
+    if "passes" in document or iterations:
+        _check_passes(document, location, width, num_points, iterations)
 
     if name == "jsr_sweep":
         _require_fields(meta, f"{location}.metadata", jam=list)

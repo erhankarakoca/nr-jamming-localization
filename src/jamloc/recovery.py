@@ -230,10 +230,14 @@ class MapAwareReceiver(Block):
         decode: bool = True,
         mode: str = "hard",
         iterations: int = 0,
+        history: bool = False,
     ):
         """``mode``: ``"hard"``, ``"soft"`` (both use ``cells``), or ``"dmrs"``, ``"lmmse"``,
         ``"slot"`` (no map, ``cells`` is ignored). ``iterations``: data-aided passes after the
-        first decoding (they need ``decode``)."""
+        first decoding (they need ``decode``). With ``history=True``, return a list of
+        pass records starting with that first attempt. Each contains ``h_sc`` and
+        ``err_var`` on the first DMRS symbol, ``x_hat``, ``llr``, and the
+        individual pass's ``tb_crc`` (None with ``decode=False``)."""
         cfg = self.cfg
         num_sc = y.shape[-1]
         num_prb = num_sc // 12
@@ -303,6 +307,18 @@ class MapAwareReceiver(Block):
         b_hat = tb_crc = None
         if decode:
             b_hat, tb_crc = self.decoder(self.layer_demapper(llr))
+        if history:
+            # Read the estimate from the grid so a hard-mode fallback is captured as well.
+            dmrs = self.dmrs_symbols[0]
+            passes = [
+                {
+                    "h_sc": h_hat[:, 0, 0, 0, 0, dmrs],
+                    "err_var": err_var[:, 0, 0, 0, 0, dmrs],
+                    "x_hat": x_hat[:, 0, 0],
+                    "llr": llr,
+                    "tb_crc": tb_crc.flatten() if decode else None,
+                }
+            ]
         # 6. Data-aided passes: the decoded symbols of the clean data cells become pilots
         for _ in range(iterations if decode else 0):
             if tb_crc.all():
@@ -317,6 +333,16 @@ class MapAwareReceiver(Block):
                 y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
             )
             b_new, crc_new = self.decoder(self.layer_demapper(llr))
+            if history:
+                passes.append(
+                    {
+                        "h_sc": h_sc,
+                        "err_var": err_sc,
+                        "x_hat": x_hat[:, 0, 0],
+                        "llr": llr,
+                        "tb_crc": crc_new.flatten(),
+                    }
+                )
             b_hat = torch.where(tb_crc[..., None], b_hat, b_new)  # keep a block once it passed
             tb_crc = tb_crc | crc_new
 
@@ -329,6 +355,8 @@ class MapAwareReceiver(Block):
         }
         if decode:
             out["b_hat"], out["tb_crc"] = b_hat, tb_crc
+        if history:
+            out["history"] = passes
         return out
 
     def _on_grid(self, h_sc, err_sc, y):
