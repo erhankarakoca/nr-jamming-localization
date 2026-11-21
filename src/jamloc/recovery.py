@@ -51,6 +51,19 @@ shrink towards zero by themselves: repair turns smoothly into erasure.
 If the hard map flags every DMRS cell there is no clean pilot to interpolate from. The receiver
 then uses Sionna's standard channel estimate, exactly like the unprotected receiver, and only
 erases the flagged data cells.
+
+**Data-aided passes** (``iterations > 0``, any mode): when the jammer covers every pilot, no map can
+give the receiver a clean pilot, and even the true map leaves many blocks undecodable. But the data
+cells the map calls clean are themselves observations of the channel, once their symbols are
+known. After a decoding attempt, the LDPC decoder's soft output on every coded bit gives the mean
+and variance of every transmitted QPSK symbol. Each data cell then becomes a *virtual pilot* whose
+noise variance includes the remaining symbol uncertainty and, in the soft and hard modes, the
+jamming the map reports for that cell (a flagged data cell carries the jammer and is left out).
+Because the channel is constant over the slot, all observations of one subcarrier, the real pilots
+with their own variances and the virtual ones, combine into one value per subcarrier
+(inverse-variance weighting, a sufficient statistic), and the same LMMSE filter smooths them
+across frequency. The slot is equalized and decoded again. A block keeps the first decoding whose
+CRC passes, as a real receiver can, since the CRC tells it which attempt succeeded.
 """
 
 import math
@@ -58,6 +71,7 @@ import math
 import numpy as np
 import torch
 from sionna.phy import Block
+from sionna.phy.fec.ldpc import LDPC5GDecoder
 from sionna.phy.mapping import Demapper
 from sionna.phy.mimo import StreamManagement
 from sionna.phy.nr import LayerDemapper, PUSCHLSChannelEstimator, PUSCHTransmitter, TBDecoder
@@ -128,6 +142,57 @@ def lmmse_interpolation(
 MODES = ("hard", "soft", "dmrs", "lmmse", "slot")
 
 
+class SoftTBDecoder(Block):
+    """Posterior LLRs of every coded bit of a transport block, in the order of the decoder's input.
+
+    The same steps as Sionna's ``TBDecoder`` (descrambling, code-block deinterleaving, LDPC belief
+    propagation), but the decoder returns soft values on the whole codeword, which are then put
+    back into the transmitted order and scrambled again. Its input and output are LLRs
+    ``log(P(b=1) / P(b=0))`` of shape ``[..., n]``.
+    """
+
+    def __init__(self, decoder: TBDecoder, **kwargs):
+        super().__init__(**kwargs)
+        self.tb = decoder
+        encoder = decoder._tb_encoder
+        self.n = encoder.n
+        self.num_cbs = encoder.num_cbs
+        self.cb_n = encoder.ldpc_encoder.n
+        self.ldpc = LDPC5GDecoder(
+            encoder=encoder.ldpc_encoder, num_iter=20, hard_out=False, return_infobits=False
+        )
+        self.perm_inv = decoder._output_perm_inv
+        self.perm = torch.argsort(self.perm_inv)  # undoes the deinterleaving
+
+    def call(self, llr: torch.Tensor) -> torch.Tensor:
+        shape = llr.shape
+        num_tx = self.tb._tb_encoder.num_tx
+        x = llr.float().reshape(-1, num_tx, self.n)  # the layout Sionna's descrambler expects
+        if self.tb._descrambler is not None:
+            x = self.tb._descrambler(x)
+        fillers = x.new_zeros(*x.shape[:-1], self.num_cbs * self.cb_n - self.n)
+        x = torch.cat([x, fillers], dim=-1).index_select(-1, self.perm_inv)
+        post = self.ldpc(x.reshape(-1, num_tx, self.num_cbs, self.cb_n))
+        post = post.reshape(-1, num_tx, self.num_cbs * self.cb_n)
+        post = post.index_select(-1, self.perm.to(post.device))[..., : self.n]
+        if self.tb._descrambler is not None:  # scrambling flips signs: applying it again undoes it
+            post = self.tb._descrambler(post)
+        return post.reshape(shape)
+
+
+def soft_qpsk(llr: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Mean and variance of QPSK symbols from the LLRs of their two bits ``[..., num_sym, 2]``.
+
+    Sionna's QPSK maps bit 0 to the real part and bit 1 to the imaginary part, a 1 to the negative
+    sign, and its LLRs are ``log(P(1) / P(0))``, so the mean of each part is
+    ``-tanh(LLR / 2) / sqrt(2)``. The symbols have unit energy, so their variance is
+    ``1 - |mean|^2``.
+    """
+    m = -torch.tanh(llr.clamp(-30, 30) / 2) / math.sqrt(2)
+    mean = torch.complex(m[..., 0], m[..., 1])
+    return mean, (1 - mean.abs() ** 2).clamp_min(0)
+
+
 class MapAwareReceiver(Block):
     """Receiver for one allocation size that uses a jamming map ``cells`` ``[B, n, 14]`` (bool).
 
@@ -154,6 +219,7 @@ class MapAwareReceiver(Block):
             tx._layer_mapper, num_bits_per_symbol=tx._num_bits_per_symbol
         )
         self.decoder = TBDecoder(tx._tb_encoder)
+        self.soft_decoder = SoftTBDecoder(self.decoder)
         self.data_sym, self.data_sc = data_positions(tx)
 
     def call(
@@ -163,9 +229,11 @@ class MapAwareReceiver(Block):
         cells: torch.Tensor | None,
         decode: bool = True,
         mode: str = "hard",
+        iterations: int = 0,
     ):
         """``mode``: ``"hard"``, ``"soft"`` (both use ``cells``), or ``"dmrs"``, ``"lmmse"``,
-        ``"slot"`` (no map, ``cells`` is ignored)."""
+        ``"slot"`` (no map, ``cells`` is ignored). ``iterations``: data-aided passes after the
+        first decoding (they need ``decode``)."""
         cfg = self.cfg
         num_sc = y.shape[-1]
         num_prb = num_sc // 12
@@ -217,9 +285,7 @@ class MapAwareReceiver(Block):
         h_sc, err_sc = lmmse_interpolation(
             h_ls, pilot_sc, clean, pilot_var, num_sc, cfg.scs, cfg.tau_max
         )
-        shape = (y.shape[0], 1, 1, 1, 1, cfg.num_symbols, num_sc)  # Sionna's h_hat layout
-        h_hat = h_sc[:, None, None, None, None, None, :].expand(shape)
-        err_var = err_sc[:, None, None, None, None, None, :].expand(shape)
+        h_hat, err_var = self._on_grid(h_sc, err_sc, y)
 
         # 3. No clean pilot at all: nothing to interpolate from, use the standard estimate
         no_clean = ~clean.any(dim=1)
@@ -227,27 +293,32 @@ class MapAwareReceiver(Block):
             h_std, err_std = self.standard_estimator(y, no)
             pick = no_clean[:, None, None, None, None, None, None]
             h_hat = torch.where(pick, h_std, h_hat)
-            err_var = torch.where(pick, err_std.expand(shape), err_var)
+            err_var = torch.where(pick, err_std.expand(h_hat.shape), err_var)
 
-        # 4. Equalize, as in the standard receiver
-        x_hat, no_eff = self.equalizer(y, h_hat, err_var, no)
+        # 4.-5. Equalize, protect the data symbols, demap
+        x_hat, no_eff, llr, extra = self._detect(
+            y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
+        )
 
-        # 5. Protect the data symbols, then demap (two bits per QPSK symbol)
-        data_prb = self.data_sc // 12
-        bits = self.tx._num_bits_per_symbol
-        if mode == "hard":
-            llr = self.demapper(x_hat, no_eff)
-            flagged = cells[:, data_prb, self.data_sym].repeat_interleave(bits, dim=1)
-            llr = llr.masked_fill(flagged[:, None, None, :], 0.0)
-        elif mode == "lmmse":
-            llr = self.demapper(x_hat, no_eff)
-        else:
-            jam_var = self._jamming_variance(y, no, h_sc, err_sc, cells, r, interfered, mode)
-            # For one antenna the unbiased LMMSE output is y / h_hat and its effective noise is
-            # (err_var + no) / |h_hat|^2; extra noise of variance v adds v / |h_hat|^2
-            h2 = (h_hat[:, 0, 0, 0, 0, self.data_sym, self.data_sc].abs() ** 2).clamp_min(1e-12)
-            no_eff = no_eff + (jam_var / h2)[:, None, None, :]
-            llr = self.demapper(x_hat, no_eff)
+        b_hat = tb_crc = None
+        if decode:
+            b_hat, tb_crc = self.decoder(self.layer_demapper(llr))
+        # 6. Data-aided passes: the decoded symbols of the clean data cells become pilots
+        for _ in range(iterations if decode else 0):
+            if tb_crc.all():
+                break
+            post = self.soft_decoder(self.layer_demapper(llr))
+            mean, var = soft_qpsk(post.reshape(y.shape[0], -1, self.tx._num_bits_per_symbol))
+            h_sc, err_sc = self._data_aided(
+                y, no, h_ls, pilot_sc, clean, pilot_var, h_hat, mean, var, extra
+            )
+            h_hat, err_var = self._on_grid(h_sc, err_sc, y)
+            x_hat, no_eff, llr, extra = self._detect(
+                y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
+            )
+            b_new, crc_new = self.decoder(self.layer_demapper(llr))
+            b_hat = torch.where(tb_crc[..., None], b_hat, b_new)  # keep a block once it passed
+            tb_crc = tb_crc | crc_new
 
         out = {
             "h_hat": h_hat,
@@ -257,9 +328,83 @@ class MapAwareReceiver(Block):
             "llr": llr,
         }
         if decode:
-            b_hat, tb_crc = self.decoder(self.layer_demapper(llr))
             out["b_hat"], out["tb_crc"] = b_hat, tb_crc
         return out
+
+    def _on_grid(self, h_sc, err_sc, y):
+        """One estimate per subcarrier, the same on all symbols, in Sionna's ``h_hat`` layout."""
+        shape = (y.shape[0], 1, 1, 1, 1, self.cfg.num_symbols, y.shape[-1])
+        h_hat = h_sc[:, None, None, None, None, None, :].expand(shape)
+        return h_hat, err_sc[:, None, None, None, None, None, :].expand(shape)
+
+    def _detect(self, y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode):
+        """Equalized symbols, their effective noise, the LLRs, and the extra noise variance of
+        every data symbol that the map implies (infinite for an erased one)."""
+        x_hat, no_eff = self.equalizer(y, h_hat, err_var, no)
+        data_prb = self.data_sc // 12
+        bits = self.tx._num_bits_per_symbol
+        if mode == "hard":
+            llr = self.demapper(x_hat, no_eff)
+            flagged = cells[:, data_prb, self.data_sym]
+            erased = flagged.repeat_interleave(bits, dim=1)
+            llr = llr.masked_fill(erased[:, None, None, :], 0.0)
+            extra = torch.where(flagged, math.inf, 0.0)
+        elif mode == "lmmse":
+            llr = self.demapper(x_hat, no_eff)
+            extra = torch.zeros_like(x_hat[:, 0, 0].real)
+        else:
+            extra = self._jamming_variance(y, no, h_sc, err_sc, cells, r, interfered, mode)
+            # For one antenna the unbiased LMMSE output is y / h_hat and its effective noise is
+            # (err_var + no) / |h_hat|^2; extra noise of variance v adds v / |h_hat|^2
+            h2 = (h_hat[:, 0, 0, 0, 0, self.data_sym, self.data_sc].abs() ** 2).clamp_min(1e-12)
+            no_eff = no_eff + (extra / h2)[:, None, None, :]
+            llr = self.demapper(x_hat, no_eff)
+        return x_hat, no_eff, llr, extra
+
+    def _data_aided(self, y, no, h_ls, pilot_sc, clean, pilot_var, h_hat, mean, var, extra):
+        """LMMSE channel estimate from the pilots and the data cells, whose symbols are known only
+        through their decoded ``mean`` and ``var`` ``[B, num_data]``.
+
+        A data cell with received value ``y = h x + w`` and a symbol of mean ``m`` gives
+        ``y / m``, an unbiased observation of ``h`` with variance
+        ``(|h|^2 var + no + extra) / |m|^2``: the symbol's uncertainty, the noise and the jamming
+        the map assigns to the cell (``extra``, infinite for an erased cell). Cells with
+        ``|m|^2 < 0.01`` (nearly unknown symbols) are left out. All observations of a subcarrier
+        are combined with inverse-variance weights before the LMMSE filter smooths across
+        frequency.
+        """
+        num_sc = y.shape[-1]
+        y_d = y[:, 0, 0, self.data_sym, self.data_sc]
+        h_d = h_hat[:, 0, 0, 0, 0, self.data_sym, self.data_sc]
+        power = mean.abs() ** 2
+        use = (power > 0.01) & torch.isfinite(extra)
+        var_d = (
+            h_d.abs() ** 2 * var + no[:, None] + torch.where(use, extra, 0.0)
+        ) / power.clamp_min(0.01)
+        w_d = torch.where(use, 1 / var_d, 0.0)
+        obs_d = torch.where(use, y_d / torch.where(use, mean, torch.ones_like(mean)), 0)
+
+        pilot_var = pilot_var if pilot_var.dim() == 2 else pilot_var[:, None].expand_as(h_ls.real)
+        ok = clean & torch.isfinite(h_ls)
+        w_p = torch.where(ok, 1 / pilot_var, 0.0)
+        obs_p = torch.where(ok, h_ls, 0)
+
+        rows = y.shape[0]
+        num = y_d.new_zeros(rows, num_sc).index_add_(1, pilot_sc, (w_p * obs_p).to(y_d.dtype))
+        num = num.index_add_(1, self.data_sc, (w_d * obs_d).to(y_d.dtype))
+        den = w_d.new_zeros(rows, num_sc).index_add_(1, pilot_sc, w_p.to(w_d.dtype))
+        den = den.index_add_(1, self.data_sc, w_d)
+        h_obs = num / den.clamp_min(1e-12)
+        every = torch.arange(num_sc, device=y.device)
+        return lmmse_interpolation(
+            h_obs,
+            every,
+            torch.ones_like(den, dtype=torch.bool),
+            1 / den.clamp_min(1e-12),
+            num_sc,
+            self.cfg.scs,
+            self.cfg.tau_max,
+        )
 
     def _jamming_variance(self, y, no, h_sc, err_sc, cells, r, interfered, mode):
         """Estimated jamming power ``[B, num_data]`` on every data symbol (0 where none)."""
