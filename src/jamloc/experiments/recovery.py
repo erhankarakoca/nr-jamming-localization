@@ -58,6 +58,7 @@ stopped early (100 block errors) is compared on the slots both receivers decoded
     python -m jamloc.experiments.recovery --channel A
     python -m jamloc.experiments.recovery --channel C --jammer pulsed --seeds 0 1 2
     python -m jamloc.experiments.recovery --channel C --noise-estimate comb --seeds 0 1 2
+    python -m jamloc.experiments.recovery --channel C --jam-prb 8 --jsr-db 3 9  # wider jammer
 
 ``--replay DIR`` repeats an earlier run whose per-seed CSVs are in ``DIR`` on exactly the same
 slots, but decodes only the points and receivers the paper quotes (``QUOTED``), so that their
@@ -274,12 +275,14 @@ def coarsen_to_prb(cells: torch.Tensor, dmrs_symbols: int | tuple[int, ...]) -> 
     return out
 
 
-def _scenario(rng, n, channel, attack, jsr_db, snr_db, whole_allocation=False) -> Scenario:
+def _scenario(
+    rng, n, channel, attack, jsr_db, snr_db, whole_allocation=False, jam_size=JAM_SIZE
+) -> Scenario:
     if whole_allocation:
         start, size = np.full(n, ALLOC[0]), np.full(n, ALLOC[1])
     else:
-        start = rng.integers(ALLOC[0], ALLOC[0] + ALLOC[1] - JAM_SIZE + 1, n)
-        size = np.full(n, JAM_SIZE)
+        start = rng.integers(ALLOC[0], ALLOC[0] + ALLOC[1] - jam_size + 1, n)
+        size = np.full(n, jam_size)
     return Scenario(
         channel=channel,
         alloc_start=ALLOC[0],
@@ -358,11 +361,13 @@ def simulate(
     noise_estimate="true",
     replay=None,
     attacks=None,
+    jam_size=JAM_SIZE,
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
     ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
     batches, decoding only the receivers ``decode[point]``. ``attacks``: simulate only these cases
-    (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``)."""
+    (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``).
+    ``jam_size``: PRBs of the pilot, data and partial-band attacks (inside the allocation)."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
     link = JammedPUSCHLink(cfg)
     nest = noise_estimate != "true"
@@ -414,7 +419,7 @@ def simulate(
         for jsr in jsr_dbs[:1] if attack == "none" else jsr_dbs:  # JSR is irrelevant then
 
             def scenario_fn(attack=attack, jsr=jsr, whole=whole):
-                return _scenario(rng, batch_size, channel, attack, jsr, snr_db, whole)
+                return _scenario(rng, batch_size, channel, attack, jsr, snr_db, whole, jam_size)
 
             if replay is None:
                 counts, failed = simulate_point(
@@ -723,6 +728,14 @@ def main(argv=None):
         choices=("none", "pilot", "data", "partial", "pilot_whole_allocation"),
         help="simulate only these cases",
     )
+    p.add_argument(
+        "--jam-prb",
+        type=int,
+        choices=range(1, ALLOC[1] + 1),
+        metavar=f"1..{ALLOC[1]}",
+        help=f"jammed PRBs of the nominal attacks (default {JAM_SIZE}); written to *_jam<N> files "
+        "(experiments/width_sweep)",
+    )
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     p.add_argument(
         "--replay",
@@ -746,6 +759,8 @@ def main(argv=None):
         stem = stem.with_name(f"{stem.name}_snr{args.snr_db:g}")
     if args.noise_estimate != "true":
         stem = stem.with_name(f"{stem.name}_nest")
+    if args.jam_prb is not None:
+        stem = stem.with_name(f"{stem.name}_jam{args.jam_prb}")
     original = stem  # the name of the run a replay repeats
     if args.replay:
         stem = stem.with_name(f"{stem.name}_replay")
@@ -784,6 +799,7 @@ def main(argv=None):
                 args.noise_estimate,
                 replay,
                 args.attacks,
+                JAM_SIZE if args.jam_prb is None else args.jam_prb,
             )
             if args.replay:
                 bad = check_replay(rows, before)
@@ -806,9 +822,12 @@ def main(argv=None):
     slot_files = sorted(stem.parent.glob(f"{stem.name}_seed*_slots.npz"))
     if slot_files:
         _write_rows(paired_rows(slot_files), stem.with_name(f"{stem.name}_paired.csv"))
-    if not any(r["attack"] in ("pilot", "data", "partial") for r in pooled):
-        # e.g. --attacks pilot_whole_allocation: the figures plot the nominal attacks only
-        print(f"Wrote {stem}.csv and {stem.name}_paired.csv (no nominal attack to plot)")
+    if args.jam_prb is not None or not any(
+        r["attack"] in ("pilot", "data", "partial") for r in pooled
+    ):
+        # e.g. --attacks pilot_whole_allocation: the figures plot the nominal attacks only; a
+        # jammer width other than the nominal one is plotted against width by width_sweep
+        print(f"Wrote {stem}.csv and {stem.name}_paired.csv (no figure)")
         return
     with paper_style():
         main_fig = plot(pooled, args.channel)  # the message: no protection vs map vs true map
