@@ -1278,3 +1278,145 @@ Paired differences on the slots both receivers decoded (percentage points, 95% i
   jammed pilots only resolving the 90-degree ambiguity, gave higher BLER than the pilot-based
   start in a 256-slot trial (all pilots jammed, 15 dB SNR: 56% against 47% at +9 dB before any
   pass) and was dropped.
+
+## 22. Partial-band walkthrough and the jammer's width
+
+Partial-band jamming hits the pilots and the data cells of its PRBs, so one slot shows both uses of
+the map. The site's walkthrough and the paper's Fig. 2 now use such a slot, and two questions the
+4-PRB results leave open are answered here: how much of the allocation the test jammers cover, and
+how detection and decoding change as the jammer widens.
+
+**The walkthrough slot** (case `partial_flip`): TDL-C, 15 dB SNR, partial-band jamming at +3 dB
+JSR on PRBs 10-13, all 14 symbols, the UE on PRBs 6-17 (a third of its pilots and data cells);
+seed 7, the first slot of the 64-slot batch that the soft U-Net receiver recovers. In that batch the
+standard receiver fails 43 of 64 slots and the soft U-Net receiver none (the 4-PRB recovery table
+gives 53.8% and 0.08% at this point). In the slot:
+
+- the U-Net flags all 56 jammed cells and no other cell;
+- medians over the allocation, jammed against clean cells: power 17.1 against 15.3 dB, residual
+  12.6 against -0.4 dB, EVM 14.1 against 0.2 dB, so the power alone barely shows this jammer;
+- squared error of the channel estimate on the jammed PRBs (DMRS symbol, against the true
+  channel): 0.140 standard (11.7 times its 0.012 on the clean PRBs), 0.045 with the map (-68%);
+- mean |LLR| of the bits (mean of the two QPSK bits per point): standard 38.4 on jammed and 56.5 on
+  clean cells, with the map 1.3 and 63.1.
+
+**How much of the allocation the jammers cover.** Training, validation and test draw the jammer's
+block (2-12 PRBs) anywhere on the carrier, independently of the allocation
+(`results/width_sweep/allocation_cover.csv`). In the jammed test slots the block overlaps the
+allocation in 85% of the slots and then covers a median of 37.5% of its PRBs; it covers more than
+half of them in 21.5% (pilot), 22.0% (data) and 23.5% (partial-band) of the slots and all of them
+in 2.2%, 2.0% and 2.5%. The recovery experiment's 4-PRB jammer covers a third.
+
+**Detection against the width** (`python -m jamloc.experiments.width_sweep --part detection`,
+`results/width_sweep/width_detection.csv`): the fused U-Net's Pd at 1% per-cell false alarm, on
+the jammed cells inside the allocation, per attack, JSR and block width (66-117 slots per group),
+means over the three training seeds. Pd does not fall as the block widens; the narrowest blocks are
+the hardest. Pilot jamming at -9 dB: 0.76 at 2 PRBs (113 jammed pilot cells) and 0.88 at 12 PRBs
+(694 cells); by the share of the allocation's PRBs the block covers, 0.82 for at most a quarter and
+0.90 for more than three quarters. At -15 dB, Pd at 2 PRBs is 0.33 (pilot), 0.42 (data) and 0.45
+(partial-band), against 0.56, 0.85 and 0.91 at 12 PRBs.
+
+**Decoding against the width.** `recovery --jam-prb N` puts the jammer on N PRBs at a random place
+inside the 12-PRB allocation. Run (TDL-C, 15 dB SNR, known noise power, three detector seeds, up to
+1,600 slots each; `results/width_sweep/run.sh` runs the 18 jobs, 8 at a time):
+
+```bash
+JAMLOC_RESULTS_DIR=results/width_sweep  # with results/width_sweep/models -> ../models
+python -m jamloc.experiments.recovery --channel C --snr-db 15 --jsr-db -3 3 9 --seeds 0 \
+    --max-mc-iter 25 --jam-prb 8 --attacks pilot data partial \
+    --receivers standard lmmse p_r_e_soft p_r_e_soft_da true_soft true_soft_da
+# the same for --jam-prb 2 4 6 10 12 and seeds 1, 2; then, with the default results folder:
+python -m jamloc.experiments.width_sweep --part decoding   # width_bler_C.csv and the figure
+```
+
+BLER pooled over the seeds (`results/width_sweep/width_bler_C.csv`; a receiver stops after 100
+block errors, so denominators run from 384 to 4,800; "0/n": no error in n blocks):
+
+Pilot jamming, BLER (%) by jammed PRBs of 12 (share of the allocation):
+
+| JSR | Receiver | 2 (17%) | 4 (33%) | 6 (50%) | 8 (67%) | 10 (83%) | 12 (100%) |
+|---|---|---|---|---|---|---|---|
+| -3 dB | No protection | 0.02 | 0.10 | 0.31 | 0.46 | 0.90 | 1.29 |
+| -3 dB | LMMSE, no map | 0/4800 | 0/4800 | 0.02 | 0.06 | 0.12 | 0.19 |
+| -3 dB | U-Net map | 0/4800 | 0/4800 | 0/4800 | 0/4800 | 0/4800 | 0.10 |
+| -3 dB | U-Net map, data-aided | 0/4800 | 0/4800 | 0/4800 | 0/4800 | 0/4800 | 0/4800 |
+| -3 dB | True map | 0/4800 | 0/4800 | 0/4800 | 0/4800 | 0/4800 | 0.10 |
+| -3 dB | True map, data-aided | 0/4800 | 0/4800 | 0/4800 | 0/4800 | 0/4800 | 0/4800 |
+| +3 dB | No protection | 0.73 | 4.96 | 12.26 | 19.41 | 28.77 | 37.83 |
+| +3 dB | LMMSE, no map | 0.15 | 1.12 | 2.90 | 5.04 | 7.25 | 9.85 |
+| +3 dB | U-Net map | 0/4800 | 0/4800 | 0.17 | 0.48 | 1.67 | 3.96 |
+| +3 dB | U-Net map, data-aided | 0/4800 | 0/4800 | 0.04 | 0.17 | 0.60 | 1.48 |
+| +3 dB | True map | 0/4800 | 0/4800 | 0.15 | 0.44 | 1.58 | 3.88 |
+| +3 dB | True map, data-aided | 0/4800 | 0/4800 | 0.04 | 0.17 | 0.60 | 1.46 |
+| +9 dB | No protection | 7.56 | 30.06 | 56.08 | 73.26 | 84.64 | 92.19 |
+| +9 dB | LMMSE, no map | 4.06 | 16.28 | 30.51 | 45.18 | 55.38 | 66.49 |
+| +9 dB | U-Net map | 0/4800 | 0.06 | 0.62 | 4.73 | 15.06 | 36.04 |
+| +9 dB | U-Net map, data-aided | 0/4800 | 0.04 | 0.29 | 1.96 | 8.10 | 22.80 |
+| +9 dB | True map | 0/4800 | 0.02 | 0.50 | 4.50 | 14.25 | 36.15 |
+| +9 dB | True map, data-aided | 0/4800 | 0/4800 | 0.23 | 1.85 | 7.89 | 22.87 |
+
+Data jamming, BLER (%) by jammed PRBs of 12 (share of the allocation):
+
+| JSR | Receiver | 2 (17%) | 4 (33%) | 6 (50%) | 8 (67%) | 10 (83%) | 12 (100%) |
+|---|---|---|---|---|---|---|---|
+| -3 dB | No protection | 0.48 | 4.15 | 12.88 | 22.66 | 35.38 | 47.66 |
+| -3 dB | LMMSE, no map | 0.46 | 4.54 | 13.11 | 23.51 | 36.72 | 49.48 |
+| -3 dB | U-Net map | 0/4800 | 0/4800 | 0.02 | 1.15 | 5.06 | 12.26 |
+| -3 dB | U-Net map, data-aided | 0/4800 | 0/4800 | 0.02 | 0.90 | 4.67 | 10.80 |
+| -3 dB | True map | 0/4800 | 0/4800 | 0.02 | 1.15 | 5.02 | 12.15 |
+| -3 dB | True map, data-aided | 0/4800 | 0/4800 | 0.02 | 0.90 | 4.62 | 10.76 |
+| +3 dB | No protection | 6.85 | 37.39 | 66.49 | 84.90 | 96.09 | 98.18 |
+| +3 dB | LMMSE, no map | 7.07 | 37.95 | 67.01 | 85.68 | 96.09 | 98.44 |
+| +3 dB | U-Net map | 0/4800 | 0/4800 | 0.88 | 23.07 | 53.28 | 78.12 |
+| +3 dB | U-Net map, data-aided | 0/4800 | 0/4800 | 0.54 | 21.67 | 51.99 | 77.54 |
+| +3 dB | True map | 0/4800 | 0/4800 | 0.88 | 22.66 | 53.12 | 78.12 |
+| +3 dB | True map, data-aided | 0/4800 | 0/4800 | 0.54 | 21.60 | 51.85 | 77.54 |
+| +9 dB | No protection | 24.92 | 80.80 | 95.57 | 100.00 | 100.00 | 100.00 |
+| +9 dB | LMMSE, no map | 22.44 | 80.80 | 94.79 | 100.00 | 100.00 | 100.00 |
+| +9 dB | U-Net map | 0/4800 | 0.08 | 4.21 | 72.07 | 96.09 | 99.74 |
+| +9 dB | U-Net map, data-aided | 0/4800 | 0.02 | 3.40 | 71.48 | 95.57 | 99.74 |
+| +9 dB | True map | 0/4800 | 0.08 | 4.21 | 72.07 | 96.09 | 99.74 |
+| +9 dB | True map, data-aided | 0/4800 | 0.02 | 3.40 | 71.48 | 95.57 | 99.74 |
+
+Partial-band jamming, BLER (%) by jammed PRBs of 12 (share of the allocation):
+
+| JSR | Receiver | 2 (17%) | 4 (33%) | 6 (50%) | 8 (67%) | 10 (83%) | 12 (100%) |
+|---|---|---|---|---|---|---|---|
+| -3 dB | No protection | 1.52 | 10.63 | 24.03 | 37.28 | 48.18 | 62.15 |
+| -3 dB | LMMSE, no map | 0.92 | 7.28 | 20.05 | 30.06 | 43.63 | 56.08 |
+| -3 dB | U-Net map | 0/4800 | 0/4800 | 0.15 | 4.08 | 12.27 | 23.72 |
+| -3 dB | U-Net map, data-aided | 0/4800 | 0/4800 | 0.08 | 2.65 | 8.14 | 17.02 |
+| -3 dB | True map | 0/4800 | 0/4800 | 0.12 | 4.08 | 12.15 | 23.65 |
+| -3 dB | True map, data-aided | 0/4800 | 0/4800 | 0.08 | 2.67 | 8.08 | 17.02 |
+| +3 dB | No protection | 13.88 | 52.97 | 78.79 | 91.67 | 97.14 | 99.74 |
+| +3 dB | LMMSE, no map | 10.26 | 48.57 | 73.44 | 88.80 | 95.05 | 99.74 |
+| +3 dB | U-Net map | 0/4800 | 0.06 | 2.12 | 38.34 | 66.84 | 89.58 |
+| +3 dB | U-Net map, data-aided | 0/4800 | 0.06 | 1.17 | 33.96 | 59.55 | 85.68 |
+| +3 dB | True map | 0/4800 | 0.06 | 2.06 | 38.34 | 66.84 | 89.58 |
+| +3 dB | True map, data-aided | 0/4800 | 0.06 | 1.15 | 33.96 | 59.55 | 85.68 |
+| +9 dB | No protection | 37.95 | 91.15 | 98.70 | 100.00 | 100.00 | 100.00 |
+| +9 dB | LMMSE, no map | 35.42 | 88.80 | 98.44 | 100.00 | 100.00 | 100.00 |
+| +9 dB | U-Net map | 0/4800 | 0.10 | 6.64 | 81.70 | 98.44 | 100.00 |
+| +9 dB | U-Net map, data-aided | 0/4800 | 0.04 | 4.17 | 79.69 | 97.66 | 100.00 |
+| +9 dB | True map | 0/4800 | 0.08 | 6.57 | 81.70 | 98.44 | 100.00 |
+| +9 dB | True map, data-aided | 0/4800 | 0.02 | 4.15 | 79.69 | 97.66 | 100.00 |
+
+
+- The U-Net map stays within 0.8 percentage points of the true map at every width, attack and
+  JSR (largest gap: pilot jamming, +9 dB, 10 PRBs).
+- Pilot jamming degrades gradually: the clean pilots around the jammed band carry the estimate.
+  At +3 dB the U-Net map stays under 1% up to 8 PRBs (0.48%) and reaches 3.96% at 12; at +9 dB,
+  36.0% at 12 PRBs (95% Wilson 33.1-39.1%), 22.8% with the data-aided passes. The 12-PRB pilot
+  point is an independent replicate of section 21's whole-allocation run (39.3% and 24.4%) and
+  agrees with it within the sampling error.
+- Data and partial-band jamming fall off a cliff between 6 and 8 jammed PRBs. A block has 3,744
+  coded bits and about 1,385 information bits (code rate about 0.37). With 6 of 12 PRBs jammed the
+  clean half still holds 1,872 coded bits; with 8 jammed the clean third holds 1,248, fewer than the
+  information bits, so the block must draw on the jammed cells. Partial-band at +3 dB: 0.06% at 4
+  PRBs, 2.12% at 6, 38.3% at 8 (the true map the same); at -3 dB, where jammed cells still carry
+  information, 4.1% at 8 and 23.7% at 12 against 62.2% without protection.
+- The data-aided passes help most under pilot jamming (+3 dB, 12 PRBs: 3.96% to 1.48%) and less
+  under data and partial-band jamming, where the decoded symbols of jammed data cells are excluded
+  and the clean cells are already used.
+- The 4-PRB points agree with the recovery table of section 17 (partial-band at +3 dB: 0.06%
+  against 0.08% there).

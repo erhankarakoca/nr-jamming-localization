@@ -17,7 +17,8 @@ commit that adds this file.
 | Website, `compact-site` | 19 | 14 | 2 | 0 | 35 |
 | `README.md` | 5 | 12 | 3 | 5 | 25 |
 | `docs/results.md` | 3 | 11 | 5 | 1 | 20 |
-| **Total** | **82** | **102** | **19** | **11** | **214** |
+| Partial-band walkthrough and jammer width (added) | 10 | 2 | 0 | 0 | 12 |
+| **Total** | **92** | **104** | **19** | **11** | **226** |
 
 Counts are register rows. A row can cover repeated wording or several numbers from the same table and population.
 
@@ -284,3 +285,23 @@ The log records successive experiments. Archived numbers are useful evidence for
 | L18 | `docs/results.md:921–1026` | Matched rates, margin uncertainty and paired BLER contrasts. | `R/intervals/test_matched{,_by_attack}_{f1_ci,paired}.csv`, `R/margin/margin_*ci.csv`, replay paired CSVs. The code distinguishes split-wide and per-attack fits and pools common decoded slots. | CORRECT | — |
 | L19 | `docs/results.md:1040–1069` | Estimated-noise scope, up to 19,200 slots, Wilson intervals and whole-allocation failure. | `R/recovery/recovery_C_nest.csv`, `recovery_C_nest_paired.csv:341–342`, `J/noise.py:55–71`. Counts and rounded results are in M87. | CORRECT | — |
 | L20 | `docs/results.md:1129–1187` | One/two DMRS configuration, three-seed detection and 4,800-slot recovery, +9 dB table and other tested JSR results. | `J/experiments/dmrs_count.py:42–44,80–173`, `R/dmrs_count/{detection,recovery}.csv`. The one-DMRS recovery comparison uses different draws from the main recovery table. Counts in M75/S21. | CORRECT | — |
+## Partial-band walkthrough and jammer width — added 21 Nov
+
+New statements on the site (overview, results page), in `main.tex` / `conference.tex` (Fig. 2 and
+its text, setup, detection, recovery) and in `docs/results.md` section 22. `W/` is
+`results/width_sweep/`, `S/` the exported slot `results/site/data/partial_flip.json`.
+
+| ID | Source | Claim | Evidence | Verdict | Corrected wording |
+|---|---|---|---|---|---|
+| N01 | site teaser, walkthrough step 8, Fig. 2 caption | Of 64 slots simulated under the walkthrough's conditions, the standard receiver fails 43 and the receiver with the map none; the slot shown is the first one the map recovers. | `S/` `metadata.batch_crc` (standard 43/64, fused_soft 0/64), `metadata.selection` (`first_crc_flip`, slot 0, flip_count 43). | CORRECT | — |
+| N02 | walkthrough step 5, `docs/results.md` §22 | The U-Net flags all 56 jammed cells and no other cell. | `S/` `grids.truth` vs `detectors.fused.decisions`: 56 jammed, 56 flagged, 0 false. | CORRECT | — |
+| N03 | walkthrough step 4, `main.tex` §features | On the jammed cells the power rises by only 1.8 dB, the residual by 13 dB and the EVM by 14 dB (medians, jammed against clean cells of the allocation). | `S/` grids: power 17.1/15.3, residual 12.6/−0.4, EVM 14.1/0.2 dB. Single slot. | CORRECT | Scope it to this slot (as written). |
+| N04 | walkthrough steps 2 and 6 | The standard estimate's squared error on the jammed PRBs is 12× that on the clean PRBs; the map cuts it by 68%. | `S/` `channel`: 0.140 vs 0.012 (11.7×); 0.045 with the map. Single slot, DMRS symbol. | CORRECT | — |
+| N05 | walkthrough steps 3 and 7, teaser caption | The standard receiver gives the jammed cells' bits almost the confidence of clean ones (mean \|LLR\| 38 vs 57); with the map 1.3 vs 63. | `S/` `abs_llr` (mean of the two bits per point) by `grids.truth`: 38.4/56.5 and 1.3/63.1. | CORRECT | — |
+| N06 | `main.tex` setup | In the jammed test slots the jammer block overlaps the allocation in 85% of slots, then covers a median 37.5% of its PRBs; more than half in 21–23%, all in 2–3%. | `W/allocation_cover.csv`. | CORRECT | — |
+| N07 | `main.tex` detection, results page | Pd does not fall as the jammer widens; pilot at −9 dB: 0.76 at 2 PRBs, 0.88 at 12; 0.82 for ≤ a quarter of the pilots covered, 0.90 for > three quarters. | `W/width_detection.csv` (3 seeds; 113 and 694 jammed pilot cells; SD 0.022 and 0.004). The 2-PRB group is small. | NEEDS QUALIFIER | Keep the cell counts (as written); "probably" for the edge explanation. |
+| N08 | overview card, results page, `docs/results.md` §22 | Partial-band at +3 dB: the map keeps BLER under 1% up to 4 of 12 PRBs (0.06%), 2.12% at 6, 38.3% at 8; without it 13.9% already at 2 PRBs. | `W/width_bler_C.csv`: 3/4800, 102/4800, 319/832; standard 311/2240. | CORRECT | — |
+| N09 | `docs/results.md` §22, results page | The cliff between 6 and 8 jammed PRBs: with 8 of 12 jammed the clean third holds fewer coded bits (1,248) than the block's information bits (about 1,385). | n = 3,744 coded bits (12 PRBs × 12 × 13 × 2); MCS 5 rate ≈ 0.37. A counting argument, not a capacity bound: jammed cells still carry information at weak jamming (−3 dB, 8 PRBs: 4.1%). | NEEDS QUALIFIER | Present it as an explanation of the cliff at strong jamming (as written). |
+| N10 | `docs/results.md` §22 | The U-Net map stays within 0.8 percentage points of the true map at every width, attack and JSR. | `W/width_bler_C.csv`, largest gap 0.81 points (pilot, +9 dB, 10 PRBs). | CORRECT | — |
+| N11 | `docs/results.md` §22 | The 12-PRB pilot point (36.0%, 22.8% with passes, +9 dB) agrees with §21's whole-allocation run (39.3%, 24.4%) within sampling error. | Wilson 33.1–39.1% for 346/960; independent draws. | CORRECT | — |
+| N12 | `main.tex` recovery | The 4-PRB jammer covers a third of the UE's pilots (pilot, partial-band) and data cells (data, partial-band). | `J/experiments/recovery.py` `ALLOC = (6, 12)`, `JAM_SIZE = 4`, block inside the allocation. | CORRECT | — |

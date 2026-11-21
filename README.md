@@ -205,6 +205,19 @@ uv run python -m jamloc.experiments.recovery --channel C --jammer hopping --seed
 uv run python -m jamloc.experiments.recovery --channel C --snr-db 8 --seeds 0 1 2   # paper's low-SNR case
 ```
 
+The jammer covers 4 of the 12 scheduled PRBs above. `--jam-prb N` moves it to N PRBs (runs go to
+`recovery_C_jam<N>` files); `experiments.width_sweep` then plots BLER against the width, and the
+detector's Pd against the width of the test split's jammer blocks (`results/width_sweep/`,
+`docs/results.md` section 22). The runs read the checkpoints through a `models` link in that folder
+(`results/width_sweep/models` pointing to `results/models`).
+
+```bash
+JAMLOC_RESULTS_DIR=results/width_sweep uv run python -m jamloc.experiments.recovery --channel C \
+    --jsr-db -3 3 9 --seeds 0 --max-mc-iter 25 --jam-prb 8 --attacks pilot data partial \
+    --receivers standard lmmse p_r_e_soft p_r_e_soft_da true_soft true_soft_da
+uv run python -m jamloc.experiments.width_sweep            # detection part, then the BLER figure
+```
+
 To compare one and two DMRS symbols, reuse the nominal test data and checkpoints from
 `paper_run`. The experiment generates missing two-DMRS splits and trains the corresponding
 P+R+E and P+E models. It writes detection and BLER tables under `results/dmrs_count/`.
