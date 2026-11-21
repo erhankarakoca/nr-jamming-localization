@@ -425,7 +425,9 @@ const WIDTH_STYLE = {
   true_soft: ["#009e73", "triangle-up-open", "dashdot"],
   true_soft_da: ["#000000", "diamond-open", "solid"],
 };
-const JSR_COLORS = { "-15": "#666666", "-9": "#008000", "-3": "#0033cc", "3": "#cc0000", "9": "#000000" };
+// An array, not an object: number-like keys of an object would come first, out of order
+const JSR_COLORS = [[-15, "#666666"], [-9, "#008000"], [-3, "#0033cc"], [3, "#cc0000"], [9, "#000000"]];
+const LOG_TICKS = { tickvals: [1e-4, 1e-3, 1e-2, 1e-1, 1], ticktext: ["0.01%", "0.1%", "1%", "10%", "100%"] };
 
 function widthSweep(section) {
   const summary = document.querySelector("#width-summary");
@@ -464,13 +466,12 @@ function widthSweep(section) {
     });
     renderPlot("width-chart", traces, `Jammed PRBs of the UE's ${total}`, "BLER", {
       xaxis: { ...axis(`Jammed PRBs of the UE's ${total}`), tickvals: widths },
-      yaxis: { ...axis("BLER"), type: "log", range: [-4.2, 0.1], tickformat: ".1%" },
+      yaxis: { ...axis("BLER"), type: "log", range: [-4.2, 0.1], ...LOG_TICKS },
     });
     const det = (section.detection ?? []).filter(r => r.attack === key);
-    const pdTraces = Object.keys(JSR_COLORS).map(Number).flatMap(j => {
+    const pdTraces = JSR_COLORS.flatMap(([j, color]) => {
       const series = det.filter(r => r.jsr_db === j).sort((a, b) => a.jam_prb - b.jam_prb);
       if (!series.length) return [];
-      const color = JSR_COLORS[String(j)];
       return [{
         x: series.map(r => r.jam_prb), y: series.map(r => r.pd),
         customdata: series.map(r => [r.pd_std ?? 0, r.num_cells, r.num_slots]),
@@ -485,12 +486,23 @@ function widthSweep(section) {
       });
     }
     const at = (rx, w) => rows.find(r => r.receiver === rx && r.jam_prb === w);
-    const safe = widths.filter(w => at("p_r_e_soft", w) && at("p_r_e_soft", w).bler < 0.01);
-    const widest = safe.length ? Math.max(...safe) : null;
+    // The widest jammer up to which every narrower one also leaves the U-Net map under 1% BLER
+    let widest = null;
+    for (const w of widths) {
+      if (!(at("p_r_e_soft", w)?.bler < 0.01)) break;
+      widest = w;
+    }
     const helped = widths.filter(w => at("p_r_e_soft_da", w) && at("p_r_e_soft", w) && at("p_r_e_soft_da", w).bler < at("p_r_e_soft", w).bler);
-    summary.replaceChildren(element("p", widest
-      ? `${attacks[key]} jamming at ${signedDb(jsr)}: with the jammer on up to ${widest} of the UE's ${total} PRBs (${Math.round(100 * widest / total)}% of its ${what(key)}), the U-Net map keeps the BLER under 1%. Wider than that, too little of the block is clean for the code to recover the rest${helped.length ? `; the data-aided passes lower the BLER at ${helped.join(", ")} PRBs` : ""}.`
-      : `${attacks[key]} jamming at ${signedDb(jsr)}: even the narrowest jammer costs the receiver with the U-Net map 1% of blocks or more.`));
+    const why = key === "pilot"
+      ? "Wider than that, fewer clean pilots are left to carry the channel estimate across the jammed band"
+      : "Wider than that, the clean cells soon carry too few coded bits for the code (rate about 0.37) to fill in the jammed ones: with 8 of 12 PRBs jammed, the clean third holds fewer coded bits than the block has information bits";
+    const head = `${attacks[key]} jamming at ${signedDb(jsr)}: `;
+    const passes = helped.length ? `. The data-aided passes lower the BLER at ${helped.join(", ")} PRBs.` : ".";
+    summary.replaceChildren(element("p", widest === null
+      ? `${head}even the narrowest jammer costs the receiver with the U-Net map 1% of blocks or more${passes}`
+      : widest === widths.at(-1)
+        ? `${head}even with every PRB of the allocation jammed, the U-Net map keeps the BLER under 1%${passes}`
+        : `${head}with the jammer on up to ${widest} of the UE's ${total} PRBs (${Math.round(100 * widest / total)}% of its ${what(key)}), the U-Net map keeps the BLER under 1%. ${why}${passes}`));
   }
   attackPick.addEventListener("change", show);
   jsrPick.addEventListener("change", show);

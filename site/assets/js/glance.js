@@ -268,13 +268,22 @@ function howWide(sweep) {
     chartHost.replaceChildren(f.svg);
     if (animate && !reduceMotion) runs.forEach(run => run());
     const at = (rx, w) => rows.find(r => r.attack === attack && r.jsr_db === jsr && r.receiver === rx && r.jam_prb === w);
-    const safe = widths.filter(w => at("p_r_e_soft", w) && at("p_r_e_soft", w).bler < 0.01);
-    const widest = safe.length ? Math.max(...safe) : null;
+    // The widest jammer up to which every narrower one also leaves the map-aware receiver under 1%
+    let widest = null;
+    for (const w of widths) {
+      if (!(at("p_r_e_soft", w)?.bler < 0.01)) break;
+      widest = w;
+    }
     const narrow = at("standard", widths[0]);
     const what = attack === "pilot" ? "pilots" : attack === "data" ? "data cells" : "pilots and data cells";
-    answer.textContent = widest
-      ? `With the jammer on up to ${widest} of the ${total} PRBs (${Math.round(100 * widest / total)}% of the ${what}), the map keeps the loss under 1%${narrow ? `; without it, ${percent(narrow.bler, 0)} of blocks are lost already at ${widths[0]} PRBs` : ""}. Wider than that, too little of the block is clean for the code to fill in the rest.`
-      : `At this jammer power even the narrowest jammer costs the map-aware receiver more than 1% of blocks.`;
+    const why = attack === "pilot"
+      ? "Wider than that, fewer clean pilots are left to carry the channel estimate across the jammed band."
+      : "Wider than that, the clean cells soon carry too few coded bits for the code (rate about 0.37) to fill in the jammed ones.";
+    answer.textContent = widest === null
+      ? "At this jammer power even the narrowest jammer costs the map-aware receiver 1% of blocks or more."
+      : widest === widths.at(-1)
+        ? `Even with the jammer on all ${total} PRBs, the map keeps the loss under 1% at this jammer power.`
+        : `With the jammer on up to ${widest} of the ${total} PRBs (${Math.round(100 * widest / total)}% of the ${what}), the map keeps the loss under 1%${narrow ? `; without it, ${percent(narrow.bler, 0)} of blocks are lost already at ${widths[0]} PRBs` : ""}. ${why}`;
     note.textContent = `${ATTACK_NAMES[attack]} jamming at ${signedDb(jsr)}, TDL-C, 15 dB SNR, the user on ${total} PRBs, known noise power, three detector seeds pooled.`;
     return runs;
   }

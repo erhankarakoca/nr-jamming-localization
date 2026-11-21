@@ -38,6 +38,20 @@ NOMINAL_ATTACKS = ("pilot", "data", "partial")
 COVER_BINS = ((0.0, 0.0), (0.01, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0))
 WIDTHS = (2, 4, 6, 8, 10, 12)  # jammed PRBs of the BLER runs (allocation: 12 PRBs)
 BLER_RECEIVERS = ("standard", "lmmse", "p_r_e_soft", "p_r_e_soft_da", "true_soft", "true_soft_da")
+# Legend names of this figure (the recovery experiment's styles otherwise)
+BLER_LABELS = {
+    "standard": "No protection",
+    "lmmse": "LMMSE, no map",
+    "p_r_e_soft": "U-Net map",
+    "p_r_e_soft_da": "U-Net map, data-aided",
+    "true_soft": "True map",
+    "true_soft_da": "True map, data-aided",
+}
+ATTACK_TITLES = {
+    "pilot": "Pilot jamming",
+    "data": "Data jamming",
+    "partial": "Partial-band jamming",
+}
 JSR_COLORS = {-15.0: GRAY, -9.0: GREEN, -3.0: BLUE, 3.0: RED, 9.0: BLACK}
 
 
@@ -228,13 +242,15 @@ def plot_bler_width(rows: list[dict], jsrs=(3.0, 9.0)):
                     [r["block_errors"] for r in sel],
                     [r["blocks"] for r in sel],
                     style,
-                    STYLE[rx]["label"],
+                    BLER_LABELS[rx],
                 )
+            # Each tick also gives the share of the allocation (pilots and/or data cells) jammed
             ax.set(yscale="log", ylim=(floor / 2, 1.5), xticks=WIDTHS)
+            ax.set_xticklabels([f"{w}\n{round(100 * w / 12)}%" for w in WIDTHS])
             if i == 0:
-                ax.set_title(f"{attack} jamming")
-            if i == len(jsrs) - 1:
-                ax.set_xlabel("Jammed PRBs of the 12 scheduled")
+                ax.set_title(ATTACK_TITLES[attack])
+            if i == len(jsrs) - 1 and j == 1:  # one label for the three columns
+                ax.set_xlabel("Jammed PRBs of the UE's 12, and their share of its allocation")
             if j == 0:
                 ax.set_ylabel(f"BLER, JSR {jsr:+g} dB")
     handles = axes[0, 0].get_legend_handles_labels()[0] + [zero_error_handle()]
