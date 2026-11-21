@@ -18,7 +18,8 @@ commit that adds this file.
 | `README.md` | 5 | 12 | 3 | 5 | 25 |
 | `docs/results.md` | 3 | 11 | 5 | 1 | 20 |
 | Partial-band walkthrough and jammer width (added) | 10 | 2 | 0 | 0 | 12 |
-| **Total** | **92** | **104** | **19** | **11** | **226** |
+| `README.md` rewrite (added) | 5 | 0 | 0 | 0 | 5 |
+| **Total** | **97** | **104** | **19** | **11** | **231** |
 
 Counts are register rows. A row can cover repeated wording or several numbers from the same table and population.
 
@@ -305,3 +306,17 @@ its text, setup, detection, recovery) and in `docs/results.md` section 22. `W/` 
 | N10 | `docs/results.md` §22 | The U-Net map stays within 0.8 percentage points of the true map at every width, attack and JSR. | `W/width_bler_C.csv`, largest gap 0.81 points (pilot, +9 dB, 10 PRBs). | CORRECT | — |
 | N11 | `docs/results.md` §22 | The 12-PRB pilot point (36.0%, 22.8% with passes, +9 dB) agrees with §21's whole-allocation run (39.3%, 24.4%) within sampling error. | Wilson 33.1–39.1% for 346/960; independent draws. | CORRECT | — |
 | N12 | `main.tex` recovery | The 4-PRB jammer covers a third of the UE's pilots (pilot, partial-band) and data cells (data, partial-band). | `J/experiments/recovery.py` `ALLOC = (6, 12)`, `JAM_SIZE = 4`, block inside the allocation. | CORRECT | — |
+
+## README rewrite — added 21 Nov
+
+The README was rewritten as a short front page; the commands moved to `docs/reproducing.md` and
+the setup, Colab, Overleaf and code-map notes to `docs/development.md`. Rows R01–R25 describe the
+earlier README. The rewrite's numbers restate rows that were already checked.
+
+| ID | Source | Claim | Evidence | Verdict | Corrected wording |
+|---|---|---|---|---|---|
+| R26 | `README.md` results table | Cell-level F1 0.952 at 1.15% per-cell false alarms, block test 0.868; test split (TDL-A and TDL-C, JSR −15 to +9 dB, SNR 5–25 dB), three seeds. | M03; `J/dataset.py` test split (both channels, JSR −15…9 dB); `docs/results.md` §17.1. | CORRECT | — |
+| R27 | `README.md` results table | Partial-band, +9 dB JSR, 4 of 12 PRBs, TDL-C, 15 dB SNR: 87.8% standard, 0.02% with the map; known noise power stated under the table. | S19: `R/recovery/recovery_C_replay.csv`, 337/384 vs 1/4,800. | CORRECT | — |
+| R28 | `README.md` results table | Partial-band, +3 dB: 0.06%, 2.1%, 38% with the map at 4, 6, 8 of 12 jammed PRBs; standard 53%, 79%, 92%. | N08; `W/width_bler_C.csv` `p_r_e_soft` 3/4,800, 102/4,800, 319/832; `standard` 339/640, 353/448, 352/384. | CORRECT | — |
+| R29 | `README.md` results table | 0.68 ms per slot for features and U-Net, one M1 Pro core, 24-PRB allocation, without estimation, equalization and decoding. | M80, item 7: `R/size_sweep/size_sweep_latency.csv`, 0.684 ms for the frozen 66,553-parameter model. | CORRECT | — |
+| R30 | `README.md` "How it works" | Residual has a known distribution under the ideal null (no jamming, channel in the delay subspace, white noise of known power); data-aided passes help when every pilot is jammed. | `J/theory.py`, M02; `docs/results.md` §21 and N11 (36.0% to 22.8% at +9 dB, 12 PRBs). | CORRECT | — |

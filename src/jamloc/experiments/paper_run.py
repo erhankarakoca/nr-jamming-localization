@@ -21,7 +21,7 @@ them all in one place, so that no result is left from an older version of the da
 
 Data generation and training are meant for a GPU (Colab). The recovery experiment is not part of
 this script: it is CPU-bound (its LMMSE solves run on the CPU) and runs best as parallel processes
-on a multi-core machine (see the README). Latency must be measured on the target CPU.
+on a multi-core machine (see docs/reproducing.md). Latency must be measured on the target CPU.
 
     python -m jamloc.experiments.paper_run --stages data train eval margin figures zip
 """

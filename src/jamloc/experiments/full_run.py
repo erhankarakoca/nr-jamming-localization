@@ -13,7 +13,7 @@ Meant for a Colab GPU; runs the same way on a laptop CPU (slower training):
 6. pack ``results/{eval,models,recovery,figures}`` into ``results/full_run.zip``.
 
 The BER/BLER sweep, the feature-map figure and the CPU latency benchmark are separate scripts
-(see the README); latency in particular should be measured on the target CPU, not on Colab.
+(see docs/reproducing.md); latency in particular should be measured on the target CPU, not on Colab.
 """
 
 import argparse

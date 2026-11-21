@@ -1,6 +1,6 @@
 # Writing guide for the paper
 
-Notes for revising the paper (Overleaf project, see the README). They collect what the IEEE style
+Notes for revising the paper (Overleaf project, see [development.md](development.md)). They collect what the IEEE style
 guides and well-written papers in our area do, and how the November 2026 revision applied it.
 Every source below was opened, and every DOI was resolved through Crossref (18 November 2026).
 
