@@ -10,6 +10,8 @@ PD_CSV = "eval/test_pd_vs_jsr.csv"
 MARGIN_CSV = "margin/margin_vs_snr_ci.csv"
 MATCHED_CSV = "intervals/test_matched_by_attack_f1_ci.csv"
 MATCHED_PAIRED_CSV = "intervals/test_matched_by_attack_paired.csv"
+DMRS_DETECTION_CSV = "dmrs_count/detection.csv"
+DMRS_RECOVERY_CSV = "dmrs_count/recovery.csv"
 RECOVERY_RUNS = {
     "nominal": "recovery_C",
     "pulsed": "recovery_C_pulsed",
@@ -47,6 +49,14 @@ POPULATIONS = {
         "Detection probability uses jammed scheduled cells at the weakest tested JSR. "
         "The values average over training seeds 0, 1, and 2. The 95% batch-bootstrap intervals hold "
         "the matched decisions fixed."
+    ),
+    "dmrs": (
+        "One DMRS symbol per slot against two (symbols 2 and 11), each with detectors trained "
+        "on its own data. F1 and false alarms cover the whole carrier of the test split; Pd counts "
+        "the jammed cells inside the allocation at −15 dB JSR. U-Net values average training "
+        "seeds 0, 1, and 2. BLER pools the same seeds at +9 dB JSR on TDL-C at 15 dB SNR with the "
+        "UE on 12 PRBs and the jammer on 4. In the last row the jammer assumes one front-loaded "
+        "DMRS symbol and jams only the first."
     ),
 }
 
@@ -145,6 +155,46 @@ def _matched_paired(rows):
     ]
 
 
+def _dmrs_detection(rows):
+    # U-Nets have one row per training seed, the model-free tests one row: average per detector.
+    groups = {}
+    for r in rows:
+        groups.setdefault((int(r["dmrs_count"]), r["detector"]), []).append(r)
+    fields = ("f1_pilot", "f1_all", "fa", "pd_pilot_m15", "pd_data_m15")
+    return [
+        {
+            "dmrs_count": count,
+            "detector": detector,
+            "n_seeds": len(group),
+            **{f: sum(float(r[f]) for r in group) / len(group) for f in fields},
+        }
+        for (count, detector), group in groups.items()
+    ]
+
+
+def _dmrs_recovery(rows):
+    pooled = {}
+    for r in rows:
+        if float(r["jsr_db"]) != 9:
+            continue
+        key = (int(r["dmrs_count"]), r["jammer_dmrs"], r["attack"], r["receiver"])
+        p = pooled.setdefault(key, [0, 0])
+        p[0] += int(r["block_errors"])
+        p[1] += int(r["blocks"])
+    return [
+        {
+            "dmrs_count": count,
+            "jammer_dmrs": jammer,
+            "attack": attack,
+            "receiver": receiver,
+            "block_errors": errors,
+            "blocks": blocks,
+            "bler": errors / blocks if blocks else None,
+        }
+        for (count, jammer, attack, receiver), (errors, blocks) in pooled.items()
+    ]
+
+
 def _recovery_files(directory: Path, stem: str) -> tuple[Path, Path]:
     for name in (f"{stem}_replay", stem):
         points = directory / f"{name}.csv"
@@ -186,6 +236,9 @@ def write_results(source: Path, build: Path) -> None:
         if path.stem.removesuffix("_replay_paired") not in RECOVERY_RUNS.values():
             copy("recovery", path)
 
+    dmrs_detection = copy("dmrs", source / DMRS_DETECTION_CSV)
+    dmrs_recovery = copy("dmrs", source / DMRS_RECOVERY_CSV)
+
     payload = {
         "pd": {"rows": _pd(_read(pd))},
         "margin": {"rows": _margin(_read(margin))},
@@ -193,6 +246,10 @@ def write_results(source: Path, build: Path) -> None:
         "matched": {
             "rows": _matched(_read(matched)),
             "paired": _matched_paired(_read(matched_paired)),
+        },
+        "dmrs": {
+            "rows": _dmrs_detection(_read(dmrs_detection)),
+            "recovery": _dmrs_recovery(_read(dmrs_recovery)),
         },
     }
     for kind, section in payload.items():

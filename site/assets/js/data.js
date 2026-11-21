@@ -1,3 +1,5 @@
+import { element } from "./nav.js";
+
 const dataRoot = new URL("../../data/", import.meta.url);
 const pending = new Map();
 
@@ -88,31 +90,39 @@ export function signedDb(value) {
 export function calibrationText(slot) {
   const m = slot.metadata;
   const calibration = m.thresholds.fused;
-  return `Simulation seed ${m.seed}, detector seed ${m.detector_seed} (${calibration.training_data}). The nominal U-Net cutoff is ${calibration.value}, calibrated on ${calibration.split} at a ${percent(calibration.false_alarm_rate)} per-cell false-alarm target`;
+  return `Simulation seed ${m.seed}, detector seed ${m.detector_seed} (${calibration.training_data}). The U-Net cutoff is ${calibration.value}, set on ${calibration.split} for ${percent(calibration.false_alarm_rate)} per-cell false alarms.`;
 }
 
 export function conditions(slot) {
   const m = slot.metadata;
   const jsr = m.jsr_db == null ? "no jamming" : `${signedDb(m.jsr_db)} JSR`;
-  const noise = m.noise_estimate === "comb" ? "estimated noise power" : "known noise power";
-  return `TDL-${m.channel} · ${m.snr_db} dB SNR · ${jsr} · ${noise}. ${calibrationText(slot)}`;
+  const noise = m.noise_estimate === "comb" ? " · estimated noise power" : "";
+  return `TDL-${m.channel} · ${m.snr_db} dB SNR · ${jsr}${noise}`;
 }
 
 export function selectionText(slot) {
   const { selection: s, batch_size: size } = slot.metadata;
   if (s.rule === "first_crc_flip") {
-    return `First slot where standard decoding failed and U-Net soft decoding passed. This happens in ${s.flip_count} of ${size} slots in its batch.`;
+    return `Standard decoding failed and U-Net soft decoding passed in ${s.flip_count} of ${size} slots; this is the first of them.`;
   }
   if (s.rule === "first_true_soft_failure") {
-    return `First slot where the soft receiver failed with the true map. This happens in ${s.failure_count} of ${size} slots in its batch.`;
+    return `Decoding failed even with the true map in ${s.failure_count} of ${size} slots; this is the first of them.`;
   }
-  if (s.hit_rate == null) return `The first of ${size} benign slots is shown because there are no jammed cells.`;
-  return `This slot has the U-Net hit rate closest to the median over ${size} batch slots, with the earliest slot used on a tie. The slot hit rate is ${percent(s.hit_rate)} and the batch median is ${percent(s.batch_median)} over jammed carrier cells.`;
+  if (s.hit_rate == null) return `The first of ${size} slots without jamming.`;
+  return `Of ${size} slots, the one whose U-Net hit rate (${percent(s.hit_rate)} of the jammed cells) is closest to the median (${percent(s.batch_median)}); the earliest on a tie.`;
+}
+
+// Seeds, calibration and the selection rule, folded away under the slot's one-line conditions.
+export function slotDetails(slot) {
+  const details = element("details", null, "more");
+  details.append(element("summary", "How this slot was chosen"),
+    element("p", selectionText(slot)), element("p", calibrationText(slot)));
+  return details;
 }
 
 export function batchText(slot, names = Object.keys(slot.receivers)) {
   const counts = slot.metadata.batch_crc;
   const size = counts[names[0]].slots;
-  const summary = names.map(name => `${receiverName(name)} failed ${counts[name].failures}`);
-  return `In this batch of ${size} slots, ${summary.join(", ")}.`;
+  const summary = names.map(name => `${receiverName(name)} ${counts[name].failures}`);
+  return `CRC failures in ${size} slots: ${summary.join(", ")}.`;
 }

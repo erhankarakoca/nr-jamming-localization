@@ -2,8 +2,8 @@ import { receiverName } from "./data.js";
 import { element } from "./nav.js";
 
 const AXIS_LIMIT = 4;
-const INSET = 29;
-const SIZE = 240;
+const INSET = 20;
+const SIZE = 160;
 const SPAN = SIZE - 2 * INSET;
 const SCALE = SPAN / (2 * AXIS_LIMIT);
 const SUBCARRIERS_PER_PRB = 12;
@@ -52,10 +52,10 @@ function draw(slot, name, prbs) {
   const xOf = x => SIZE / 2 + SCALE * x;
   const yOf = y => SIZE / 2 - SCALE * y;
 
-  ctx.fillStyle = "#f8fafb";
-  ctx.fillRect(INSET, INSET, SPAN, SPAN);
-  ctx.strokeStyle = "#a6b7c1";
+  ctx.lineWidth = 0.6;
+  ctx.strokeStyle = "#000";
   ctx.strokeRect(INSET, INSET, SPAN, SPAN);
+  ctx.strokeStyle = "#d9d9d9";
   ctx.beginPath();
   ctx.moveTo(INSET, yOf(0));
   ctx.lineTo(SIZE - INSET, yOf(0));
@@ -63,15 +63,18 @@ function draw(slot, name, prbs) {
   ctx.lineTo(xOf(0), SIZE - INSET);
   ctx.stroke();
 
-  ctx.font = "11px system-ui";
-  ctx.fillStyle = "#455965";
+  ctx.font = '10px "STIX Two Text", "Times New Roman", Times, serif';
+  ctx.fillStyle = "#000";
   ctx.textAlign = "center";
   for (const tick of [-AXIS_LIMIT, 0, AXIS_LIMIT]) {
-    ctx.fillText(tick, xOf(tick), SIZE - 14);
-    ctx.fillText(tick, 16, yOf(tick) + 4);
+    ctx.fillText(String(tick).replace("-", "−"), xOf(tick), SIZE - 8);
+    ctx.textAlign = "right";
+    ctx.fillText(String(tick).replace("-", "−"), INSET - 3, yOf(tick) + 3);
+    ctx.textAlign = "center";
   }
-  ctx.fillText("I", SIZE - 9, SIZE - 14);
-  ctx.fillText("Q", 16, 17);
+  ctx.font = 'italic 10px "STIX Two Text", "Times New Roman", Times, serif';
+  ctx.fillText("I", SIZE - INSET / 2, SIZE - 8);
+  ctx.fillText("Q", INSET / 2 - 2, INSET - 6);
 
   ctx.save();
   ctx.beginPath();
@@ -92,9 +95,9 @@ function draw(slot, name, prbs) {
     }
     shown++;
     ctx.globalAlpha = 0.14 + 0.76 * (1 - Math.exp(-(llrs[index] ?? 0) / 14));
-    ctx.fillStyle = slot.grids.truth[prb][symbol] ? "#d55e00" : "#254c63";
+    ctx.fillStyle = slot.grids.truth[prb][symbol] ? "#cc0000" : "#0033cc";
     ctx.beginPath();
-    ctx.arc(xOf(point[0]), yOf(point[1]), 1.5, 0, Math.PI * 2);
+    ctx.arc(xOf(point[0]), yOf(point[1]), 1.1, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
@@ -106,7 +109,7 @@ function draw(slot, name, prbs) {
   const figure = element("figure");
   const caption = element("figcaption");
   caption.append(element("strong", label), crcBadge(receiver.crc));
-  if (outside) caption.append(element("span", `${outside.toLocaleString()} outside axes`, "context"));
+  if (outside) caption.append(element("span", `${outside.toLocaleString()} points off the axes`, "context"));
   figure.append(canvas, caption);
   return figure;
 }

@@ -3,77 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jammer timing and pilot residual · NR Jamming Localization</title>
+  <meta http-equiv="refresh" content="0; url=walkthrough.html">
+  <title>Animations · NR Jamming Localization</title>
   <link rel="stylesheet" href="assets/style.css">
-  <script type="module" src="assets/js/nav.js"></script>
-  <script type="module" src="assets/js/animate.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-header">
-    <div class="shell header-inner">
-      <a class="wordmark" href="index.html">NR Jamming Localization</a>
-      <nav aria-label="Main navigation">
-        <a href="index.html">Overview</a>
-        <a href="walkthrough.html">Walkthrough</a>
-        <a href="explore.html">Explore</a>
-        <a href="constellations.html">Constellations</a>
-        <a href="animations.html" aria-current="page">Animations</a>
-        <a href="results.html">Results</a>
-      </nav>
-    </div>
-  </header>
-  <main class="shell" id="main" tabindex="-1">
-<header class="page-intro">
-  <h1>Jammer timing and pilot residual</h1>
-  <p class="lede">Follow the jammer across the OFDM symbols of a recorded slot. The blue
-    flags come from the U-Net map computed after the full slot was received.</p>
-  <p>In the power sweep, the channel, noise, and jammer waveform are held fixed. The slider
-    selects the jammer-to-signal ratio (JSR) of an exported realization.</p>
-</header>
-<section class="panel" aria-labelledby="timing-title">
-  <h2 id="timing-title">Hopping and pulsed interference</h2>
-  <p id="timing-comparison" hidden>In this recorded hopping slot, the block-trained U-Net
-    flags PRBs outside the hop at several symbols. The mixed-attack U-Net follows the
-    injected PRBs throughout the slot.</p>
-  <div class="controls">
-    <label>Jammer <select id="timing-case" disabled><option value="hopping">Hopping</option><option value="pulsed">Pulsed</option></select></label>
-    <label>Detector <select id="timing-detector" disabled></select></label>
-    <button type="button" id="timing-play" disabled>Play</button>
-    <button type="button" id="timing-next" disabled>Step</button>
-    <output id="symbol" class="counter" aria-live="polite"></output>
-  </div>
-  <div id="timing-grid" aria-busy="true">Loading the recorded slot…</div>
-  <div id="timing-caption" class="context" aria-live="polite"></div>
-</section>
-<section class="panel" aria-labelledby="sweep-title">
-  <h2 id="sweep-title">Pilot residual vs. JSR</h2>
-  <p>The pilot residual is the part of the channel estimate left after projection onto the
-    delay subspace. The normalized residual <var>R</var><sub>b</sub> combines pilot
-    residual power within PRB <var>b</var>.</p>
-  <p class="context">As in Fig. 3, the top chart divides each pilot’s residual power by the noise
-    variance of the least-squares channel estimate before converting to dB. This variance is
-    <var>N</var><sub>0</sub>/<var>P</var><sub>p</sub>, where
-    <var>N</var><sub>0</sub> = 10<sup>−SNR/10</sup> uses the case SNR in dB and
-    <var>P</var><sub>p</sub> = 2 is the energy per occupied DMRS RE for the configured two CDM groups.</p>
-  <label class="range-label" for="jsr">Jammer-to-signal ratio <output id="jsr-value" for="jsr"></output></label>
-  <input id="jsr" type="range" min="0" max="0" value="0" disabled>
-  <div id="sweep" aria-busy="true">Loading the power sweep…</div>
-</section>
+  <main class="shell">
+    <p>This page has moved to <a href="walkthrough.html">walkthrough.html</a>.</p>
   </main>
-  <footer class="site-footer">
-    <div class="shell footer-inner">
-      <div><a href="https://github.com/erhankarakoca/nr-jamming-localization">Code repository</a><span>Paper in preparation</span></div>
-      <details>
-        <summary>How to cite this repository</summary>
-        <pre><code>@misc{karakoca_nr_jamming_localization,
-  author = {Erhan Karakoca},
-  title = {NR Jamming Localization},
-  howpublished = {Software repository},
-  url = {https://github.com/erhankarakoca/nr-jamming-localization}
-}</code></pre>
-      </details>
-    </div>
-  </footer>
 </body>
 </html>

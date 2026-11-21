@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Explore a slot · NR Jamming Localization</title>
+  <title>Explore · NR Jamming Localization</title>
   <link rel="stylesheet" href="assets/style.css">
   <script type="module" src="assets/js/nav.js"></script>
   <script type="module" src="assets/js/grid.js"></script>
@@ -17,47 +17,47 @@
         <a href="index.html">Overview</a>
         <a href="walkthrough.html">Walkthrough</a>
         <a href="explore.html" aria-current="page">Explore</a>
-        <a href="constellations.html">Constellations</a>
-        <a href="animations.html">Animations</a>
         <a href="results.html">Results</a>
       </nav>
     </div>
   </header>
   <main class="shell" id="main" tabindex="-1">
 <header class="page-intro">
-  <h1>Explore a slot</h1>
-  <p class="lede">Choose a case and select a resource grid cell to inspect its features
-    and detector decisions. Use the arrow keys to move between cells when the grid has focus.</p>
-  <p>Each constellation shows all equalized data symbols in the selected PRB. Points
-    with larger absolute log-likelihood ratios (|LLR|) are more opaque. The CRC badges
-    report whether each receiver decoded the whole block.</p>
+  <h1>Explore</h1>
+  <p>Pick a recorded slot and a cell. Arrow keys move between cells once the grid has focus.</p>
 </header>
 <div id="explorer" aria-busy="true">
-  <section class="panel" aria-label="Resource grid and layers">
+  <section aria-label="Resource grid and layers">
     <div class="controls">
-      <label>Case <select id="case-select" disabled></select></label>
+      <label>Slot <select id="case-select" disabled></select></label>
       <label>Feature <select id="feature-select" disabled>
         <option value="">None</option><option value="power_db">Power P</option>
         <option value="residual_db">Pilot residual R</option><option value="evm_db">EVM E</option>
       </select></label>
-      <label>Detector flags <select id="detector-select" disabled></select></label>
-      <label class="check"><input id="truth-toggle" type="checkbox" checked disabled> Injected cells</label>
+      <label>Detector <select id="detector-select" disabled></select></label>
+      <label class="check"><input id="truth-toggle" type="checkbox" checked disabled> Jammed cells</label>
     </div>
-    <p id="explore-context" class="context" aria-live="polite">Loading cases…</p>
-    <div id="explore-grid"></div>
-    <div id="unavailable" class="context"></div>
+    <p id="explore-lesson"></p>
+    <div id="explore-context" class="context" aria-live="polite">Loading the slots…</div>
+    <div class="slot-row">
+      <div>
+        <div id="explore-grid"></div>
+        <div id="unavailable" class="context"></div>
+      </div>
+      <div aria-labelledby="cell-heading">
+        <h2 id="cell-heading">Selected cell</h2>
+        <div id="cell-details" aria-live="polite"></div>
+      </div>
+    </div>
   </section>
-  <div class="inspection">
-    <section class="panel" aria-labelledby="cell-heading">
-      <h2 id="cell-heading">Selected cell</h2>
-      <div id="cell-details" aria-live="polite"></div>
-    </section>
-    <section class="panel" aria-labelledby="points-heading">
-      <h2 id="points-heading">Equalized symbols</h2>
-      <div id="explore-points"></div>
-    </section>
-  </div>
-  <p id="explore-batch" class="context"></p>
+  <section class="panel" aria-labelledby="points-heading">
+    <h2 id="points-heading">Equalized symbols</h2>
+    <p class="context">Data symbols of the selected PRB; stronger bit reliability is drawn darker.
+      The CRC covers the whole block.</p>
+    <div class="controls"><label class="check"><input id="all-receivers" type="checkbox"> All receivers</label></div>
+    <div id="explore-points"></div>
+    <p id="explore-batch" class="context"></p>
+  </section>
 </div>
   </main>
   <footer class="site-footer">
