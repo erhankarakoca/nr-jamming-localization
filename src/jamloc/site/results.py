@@ -12,6 +12,8 @@ MATCHED_CSV = "intervals/test_matched_by_attack_f1_ci.csv"
 MATCHED_PAIRED_CSV = "intervals/test_matched_by_attack_paired.csv"
 DMRS_DETECTION_CSV = "dmrs_count/detection.csv"
 DMRS_RECOVERY_CSV = "dmrs_count/recovery.csv"
+RECOVERY_CURVES_CSV = "recovery_pr9/recovery_C.csv"
+RECOVERY_CURVES_RECEIVERS = ("standard", "lmmse", "block_soft", "p_r_e_soft", "true_soft")
 # The data-aided receiver study: its own results folder, one recovery run per SNR
 DATA_AIDED_RUNS = {
     15.0: "receiver_study/recovery/recovery_C",
@@ -56,6 +58,13 @@ POPULATIONS = {
         "allocation spans 12 PRBs and the jammer occupies 4 PRBs when active. Receivers share the same draws "
         "but can stop at different block counts. The paired 95% intervals use only slots "
         "decoded by both receivers, so their BLER differences can differ from the pooled table."
+    ),
+    "recovery_curves": (
+        "Block error rate (BLER) pools block errors and decoded blocks over detector training "
+        "seeds 0, 1, and 2 on TDL-C at 15 dB SNR with known noise power. The nominal jammer "
+        "sweep spans −15 to +9 dB JSR and includes a benign reference. The UE occupies 12 PRBs. "
+        "The jammer occupies 4 PRBs for pilot, data, and partial-band jamming and all 12 PRBs "
+        "for whole-allocation pilot jamming."
     ),
     "matched": (
         "On the nominal test split, thresholds are fitted by attack and detector to flag 1% "
@@ -151,6 +160,25 @@ def _recovery_paired(rows, jammer):
         for r in rows
         if _number(r["jsr_db"]) == 9
     ]
+
+
+def _recovery_curves(rows):
+    from jamloc.experiments.recovery import pool_seeds
+
+    selected = []
+    for row in rows:
+        if (
+            row["receiver"] not in RECOVERY_CURVES_RECEIVERS
+            or row["jammer"] != "nominal"
+            or row["seed"] not in ("0", "1", "2")
+            or _number(row["snr_db"]) != 15
+        ):
+            continue
+        jsr = _number(row["jsr_db"])
+        if (jsr is None and row["attack"] == "none") or (jsr is not None and -15 <= jsr <= 9):
+            selected.append({**row, "jsr_db": jsr, "snr_db": 15.0})
+    keys = ("attack", "jsr_db", "receiver", "block_errors", "blocks", "bler")
+    return [{key: row[key] for key in keys} for row in pool_seeds(selected)]
 
 
 def _matched(rows):
@@ -334,6 +362,7 @@ def write_results(source: Path, build: Path) -> None:
     for path in sorted(recovery_dir.glob("recovery_C*_replay_paired.csv")):
         if path.stem.removesuffix("_replay_paired") not in RECOVERY_RUNS.values():
             copy("recovery", path)
+    curves = copy("recovery_curves", source / RECOVERY_CURVES_CSV, "recovery_curves_")
 
     aided = {}
     for snr, stem in DATA_AIDED_RUNS.items():
@@ -348,6 +377,7 @@ def write_results(source: Path, build: Path) -> None:
         "pd": {"rows": _pd(_read(pd))},
         "margin": {"rows": _margin(_read(margin))},
         "recovery": {"rows": recovery, "paired": paired},
+        "recovery_curves": {"rows": _recovery_curves(_read(curves))},
         "matched": {
             "rows": _matched(_read(matched)),
             "paired": _matched_paired(_read(matched_paired)),

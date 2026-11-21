@@ -18,9 +18,10 @@ Numbers have about four significant digits. Undefined values are JSON null.
   batch_median. For median_hit_rate choose the hit rate nearest the arithmetic median,
   first index on a tie. If there are no jammed cells, both rates are null and slot zero
   is shown. first_crc_flip selects the first standard failure that fused_soft recovers,
-  with flip_count and flip_frequency. first_true_soft_failure selects the first true_soft
-  CRC failure, with failure_count and failure_frequency. Both frequencies are fractions
-  of the full case batch.
+  with flip_count and flip_frequency. first_aided_crc_flip uses the same counts for the
+  first fused_soft failure that fused_soft_da recovers and reports the selected batch seed.
+  first_true_soft_failure selects the first true_soft CRC failure, with failure_count and
+  failure_frequency. Frequencies are fractions of the full case batch.
   For paper_realization, block_min_relative_db is the weakest block PRB's benign power
   relative to the allocation mean. The original figure uses the first seed at or above −3 dB.
 * grids: power_db, residual_db, evm_db from the detector inputs, allocation and truth.
@@ -39,6 +40,12 @@ Numbers have about four significant digits. Undefined values are JSON null.
   in symbol order, skipping the DMRS symbol, then in increasing allocation subcarrier
   order (12 per PRB). For point i, divmod(i, 12 * alloc_size) gives data-symbol ordinal
   and allocation subcarrier.
+* channel: the first DMRS symbol and the number of subcarriers in the allocation. Pilot
+  indices, jamming labels, LS and fitted values follow pilot order. True, standard and
+  map-aware estimates follow subcarrier order. Residuals and thresholds follow PRB order.
+* passes: the soft map-aware receiver's initial attempt and each data-aided pass that ran.
+  Each has h (the estimate in subcarrier order), crc (that pass's outcome), x_hat and
+  abs_llr (references into the same tables the receivers use).
 * fig3 and jsr_sweep also have benign (jsr_db null for zero power, pilots, r_b), from the
   same batch seed and slot index. jsr_sweep adds sweep, nine such frames with finite
   jsr_db values from -15 to +9. The selected index comes from its 0 dB batch.
@@ -49,7 +56,7 @@ import math
 import subprocess
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -80,7 +87,7 @@ from jamloc.jammer import ATTACKS
 from jamloc.link import JammedPUSCHLink, Scenario, SlotBatch, seed_everything
 from jamloc.paths import REPO_ROOT, results_dir
 from jamloc.recovery import MapAwareReceiver
-from jamloc.site.cases import Case
+from jamloc.site.cases import AIDED_RECEIVER, Case
 from jamloc.train import load_model
 
 SCHEMA_VERSION = 2
@@ -128,7 +135,7 @@ def _load_detector(name, seed, noise_estimate):
     return variant, model, calibration
 
 
-def _batch(case, jsr_db, *, receive):
+def _batch(case, jsr_db, *, receive, keep_channel=False):
     """Reset before constructing the link so all power levels use the same random draws."""
     seed_everything(case.seed)
     n = case.batch_size
@@ -142,7 +149,13 @@ def _batch(case, jsr_db, *, receive):
         jsr_db=torch.full((n,), float(jsr_db) if jsr_db is not None else -torch.inf),
         snr_db=torch.full((n,), float(case.snr_db)),
     )
-    return JammedPUSCHLink(case.config())(sc, decode=receive, receive=receive)
+    return JammedPUSCHLink(case.config())(
+        sc, decode=receive, receive=receive, keep_channel=keep_channel
+    )
+
+
+class _NoSelectedSlot(ValueError):
+    """The batch had no slot meeting a conditioned selection rule."""
 
 
 def _select(case, truth, flags, crc):
@@ -159,16 +172,21 @@ def _select(case, truth, flags, crc):
         selection["batch_median"] = float((lower + upper) / 2)
         if case.selection_rule == "median_hit_rate":
             slot = int(((rates == lower) | (rates == upper)).nonzero()[0].item())
-    if case.selection_rule in ("first_crc_flip", "first_true_soft_failure"):
-        if case.selection_rule == "first_crc_flip":
-            matches = ~crc["standard"] & crc["fused_soft"]
-            field, outcome = "flip", "CRC flip"
-        else:
-            matches = ~crc["true_soft"]
-            field, outcome = "failure", "true_soft CRC failure"
+    matches = None
+    if case.selection_rule == "first_crc_flip":
+        matches = ~crc["standard"] & crc["fused_soft"]
+        field, outcome = "flip", "CRC flip"
+    elif case.selection_rule == "first_aided_crc_flip":
+        matches = ~crc["fused_soft"] & crc[AIDED_RECEIVER]
+        field, outcome = "flip", "data-aided CRC flip"
+        selection["seed"] = case.seed
+    elif case.selection_rule == "first_true_soft_failure":
+        matches = ~crc["true_soft"]
+        field, outcome = "failure", "true_soft CRC failure"
+    if matches is not None:
         indices = matches.nonzero().flatten()
         if not len(indices):
-            raise ValueError(f"{case.name}: no {outcome} among {len(matches)} slots")
+            raise _NoSelectedSlot(f"{case.name}: no {outcome} among {len(matches)} slots")
         slot = int(indices[0])
         selection[f"{field}_count"] = len(indices)
         selection[f"{field}_frequency"] = len(indices) / len(matches)
@@ -189,32 +207,51 @@ class CaseRun:
 
 
 def simulate_case(case: Case, *, load_detector: Callable = _load_detector) -> CaseRun:
-    """Decode every map on the same received allocation and then select one slot."""
+    """Select a slot, advancing the simulation seed if a data-aided flip is absent."""
+    load_detector = cache(load_detector)
     with _cpu():
-        batch = _batch(case, case.jsr_db, receive=True)
-        cfg = case.config()
-        maps, thresholds = {}, {}
-        for name in case.detectors:
-            variant, model, calibration = load_detector(
-                name, case.detector_seed, case.noise_estimate
-            )
-            thresholds[name] = calibration
-            maps[name] = detector_cells(
-                batch, cfg, variant, model, calibration["value"], return_scores=True
-            )
+        while True:
+            try:
+                return _simulate_batch(case, load_detector)
+            except _NoSelectedSlot:
+                if case.selection_rule != "first_aided_crc_flip":
+                    raise
+                case = replace(case, seed=case.seed + 1)
 
-        receiver = MapAwareReceiver(batch.tx, cfg)
-        alloc = slice(case.alloc[0], sum(case.alloc))
-        truth = batch.labels[:, alloc]
-        sources = {name: maps[name][1][:, alloc] for name in case.decode_maps}
-        sources.update(true=truth, true_prb=coarsen_to_prb(truth, cfg.dmrs_symbols))
-        receivers = {"standard": batch.rx}
-        for name, cells in sources.items():
-            for mode in ("soft", "hard") if name == "fused" else ("soft",):
-                receivers[f"{name}_{mode}"] = receiver(batch.y_alloc, batch.no, cells, mode=mode)
-        crc = {name: rx["tb_crc"].bool().flatten() for name, rx in receivers.items()}
-        selection = _select(case, batch.labels, maps["fused"][1], crc)
-        return CaseRun(case, batch, maps, thresholds, receivers, selection)
+
+def _simulate_batch(case, load_detector):
+    """Decode every map on the same received allocation and then select one slot."""
+    batch = _batch(case, case.jsr_db, receive=True, keep_channel=case.include_channel)
+    cfg = case.config()
+    maps, thresholds = {}, {}
+    for name in case.detectors:
+        variant, model, calibration = load_detector(name, case.detector_seed, case.noise_estimate)
+        thresholds[name] = calibration
+        maps[name] = detector_cells(
+            batch, cfg, variant, model, calibration["value"], return_scores=True
+        )
+
+    receiver = MapAwareReceiver(batch.tx, cfg)
+    alloc = slice(case.alloc[0], sum(case.alloc))
+    truth = batch.labels[:, alloc]
+    sources = {name: maps[name][1][:, alloc] for name in case.decode_maps}
+    sources.update(true=truth, true_prb=coarsen_to_prb(truth, cfg.dmrs_symbols))
+    receivers = {"standard": batch.rx}
+    for name, cells in sources.items():
+        for mode in ("soft", "hard") if name == "fused" else ("soft",):
+            receivers[f"{name}_{mode}"] = receiver(batch.y_alloc, batch.no, cells, mode=mode)
+    if case.iterations:
+        receivers[AIDED_RECEIVER] = receiver(
+            batch.y_alloc,
+            batch.no,
+            sources["fused"],
+            mode="soft",
+            iterations=case.iterations,
+            history=True,
+        )
+    crc = {name: rx["tb_crc"].bool().flatten() for name, rx in receivers.items()}
+    selection = _select(case, batch.labels, maps["fused"][1], crc)
+    return CaseRun(case, batch, maps, thresholds, receivers, selection)
 
 
 def _numbers(value):
@@ -238,6 +275,8 @@ def _numbers(value):
 def _pilot_frame(batch, cfg, slot, jsr_db):
     """Keep unclipped residuals for the figure and animation, including clean neighbors."""
     h, sc, power = dmrs_ls(batch.y_alloc[slot : slot + 1], batch.tx)
+    num_pilots = sc.numel() // len(cfg.dmrs_symbols)
+    h, sc = h[:, :num_pilots], sc[:num_pilots]
     u = delay_subspace(sc, cfg.scs, cfg.tau_max).to(h.dtype)
     projection = (h @ u.conj()) @ u.T
     r_b = residual_per_prb(h, sc, batch.no[slot : slot + 1], power, cfg)
@@ -285,6 +324,15 @@ def _share(table, name, values):
     return name
 
 
+def _symbol_refs(points, reliability, name, rx, slot):
+    xy = torch.view_as_real(rx["x_hat"][slot]).half()
+    llr = rx["llr"][slot].reshape(len(xy), 2).abs().mean(-1)
+    return {
+        "x_hat": _share(points, name, _numbers(xy)),
+        "abs_llr": _share(reliability, name, _numbers(llr)),
+    }
+
+
 def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | None = None) -> dict:
     """Build the versioned JSON document for the selected slot."""
     if git_commit is None:
@@ -311,12 +359,9 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
     for name, rx in run.receivers.items():
         crc = rx["tb_crc"].bool().flatten()
         batch_crc[name] = {"slots": len(crc), "failures": int((~crc).sum())}
-        xy = torch.view_as_real(rx["x_hat"][i]).half()
-        llr = rx["llr"][i].reshape(len(xy), 2).abs().mean(-1)
         receivers[name] = {
             "crc": bool(crc[i]),
-            "x_hat": _share(points, name, _numbers(xy)),
-            "abs_llr": _share(reliability, name, _numbers(llr)),
+            **_symbol_refs(points, reliability, name, rx, i),
         }
     anchor = _pilot_frame(batch, cfg, i, case.jsr_db)
     result = {
@@ -348,6 +393,35 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
         "x_hat": points,
         "abs_llr": reliability,
     }
+    if case.include_channel:
+        dmrs = cfg.dmrs_symbols[0]
+        pilots = result["pilots"]
+        pilot_sc = pilots["subcarrier"]
+        jammed = batch.labels[i, case.alloc[0] : sum(case.alloc), dmrs].tolist()
+        result["channel"] = _numbers(
+            {
+                "dmrs_symbol": dmrs,
+                "num_sc": batch.y_alloc.shape[-1],
+                "pilot_sc": pilot_sc,
+                "pilot_jammed": [jammed[sc // 12] for sc in pilot_sc],
+                "ls": pilots["ls"],
+                "fit": pilots["projection"],
+                "true": batch.h_ue[i, dmrs],
+                "standard": batch.rx["h_hat"][i, 0, 0, 0, 0, dmrs],
+                "map": run.receivers["fused_soft"]["h_hat"][i, 0, 0, 0, 0, dmrs],
+                "residual_prb": result["prb"]["r_b"],
+                "threshold_prb": result["prb"]["threshold"],
+            }
+        )
+    if case.iterations:
+        result["passes"] = [
+            {
+                "h": _numbers(step["h_sc"][i]),
+                **_symbol_refs(points, reliability, f"pass_{index}", step, i),
+                "crc": bool(step["tb_crc"][i]),
+            }
+            for index, step in enumerate(run.receivers[AIDED_RECEIVER]["history"])
+        ]
     if case.name in ("fig3", "jsr_sweep"):
         with _cpu():
             benign = _batch(case, None, receive=False)

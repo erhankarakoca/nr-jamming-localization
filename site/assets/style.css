@@ -212,8 +212,40 @@ main > figure + section { margin-top: 2rem; }
 .bars { display: block; width: 100%; max-width: 40rem; height: auto; margin-block: 0.5rem; }
 .bars text { font-family: var(--serif); fill: var(--ink); }
 
+/* Overview: plain summary, results at a glance, step-by-step animations */
+.in-short p { font-size: 1.05rem; max-width: 70ch; }
+.glance { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem 2rem; margin-top: 0.75rem; }
+.glance-card { min-width: 0; border-top: 2px solid var(--ink); padding-top: 0.6rem; }
+.glance-card:first-child { grid-column: 1 / -1; }
+.glance-card h3 { font-family: var(--serif); font-size: 1.15rem; font-weight: 600; }
+.glance-answer { font-size: 0.97rem; margin-top: 0.3rem; max-width: 70ch; }
+.glance-chart { display: block; width: 100%; max-width: 30rem; height: auto; margin-top: 0.4rem; }
+.glance-chart text, .anim svg text { font-family: var(--serif); fill: var(--ink); }
+.glance-panels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.4rem; }
+.glance-panels .glance-chart { max-width: none; }
+.swatch.line { width: 1.4rem; height: 0; border: 0; border-top: 2px solid var(--ink); }
+.terms dl { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); gap: 0.3rem 1rem; margin: 0.5rem 0; }
+.terms dt { font-weight: 600; color: var(--ink); }
+.terms dd { margin: 0; }
+.anim { border: 1px solid var(--line); background: #fafafa; padding: 1rem; margin-top: 0.75rem; }
+.anim-stage { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 1.25rem; align-items: center; }
+.anim-grid, .anim-plot { display: block; width: 100%; height: auto; }
+.anim-canvas { display: block; width: 100%; max-width: 320px; height: auto; margin: 0 auto; }
+.anim-caption { margin-top: 0.9rem; min-height: 5.2em; }
+.anim-caption h3 { font-size: 1rem; }
+.anim-caption p { font-size: 0.93rem; margin-top: 0.2rem; max-width: 80ch; }
+.anim-controls { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.5rem; }
+.anim-dots { display: inline-flex; gap: 0.25rem; flex-wrap: wrap; margin-left: 0.5rem; }
+.anim-dots button { min-width: 2rem; padding-inline: 0.35rem; }
+.anim-note { margin-top: 0.5rem; }
+.pulsing .pulse { animation: pulse 0.9s ease-in-out 3; }
+@keyframes pulse { 50% { stroke-width: 3.5px; } }
+.pass-crc { display: inline-flex; gap: 0.3rem; align-items: center; margin-right: 0.9rem; font-size: 0.85rem; }
+
 @media (max-width: 760px) {
-  .inspection, .slot-row, .teaser-body { grid-template-columns: minmax(0, 1fr); }
+  .inspection, .slot-row, .teaser-body, .anim-stage, .glance { grid-template-columns: minmax(0, 1fr); }
+  .glance-panels { grid-template-columns: minmax(0, 1fr); }
+  .terms dl { grid-template-columns: minmax(0, 1fr); }
   .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .strip-panel + .strip-panel::before { content: none; }
   .project h1 { font-size: 1.45rem; }
