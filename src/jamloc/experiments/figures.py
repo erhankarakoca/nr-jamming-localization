@@ -102,120 +102,104 @@ def _example_seed(channel: str) -> int:
 # --- 1. What the attacker does ---------------------------------------------------------------
 
 
-def attack_patterns():
-    fig, axes = new_figure(3.5, 2.45, nrows=2, ncols=2, sharex=True, sharey=True)
-    fig.set_layout_engine(None)
-    fig.subplots_adjust(left=0.14, right=0.98, bottom=0.32, top=0.90, hspace=0.36, wspace=0.15)
-    titles = ("(a) No jammer", "(b) Pilot jamming", "(c) Data jamming", "(d) Partial-band jamming")
-    outline = "#333333"
-    for ax, attack, title in zip(axes.flat, ATTACKS, titles, strict=True):
-        cells = cell_mask(
-            torch.tensor([ATTACKS.index(attack)]),
-            torch.tensor([JAM[0]]),
-            torch.tensor([JAM[1]]),
-            CFG,
-        )[0].numpy()
-        # The UE allocation and its single DMRS symbol occupy the same cells in every panel.
-        ax.add_patch(
-            Rectangle(
-                (-0.5, ALLOC[0] - 0.5),
-                CFG.num_symbols,
-                ALLOC[1],
-                facecolor=ALLOC_COLOR,
-                edgecolor="none",
-            )
-        )
-        ax.add_patch(
-            Rectangle(
-                (CFG.dmrs_symbol - 0.5, ALLOC[0] - 0.5),
-                1,
-                ALLOC[1],
-                facecolor=DMRS_COLOR,
-                edgecolor="none",
-            )
-        )
+# Where the jammer's block sits: anywhere on the carrier, so inside the allocation, across its
+# edge, outside it, or (scheduling-aware) on exactly the scheduled PRBs.
+PATTERN_EXAMPLES = (
+    ("(a) Pilot, inside", "pilot", 10, 4),
+    ("(b) Data, across the edge", "data", 15, 6),
+    ("(c) Partial-band, outside", "partial", 0, 4),
+    ("(d) Pilot, whole allocation", "pilot", ALLOC[0], ALLOC[1]),
+)
+EMPTY_COLOR = "#F2F2F2"
 
-        # All PRBs in this fixed block share the same mask. Padding with False makes each pair
-        # of transitions the start and exclusive end of one contiguous run of symbols.
-        attacked = cells[JAM[0]]
-        regions = [(attacked, JAM_COLOR, "-")]
+
+def _cell_grid(ax, codes, colors):
+    """Draw a PRB x symbol grid of category codes as separate cells with thin white gaps."""
+    ax.pcolormesh(
+        np.arange(CFG.num_symbols + 1) - 0.5,
+        np.arange(CFG.num_prb + 1) - 0.5,
+        codes,
+        cmap=ListedColormap(colors),
+        vmin=-0.5,
+        vmax=len(colors) - 0.5,
+        edgecolors="white",
+        linewidth=0.15,
+    )
+    ax.set(
+        xlim=(-0.5, CFG.num_symbols - 0.5),
+        ylim=(-0.5, CFG.num_prb - 0.5),
+        xticks=[0, CFG.dmrs_symbol, CFG.num_symbols - 1],
+        yticks=[0, 6, 12, 18, CFG.num_prb - 1],
+    )
+    ax.grid(False)
+    ax.tick_params(direction="out", length=2, width=0.6, pad=2)
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.6)
+
+
+def attack_patterns():
+    fig, axes = new_figure(3.5, 3.0, nrows=2, ncols=2, sharex=True, sharey=True)
+    fig.set_layout_engine(None)
+    fig.subplots_adjust(left=0.115, right=0.985, bottom=0.235, top=0.925, hspace=0.38, wspace=0.1)
+    colors = [EMPTY_COLOR, ALLOC_COLOR, DMRS_COLOR, JAM_COLOR]  # empty, data, DMRS, attacked
+    data_symbols = [s for s in range(CFG.num_symbols) if s != CFG.dmrs_symbol]
+    for ax, (title, attack, start, size) in zip(axes.flat, PATTERN_EXAMPLES, strict=True):
+        codes = np.zeros((CFG.num_prb, CFG.num_symbols), dtype=int)
+        codes[ALLOC[0] : sum(ALLOC)] = 1
+        codes[ALLOC[0] : sum(ALLOC), CFG.dmrs_symbol] = 2
+        attacked = cell_mask(
+            torch.tensor([ATTACKS.index(attack)]), torch.tensor([start]), torch.tensor([size]), CFG
+        )[0].numpy()
+        codes[attacked] = 3
+        _cell_grid(ax, codes, colors)
         if attack == "pilot":
-            regions.append((~attacked, "none", "--"))
-        for symbols, face, style in regions:
-            edges = np.flatnonzero(np.diff(np.r_[False, symbols, False]))
-            # Inset the dashed outline so it stays visible beside the axes and DMRS border.
-            inset = 0.13 if style == "--" else 0
-            for left, right in edges.reshape(-1, 2):
+            # Unjammed data cells of the attacked, scheduled PRBs: equalized with a corrupted
+            # channel estimate, so their EVM rises although their label stays 0.
+            low, high = max(start, ALLOC[0]), min(start + size, sum(ALLOC))
+            for first, last in ((data_symbols[0], CFG.dmrs_symbol - 1), (CFG.dmrs_symbol + 1, 13)):
                 ax.add_patch(
                     Rectangle(
-                        (left - 0.5 + inset, JAM[0] - 0.5),
-                        right - left - 2 * inset,
-                        JAM[1],
-                        facecolor=face,
-                        edgecolor=outline,
-                        linewidth=0.65,
-                        linestyle=style,
-                        zorder=2,
+                        (first - 0.5, low - 0.5),
+                        last - first + 1,
+                        high - low,
+                        facecolor="none",
+                        edgecolor="#555555",
+                        hatch="//////",
+                        linewidth=0,
+                        zorder=3,
                     )
                 )
-
-        # The cell boundaries stay faint over all fills, while the region outlines carry
-        # their meaning in grayscale.
-        ax.grid(False)
-        grid = {"color": "#888888", "alpha": 0.15, "linewidth": 0.6, "zorder": 2}
-        ax.vlines(np.arange(1, CFG.num_symbols) - 0.5, -0.5, CFG.num_prb - 0.5, **grid)
-        ax.hlines(np.arange(1, CFG.num_prb) - 0.5, -0.5, CFG.num_symbols - 0.5, **grid)
-        ax.set(
-            xlim=(-0.5, CFG.num_symbols - 0.5),
-            ylim=(-0.5, CFG.num_prb - 0.5),
-            xticks=[0, CFG.dmrs_symbol, CFG.num_symbols - 1],
-            yticks=[0, 6, 12, 18, CFG.num_prb - 1],
-        )
-        ax.set_title(title, loc="left", pad=3, fontsize=8)
-        ax.tick_params(direction="out", length=2, width=0.6, pad=2)
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.6)
-        if attack == "pilot":
-            ax.annotate(
-                "EVM rises",
-                xy=(8, sum(JAM) - 0.5),
-                xytext=(8, 18),
-                ha="center",
-                va="bottom",
-                fontsize=7,
-                color=outline,
-                arrowprops={"arrowstyle": "-", "linewidth": 0.6, "color": outline, "shrinkB": 0.5},
-            )
+        ax.set_title(title, loc="left", pad=2.5, fontsize=7)
     for ax in axes[0]:
         ax.tick_params(bottom=False)
     for ax in axes[:, 1]:
         ax.tick_params(left=False)
-    fig.supylabel("PRB", x=0.022, y=0.61, fontsize=8)
-    fig.supxlabel("OFDM symbol", y=0.176, fontsize=8)
+    fig.supylabel("PRB", x=0.02, y=0.58, fontsize=8)
+    fig.supxlabel("OFDM symbol (DMRS on 2)", y=0.135, fontsize=8)
     legend = [
-        Patch(facecolor=ALLOC_COLOR, label="UE allocation"),
-        Patch(facecolor=DMRS_COLOR, label="DMRS"),
-        Patch(
-            facecolor=JAM_COLOR, edgecolor=outline, linewidth=0.65, label="Attacked cells (label 1)"
-        ),
-        Patch(
-            facecolor="none", edgecolor=outline, linewidth=0.65, linestyle="--", label="EVM effect"
-        ),
+        Patch(facecolor=ALLOC_COLOR, label="UE data"),
+        Patch(facecolor=DMRS_COLOR, label="UE DMRS"),
+        Patch(facecolor=JAM_COLOR, label="Attacked (label 1)"),
+        Patch(facecolor="white", edgecolor="#555555", hatch="//////", lw=0.4, label="EVM rises (label 0)"),
     ]
     fig.legend(
         handles=legend,
         loc="lower center",
-        bbox_to_anchor=(0.5, 0.012),
+        bbox_to_anchor=(0.5, 0.0),
         ncols=2,
         frameon=False,
         fontsize=7,
+        handlelength=1.4,
+        columnspacing=1.2,
     )
     caption = (
-        "Resource grid of one slot (24 PRBs by 14 OFDM symbols). The UE is scheduled on PRBs "
-        "6-17 and sends its DMRS pilots on symbol 2. The filled, outlined regions on PRBs 10-13 "
-        "are the attacked cells (label 1): (a) none, (b) the DMRS symbol, (c) the 13 data "
-        "symbols, and (d) all symbols. The dashed outlines in (b) show where EVM rises because "
-        "the corrupted pilots affect equalization. Those data cells retain label 0."
+        "Resource grid of one slot (24 PRBs by 14 OFDM symbols) with the UE on PRBs 6-17 and "
+        "its DMRS on symbol 2. The jammer's block of 2-12 PRBs can sit anywhere on the carrier: "
+        "(a) pilot jamming inside the allocation, (b) data jamming across its edge, (c) "
+        "partial-band jamming on unscheduled PRBs, where only the power reveals it, and (d) a "
+        "scheduling-aware jammer on the DMRS of the whole allocation. Orange cells are the "
+        "attacked cells, which are the labels. Hatched cells are unjammed data cells whose EVM "
+        "rises under pilot jamming, because they are equalized with a corrupted channel estimate."
     )
     return fig, caption
 
@@ -232,135 +216,61 @@ SYSTEM_DIAGRAM_CAPTION = (
 )
 
 
-@paper_style()
-def timing():
-    """Show when the buffered grid becomes available and how the receiver uses it twice."""
-    fig, ax = new_figure(3.5, 2.78)
-    fig.set_layout_engine(None)
-    fig.subplots_adjust(left=0.025, right=0.975, top=0.99, bottom=0.01)
-    ax.set(xlim=(-0.1, 14.6), ylim=(0.6, 10))
-    ax.set_axis_off()
-    ax.text(0, 9.55, r"Physical slot $n$ (0.5 ms)", weight="bold", va="center")
-    ax.plot(11.35, 9.55, "s", color=DMRS_COLOR)
-    ax.text(11.7, 9.55, "DMRS", fontsize=7, va="center")
-
-    for symbol in range(CFG.num_symbols):
-        dmrs = symbol == CFG.dmrs_symbol
-        ax.add_patch(
-            Rectangle(
-                (symbol, 8.32),
-                1,
-                0.72,
-                facecolor=DMRS_COLOR if dmrs else ALLOC_COLOR,
-                edgecolor="white",
-                lw=0.7,
-            )
-        )
-        ax.text(
-            symbol + 0.5,
-            8.68,
-            str(symbol),
-            fontsize=7.5,
-            ha="center",
-            va="center",
-            color="white" if dmrs else "black",
-        )
-
-    # Only the end of symbol 13 feeds the buffer. The vertical branch supplies both passes.
-    ax.plot([13.55, 14, 14, 13.55], [9.12, 9.12, 8.02, 8.02], color="0.25", lw=0.8)
-    ax.text(13.45, 7.82, r"received grid of slot $n$ available", ha="right", fontsize=7.5)
-    ax.plot([14, 14], [8.02, 1.945], color="0.35", lw=0.75)
-    ax.text(0, 6.72, "Processing order (not to scale)", weight="bold")
-    height = 2.13
-    for bottom, title, steps in (
-        (
-            4.05,
-            "1  Detect",
-            "Channel estimation and equalization\n→ Features P, R, E → U-Net → map",
-        ),
-        (
-            0.88,
-            "2  Mitigate and decode the same buffered slot",
-            "Re-weighted pilot interpolation → re-equalization\n→ LLR scaling → LDPC decoding → CRC",
-        ),
-    ):
-        center = bottom + height / 2
-        ax.add_patch(Rectangle((0, bottom), 13.3, height, fc="#F4F8FB", ec="0.70", lw=0.6))
-        ax.text(0.35, bottom + height - 0.25, title, va="top", weight="bold", fontsize=7.5)
-        ax.text(0.35, bottom + height - 0.91, steps, va="top", fontsize=7.5, linespacing=1.35)
-        ax.annotate(
-            "",
-            (13.3, center),
-            (14, center),
-            arrowprops={
-                "arrowstyle": "-|>",
-                "color": "0.35",
-                "lw": 0.75,
-                "shrinkA": 0,
-                "shrinkB": 0,
-            },
-        )
-    ax.annotate(
-        "",
-        (6.65, 3.01),
-        (6.65, 4.05),
-        arrowprops={"arrowstyle": "-|>", "color": DMRS_COLOR, "lw": 1, "shrinkA": 0, "shrinkB": 0},
-    )
-    caption = (
-        "The receiver buffers all 14 OFDM symbols of slot n (0.5 ms), including the DMRS at "
-        "symbol 2. After channel estimation and equalization, it computes power (P), the pilot "
-        "residual (R) and error vector magnitude (E). The U-Net map guides a second pass through "
-        "the same received grid for decoding. On one Apple M1 Pro CPU thread with 24 allocated "
-        "PRBs, the median times for feature extraction and frozen U-Net inference summed to "
-        "0.48–0.68 ms across network widths. Timing starts after equalization and ends before "
-        "decoding."
-    )
-    return fig, caption
-
-
 # --- 3. How the DMRS residual works ----------------------------------------------------------
 
 
 @paper_style()
 def residual_explained():
-    """Relate each complex pilot residual to the detector statistic of its own PRB."""
-    fig, (pilots, prbs) = new_figure(3.5, 2.7, nrows=2, sharex=True)
+    """Show the residual as the gap between the pilot estimates and the smoothest channel."""
+    fig, (fit, prbs) = new_figure(3.5, 2.85, nrows=2, sharex=True)
     fig.set_layout_engine(None)
-    fig.subplots_adjust(left=0.15, right=0.985, bottom=0.155, top=0.79, hspace=0.57)
+    fig.subplots_adjust(left=0.15, right=0.985, bottom=0.145, top=0.885, hspace=0.36)
     numbers = np.arange(ALLOC[0], sum(ALLOC))
     edges = np.arange(ALLOC[0], sum(ALLOC) + 1) - 0.5
     seed = _example_seed("C")
     limits = 10 * np.log10([threshold(ALLOC[1], pos, fa=0.01) for pos in range(ALLOC[1])])
-    for ax in (pilots, prbs):
+    for ax in (fit, prbs):
         ax.axvspan(JAM[0] - 0.5, sum(JAM) - 0.5, color=JAM_COLOR, alpha=0.10, lw=0)
         ax.grid(False)
         ax.grid(axis="y", color="0.89", alpha=1, lw=0.5)
         ax.tick_params(length=2, pad=2)
     for edge in edges[1:-1]:
-        pilots.axvline(edge, color="0.80", lw=0.4, zorder=0)
+        fit.axvline(edge, color="0.85", lw=0.4, zorder=0)
 
+    # (a) The jammed slot: LS estimate of every pilot and its projection onto the delay subspace,
+    # which is the smoothest frequency response a channel with delays up to tau_max can have.
+    batch = _example_batch("pilot", 0.0, 20.0, "C", seed)
+    h, sc, _ = dmrs_ls(batch.y_alloc, batch.tx)
+    basis = delay_subspace(sc, CFG.scs, CFG.tau_max).to(h.dtype)
+    smooth = ((h @ basis.conj()) @ basis.T)[0].abs().cpu().numpy()
+    estimates = h[0].abs().cpu().numpy()
+    sc = sc.cpu().numpy()
+    x = edges[0] + (sc + 0.5) / 12
+    jammed = (ALLOC[0] + sc // 12 >= JAM[0]) & (ALLOC[0] + sc // 12 < sum(JAM))
+    fit.plot(x, smooth, color="0.15", lw=1.0, label="Smooth fit", zorder=3)
+    fit.plot(
+        x[~jammed], estimates[~jammed], ls="none", marker="o", ms=2.2, mfc="0.5", mec="none",
+        label="LS, clean PRB",
+    )
+    fit.plot(
+        x[jammed], estimates[jammed], ls="none", marker="s", ms=2.4, mfc=JAM_COLOR, mec="none",
+        label="LS, jammed PRB",
+    )
+    fit.set_ylabel(r"$|\tilde{h}_p|$", fontsize=8)
+    fit.set_ylim(bottom=0)
+
+    # (b) The residual of every PRB in the benign and the jammed slot, against its threshold.
     leak_note = ""
     for attack, label, mark, edge_color, face in (
         ("none", "Benign", "o", "0.53", "none"),
         ("pilot", "Pilot jammed", "s", JAM_COLOR, JAM_COLOR),
     ):
         batch = _example_batch(attack, 0.0, 20.0, "C", seed)
-        h, sc, power = dmrs_ls(batch.y_alloc, batch.tx)
-        basis = delay_subspace(sc, CFG.scs, CFG.tau_max).to(h.dtype)
-        error = h - (h @ basis.conj()) @ basis.T
-        energy = error[0].abs().square() / (batch.no[0] / power)
-        x = edges[0] + (sc.cpu().numpy() + 0.5) / 12
         db = 10 * np.log10(residual_map(batch, CFG)[0, numbers, CFG.dmrs_symbol].cpu().numpy())
-        style = {
-            "ls": "none",
-            "marker": mark,
-            "mec": edge_color,
-            "mfc": face,
-            "mew": 0.55,
-            "label": label,
-        }
-        pilots.plot(x, 10 * np.log10(energy.cpu().numpy()), ms=2.4, **style)
-        prbs.plot(numbers, db, ms=3.7, **style)
+        prbs.plot(
+            numbers, db, ls="none", marker=mark, ms=3.5, mec=edge_color, mfc=face, mew=0.55,
+            label=label,
+        )
         if attack == "pilot":
             neighbors = (numbers == JAM[0] - 1) | (numbers == sum(JAM))
             crossings = np.flatnonzero(neighbors & (db > limits))
@@ -369,7 +279,7 @@ def residual_explained():
                 prbs.annotate(
                     "Leakage",
                     (numbers[k], db[k]),
-                    xytext=(0, 8),
+                    xytext=(-12, 8),
                     textcoords="offset points",
                     ha="center",
                     va="bottom",
@@ -377,54 +287,34 @@ def residual_explained():
                     arrowprops={"arrowstyle": "-", "color": "0.35", "lw": 0.6},
                 )
                 leak_note = (
-                    f" Leakage through the projection takes clean PRB {numbers[k]} above threshold."
+                    f" Leakage through the projection takes the clean PRB {numbers[k]} above the "
+                    "threshold."
                 )
-
+    prbs.stairs(limits, edges, baseline=None, color="0.2", lw=0.9, ls="--", label="1% threshold")
     prbs.yaxis.set_major_locator(MultipleLocator(10))
     prbs.margins(y=0.12)
-    pilots.margins(y=0.09)
-    prbs.stairs(limits, edges, baseline=None, color="0.2", lw=0.9, ls="--", label="1% threshold")
-    # The bracket is above the data and spans the exact same bin as the PRB 11 statistic below.
-    transform = pilots.get_xaxis_transform()
-    pilots.plot(
-        [10.5, 10.5, 11.5, 11.5],
-        [1.01, 1.07, 1.07, 1.01],
-        transform=transform,
-        color="0.2",
-        lw=0.7,
-        clip_on=False,
-    )
-    pilots.text(
-        11, 1.10, "six pilots of PRB 11", transform=transform, ha="center", va="bottom", fontsize=7
-    )
-    pilots.tick_params(bottom=False)
-    pilots.set_ylabel("Pilot residual [dB]", fontsize=7.5)
     prbs.set(
         xlabel="PRB", ylabel=r"$R_b$ [dB]", xticks=numbers, xlim=(edges[0] - 0.07, edges[-1] + 0.07)
     )
-    pilots.set_title("(a)", loc="left", fontsize=8, pad=2)
-    prbs.set_title("(b)", loc="left", fontsize=8, pad=2)
-    handles, labels = prbs.get_legend_handles_labels()
+    fit.tick_params(bottom=False)
+    fit.set_title("(a) Jammed slot: pilot estimates", loc="left", fontsize=7.5, pad=2)
+    prbs.set_title("(b) Residual per PRB", loc="left", fontsize=7.5, pad=2)
+    legend = {"frameon": False, "fontsize": 7, "handlelength": 1.3, "columnspacing": 0.9}
     fig.legend(
-        handles,
-        labels,
-        loc="upper center",
-        bbox_to_anchor=(0.53, 1),
-        ncols=3,
-        frameon=False,
-        fontsize=7,
-        handlelength=1.3,
-        columnspacing=1,
-        handletextpad=0.4,
+        *fit.get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(0.56, 1.0),
+        ncols=3, handletextpad=0.4, **legend,
     )
+    prbs.legend(loc="upper right", ncols=1, handletextpad=0.4, borderaxespad=0.3, **legend)
     caption = (
-        "Paired TDL-C slots share the same channel and noise at 20 dB SNR. One slot has pilot "
-        "jamming at 0 dB JSR on PRBs 10–13 (shaded). (a) The receiver subtracts the delay-subspace "
-        "projection from each complex LS pilot estimate. Each point shows the squared magnitude "
-        "of that difference relative to the LS noise variance, in dB. (b) For each PRB, the "
-        "receiver sums the six residual powers and divides by the noise power expected after "
-        "projection. The dashed step marks the analytic 1% false-alarm threshold for this ratio "
-        "at each PRB position." + leak_note
+        "The DMRS residual in two TDL-C slots at 20 dB SNR that share their channel and noise, "
+        "with a 12-PRB allocation (PRBs 6-17) and, in one of them, pilot jamming at 0 dB JSR on "
+        "PRBs 10-13 (shaded). (a) Magnitude of the LS channel estimates at the 72 pilots of the "
+        "jammed slot, and of their projection onto the delay subspace: the smoothest frequency "
+        "response that a channel with delays up to 3 us can have. On clean PRBs the estimates "
+        "follow the curve; on jammed PRBs they scatter around it. The residual is the complex "
+        "difference between estimate and curve. (b) Residual R_b of each PRB in both slots: the "
+        "six squared differences summed and divided by their expected value without jamming, "
+        "with the analytic 1% threshold for each PRB position (dashed)." + leak_note
     )
     return fig, caption
 
@@ -975,8 +865,253 @@ def constellations_with_map(seed: int | None = None, jsr_db: float = 6.0):
     return fig, caption
 
 
+# --- 9. The receiver at work, one slot ------------------------------------------------------
+
+
+def _case_payload(case) -> dict:
+    """Simulate one example slot with the exporter of the showcase site (seeded, and the slot is
+    picked by the case's stated rule)."""
+    from jamloc.site.export import payload, simulate_case
+
+    _require_models(("fused", "no_residual", "power"))
+    return payload(simulate_case(case))
+
+
+def _outline(ax, mask, **style):
+    """Draw the outer boundary of the True cells of a [PRB, symbol] mask."""
+    padded = np.pad(mask, 1)
+    for b, s in np.argwhere(mask):
+        for db, ds, (x0, y0, x1, y1) in (
+            (-1, 0, (s - 0.5, b - 0.5, s + 0.5, b - 0.5)),
+            (1, 0, (s - 0.5, b + 0.5, s + 0.5, b + 0.5)),
+            (0, -1, (s - 0.5, b - 0.5, s - 0.5, b + 0.5)),
+            (0, 1, (s + 0.5, b - 0.5, s + 0.5, b + 0.5)),
+        ):
+            if not padded[b + 1 + db, s + 1 + ds]:
+                ax.plot([x0, x1], [y0, y1], solid_capstyle="projecting", **style)
+
+
+def _constellation(ax, points, jammed_prb, title):
+    ax.scatter(*points[~jammed_prb].T, s=0.6, color="0.6", lw=0, rasterized=True)
+    ax.scatter(*points[jammed_prb].T, s=0.6, color=JAM_COLOR, lw=0, rasterized=True)
+    ax.set(xlim=(-1.7, 1.7), ylim=(-1.7, 1.7), xticks=[], yticks=[], aspect="equal")
+    ax.axhline(0, color="0.85", lw=0.4, zorder=0)
+    ax.axvline(0, color="0.85", lw=0.4, zorder=0)
+    ax.grid(False)
+    ax.set_title(title, fontsize=7, pad=2.5)
+
+
+@paper_style()
+def system_views():
+    """The receiver and the detector on one pilot-jammed slot: what every step produces."""
+    from jamloc.site.cases import Case
+
+    # Pilot jamming at +9 dB JSR, the strongest point of the recovery table, on the site's seed
+    d = _case_payload(Case("pilot_strong", "Pilot jamming, +9 dB", "pilot", 9))
+    meta = d["metadata"]
+    a0, n = meta["alloc"]
+    j0, jn = meta["jam"]
+    l0 = meta["config"]["dmrs_symbol"]
+    grid = {k: np.array(v, dtype=float) for k, v in d["grids"].items()}
+    truth, alloc = grid["truth"] > 0, grid["allocation"] > 0
+    fused = d["detectors"]["fused"]
+    flags = np.array(fused["decisions"], dtype=float) > 0
+
+    # Every equalized point belongs to one allocation subcarrier: divmod(i, 12 n) -> (symbol, sc)
+    def points(receiver):
+        xy = np.array(d["x_hat"][d["receivers"][receiver]["x_hat"]], dtype=float)
+        return xy
+
+    sc_of_point = np.arange(12 * n * (meta["config"]["num_symbols"] - 1)) % (12 * n)
+    jammed_point = (a0 + sc_of_point // 12 >= j0) & (a0 + sc_of_point // 12 < j0 + jn)
+
+    fig = Figure(figsize=(7.16, 3.75))
+    width, height = 7.16, 3.75
+    dark = "0.25"
+
+    def axes(left, bottom, w, h):  # positions in inches
+        return fig.add_axes((left / width, bottom / height, w / width, h / height))
+
+    row1, row2, h1, h2 = 2.12, 0.33, 1.18, 1.0
+    grid_w = 0.82
+    a = axes(0.66, row1, grid_w, h1)
+    b = axes(1.86, row1, 1.3, h1)
+    c = axes(3.5, row1 + 0.04, 1.1, 1.1)
+    dd = axes(4.95, row1, grid_w, h1)
+    e = axes(5.98, row1, grid_w, h1)
+    f = axes(1.86, row2, 1.3, h2)
+    g = axes(3.53, row2 - 0.03, 1.05, 1.05)
+    cbar = axes(6.86, row1 + 0.08, 0.055, h1 - 0.16)
+
+    # (a) the received grid of the whole slot as power, with the injected cells outlined
+    norm = {"cmap": "viridis", "vmin": 0, "vmax": 25, "origin": "lower", "aspect": "auto"}
+    image = a.imshow(grid["power_db"], interpolation="nearest", **norm)
+    # (d) the two features computed on the scheduled cells: R on the DMRS, E on the data
+    features = np.where(alloc, np.nan, np.nan)
+    features[:, l0] = grid["residual_db"][:, l0]
+    data_cols = [s for s in range(features.shape[1]) if s != l0]
+    features[:, data_cols] = grid["evm_db"][:, data_cols]
+    dd.imshow(np.where(alloc, features, np.nan), interpolation="nearest", **norm)
+    dd.set_facecolor(EMPTY_COLOR)
+    # (e) the U-Net map
+    codes = np.where(flags, 2, np.where(alloc, 1, 0))
+    _cell_grid(e, codes, [EMPTY_COLOR, ALLOC_COLOR, DMRS_COLOR])
+    for ax in (a, dd, e):
+        _outline(ax, truth, color="black", lw=0.8)
+        ax.set(xticks=[0, l0, 13], yticks=[0, 6, 12, 18, 23])
+        ax.tick_params(direction="out", length=2, width=0.5, pad=1.5, labelsize=6.5)
+        ax.grid(False)
+    for ax in (a, dd):
+        _outline(ax, alloc, color="white", lw=0.6, ls=(0, (2, 1.5)))
+    a.set_ylabel("PRB", fontsize=7, labelpad=1)
+    for ax in (dd, e):
+        ax.tick_params(labelleft=False)
+    for ax in (a, dd, e):
+        ax.set_xlabel("symbol", fontsize=6.5, labelpad=1)
+    fig.colorbar(image, cax=cbar)
+    cbar.tick_params(labelsize=6, length=2, pad=1)
+    cbar.set_title("dB", fontsize=6.5, pad=3)
+    cbar.set_ylabel("$P$, $R$, $E$", fontsize=6.5, labelpad=1)
+
+    # (b) LS estimates of the pilots and the smooth channel fit (delay-subspace projection)
+    pil = d["pilots"]
+    sc = np.array(pil["subcarrier"])
+    ls = np.hypot(*np.array(pil["ls"], dtype=float).T)
+    smooth = np.hypot(*np.array(pil["projection"], dtype=float).T)
+    x = a0 - 0.5 + (sc + 0.5) / 12
+    hit = (a0 + sc // 12 >= j0) & (a0 + sc // 12 < j0 + jn)
+    b.axvspan(j0 - 0.5, j0 + jn - 0.5, color=JAM_COLOR, alpha=0.12, lw=0)
+    b.plot(x, smooth, color="0.15", lw=0.9)
+    b.plot(x[~hit], ls[~hit], ls="none", marker="o", ms=1.6, mfc="0.5", mec="none")
+    b.plot(x[hit], ls[hit], ls="none", marker="s", ms=1.8, mfc=JAM_COLOR, mec="none")
+    b.set(xlim=(a0 - 0.5, a0 + n - 0.5), ylim=(0, None), xticks=[a0, j0, j0 + jn - 1, a0 + n - 1])
+    b.set_xlabel("PRB", fontsize=6.5, labelpad=1)
+    b.tick_params(length=2, pad=1.5, labelsize=6.5)
+    b.grid(False)
+
+    # (c) and (g): equalized symbols before and after the map, jammed PRBs in orange
+    _constellation(c, points("standard"), jammed_point, "")
+    _constellation(g, points("fused_soft"), jammed_point, "")
+
+    # (f) pilot weights of the second pass: max(R_b, 1) on flagged DMRS cells, else 1
+    r_b = np.array(d["prb"]["r_b"], dtype=float)
+    prbs = np.arange(a0, a0 + n)
+    weight = np.where(flags[prbs, l0], np.maximum(r_b, 1), 1.0)
+    f.bar(prbs, weight, width=0.7, color=np.where(weight > 1, JAM_COLOR, "0.6"), bottom=0)
+    f.set_yscale("log")
+    f.set(
+        xlim=(a0 - 0.5, a0 + n - 0.5),
+        xticks=[a0, j0, j0 + jn - 1, a0 + n - 1],
+        ylim=(0.8, 2.5 * weight.max()),
+    )
+    f.set_xlabel("PRB", fontsize=6.5, labelpad=1)
+    f.tick_params(length=2, pad=1.5, labelsize=6.5)
+    f.grid(False)
+
+    titles = (
+        (a, "Received grid: power $P$"),
+        (b, r"Channel est.: $|\tilde{h}_p|$ and smooth fit"),
+        (c, "Equalized symbols"),
+        (dd, "$R$ (DMRS) and $E$ (data)"),
+        (e, "U-Net map"),
+        (f, r"Pilot weights $\delta_p$ (map and $R_b$)"),
+        (g, "Re-equalized symbols"),
+    )
+    for ax, text in titles:
+        ax.set_title(text, fontsize=7, pad=3)
+
+    # Arrows between the steps (figure inches -> fraction)
+    def arrow(x0, y0, x1, y1, text=None, **kw):
+        from matplotlib.patches import FancyArrowPatch
+
+        fig.add_artist(
+            FancyArrowPatch(
+                (x0 / width, y0 / height), (x1 / width, y1 / height), transform=fig.transFigure,
+                arrowstyle="-|>", mutation_scale=7, lw=0.8, color=dark, **kw,
+            )
+        )
+
+    mid1 = row1 + h1 / 2
+    for x0, x1 in ((1.5, 1.82), (3.2, 3.46), (4.64, 4.91), (5.78, 5.95)):
+        arrow(x0, mid1, x1, mid1)
+    # Second pass: the buffered grid (from a) and the map (from e) meet above (f)
+    join_y, f_x = 1.62, 1.86 + 1.3 / 2
+    fig.add_artist(
+        __import__("matplotlib.lines", fromlist=["Line2D"]).Line2D(
+            [a.get_position().x0 + grid_w / 2 / width] * 2 + [f_x / width],
+            [(row1 - 0.27) / height, join_y / height, join_y / height],
+            transform=fig.transFigure, color=dark, lw=0.8,
+        )
+    )
+    fig.add_artist(
+        __import__("matplotlib.lines", fromlist=["Line2D"]).Line2D(
+            [(5.98 + grid_w / 2) / width] * 2 + [f_x / width],
+            [(row1 - 0.27) / height, join_y / height, join_y / height],
+            transform=fig.transFigure, color=dark, lw=0.8,
+        )
+    )
+    arrow(f_x, join_y, f_x, row2 + h2 + 0.2)
+    fig.text(1.05 / width, (join_y + 0.04) / height, "same buffered grid", fontsize=6.5, color=dark)
+    fig.text(5.2 / width, (join_y + 0.04) / height, "map", fontsize=6.5, color=dark)
+    arrow(3.2, row2 + h2 / 2, 3.49, row2 + h2 / 2)
+    arrow(4.62, row2 + h2 / 2, 4.9, row2 + h2 / 2)
+    crc = d["metadata"]["batch_crc"]
+    fig.text(
+        4.95 / width,
+        (row2 + h2 / 2) / height,
+        "Demapping (LLRs scaled\nby the noise variance)\n→ LDPC decoding → CRC\n\n"
+        f"CRC failures in this batch\nof {crc['standard']['slots']} slots: "
+        f"{crc['standard']['failures']} without\nthe map, {crc['fused_soft']['failures']} with it",
+        fontsize=6.5,
+        va="center",
+        linespacing=1.25,
+    )
+    from matplotlib.lines import Line2D
+
+    fig.legend(
+        handles=[
+            Line2D([], [], ls="none", marker="s", ms=4, mfc=JAM_COLOR, mec="none", label="Jammed PRBs"),
+            Line2D([], [], ls="none", marker="o", ms=3.5, mfc="0.55", mec="none", label="Clean PRBs"),
+            Patch(facecolor="none", edgecolor="black", lw=0.8, label="Attacked cells"),
+            Patch(facecolor=DMRS_COLOR, label="Flagged by U-Net"),
+            Patch(facecolor=ALLOC_COLOR, label="UE allocation"),
+        ],
+        loc="center left",
+        bbox_to_anchor=(0.36 / width, (row2 + h2 / 2) / height),
+        frameon=False,
+        fontsize=6.5,
+        handlelength=1.2,
+        labelspacing=0.5,
+    )
+    # Row labels
+    for y, text in ((mid1, "Pass 1: detect"), (row2 + h2 / 2, "Pass 2: decode")):
+        fig.text(0.17 / width, y / height, text, rotation=90, va="center", ha="center",
+                 fontsize=7.5, fontweight="bold", linespacing=1.1)
+    fig.text(
+        0.66 / width, (row1 + h1 + 0.3) / height,
+        f"Slot n (0.5 ms, 14 OFDM symbols) is buffered; pilot jamming at +{meta['jsr_db']} dB JSR "
+        f"on PRBs {j0}-{j0 + jn - 1}, TDL-C, {meta['snr_db']} dB SNR",
+        fontsize=7,
+    )
+    caption = (
+        "The receiver and the detector on one slot with pilot jamming at "
+        f"+{meta['jsr_db']} dB JSR on PRBs {j0}-{j0 + jn - 1} (TDL-C, {meta['snr_db']} dB SNR, UE "
+        f"on PRBs {a0}-{a0 + n - 1}). Top, the first pass over the buffered slot: received power; "
+        "the LS channel estimates at the pilots and the smooth curve a channel with delays up to "
+        "3 us can follow; the equalized data symbols (jammed PRBs in orange), whose spread "
+        "follows from the corrupted channel estimate; the residual R on the DMRS cells and the "
+        "EVM E on the data cells, which rises on the data symbols of the jammed PRBs although "
+        "only their pilots were attacked; and the U-Net map. Black outlines mark the attacked "
+        "cells, white dashed lines the allocation. Bottom, the second pass over the same "
+        "buffered grid: the map selects the DMRS cells whose residual sets the pilot weights, "
+        "the channel is re-estimated, and the data are equalized and decoded again. The slot is "
+        "the one with the median U-Net hit rate in its batch of 64."
+    )
+    return fig, caption
+
+
 FIGURES = {
-    "timing": timing,
+    "system_views": system_views,
     "attack_patterns": attack_patterns,
     "residual_explained": residual_explained,
     "constellations": constellations,

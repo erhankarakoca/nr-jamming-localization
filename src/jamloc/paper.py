@@ -9,8 +9,9 @@ file or in the URL::
     git clone https://git.overleaf.com/<project-id> nr-jamming-paper
 
 Overleaf is the home of the text (``main.tex``, ``references.bib``); the figures are generated
-here. This command copies every figure that ``main.tex`` includes from ``results_dir()`` into the
-clone's ``figures/`` folder::
+here. This command copies every figure that the clone's LaTeX sources include (``main.tex``, the
+extended version, and ``conference.tex``, the short one) from ``results_dir()`` into the clone's
+``figures/`` folder::
 
     python -m jamloc.paper                                     # clone in ../nr-jamming-paper
     python -m jamloc.paper --dest PATH                         # or set JAMLOC_PAPER_DIR
@@ -69,11 +70,12 @@ def figure_paths(tex: str) -> list[str]:
 
 
 def sync_figures(dest: Path) -> tuple[list[str], list[str]]:
-    """Copy the figures ``dest/main.tex`` includes from ``results_dir()`` to ``dest/figures``.
+    """Copy the figures that the ``.tex`` files in ``dest`` include from ``results_dir()`` to
+    ``dest/figures``.
 
     Returns the copied and the missing paths (relative to ``results/``).
     """
-    tex = (dest / "main.tex").read_text(encoding="utf-8")
+    tex = "\n".join(f.read_text(encoding="utf-8") for f in sorted(dest.glob("*.tex")))
     copied, missing = [], []
     for rel in figure_paths(tex):
         src = results_dir() / Path(rel)
