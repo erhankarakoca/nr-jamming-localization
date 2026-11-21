@@ -254,13 +254,44 @@ def _data_aided_summary(rows):
     needed = [(j, rx) for j in (9.0, 3.0) for rx in ("p_r_e_soft", "p_r_e_soft_da", "lmmse_da")]
     if any(key not in found for key in needed):
         return ""
-    return (
+    text = (
         "With every pilot of the allocation jammed there is no clean pilot to estimate the "
         "channel from. At 15 dB SNR, data-aided passes lower the BLER with the U-Net map from "
         f"{found[9.0, 'p_r_e_soft']} to {found[9.0, 'p_r_e_soft_da']} at +9 dB JSR and from "
         f"{found[3.0, 'p_r_e_soft']} to {found[3.0, 'p_r_e_soft_da']} at +3 dB; the same passes "
         f"without a map reach {found[9.0, 'lmmse_da']} and {found[3.0, 'lmmse_da']}."
     )
+    # At 8 dB SNR: data and partial-band jamming of 4 PRBs, where the map decides which data cells
+    # may serve as pilots
+    low = {
+        (r["receiver"], r["attack"], r["jsr_db"]): 100 * r["bler"]
+        for r in rows
+        if r["snr_db"] == 8.0 and r["attack"] in ("data", "partial")
+    }
+    points = {(a, j) for _, a, j in low}
+    if points and all(("p_r_e_soft", *k) in low and ("p_r_e_soft_da", *k) in low for k in points):
+        before = [low["p_r_e_soft", *k] for k in points]
+        after = [low["p_r_e_soft_da", *k] for k in points]
+        text += (
+            " At 8 dB SNR, data and partial-band jamming of 4 PRBs still leave "
+            f"{min(before):.1f}–{max(before):.1f}% BLER with the map; the passes lower it to "
+            f"{min(after):.1f}–{max(after):.1f}%. Without a map they change little there, because "
+            "they then also treat jammed data cells as pilots."
+        )
+    # State any whole-allocation point where the passes without a map end lower than with it
+    whole = {
+        (r["snr_db"], r["jsr_db"], r["receiver"]): 100 * r["bler"]
+        for r in rows
+        if r["attack"] == "pilot_whole_allocation"
+    }
+    for snr, jsr in sorted({(k[0], k[1]) for k in whole}):
+        mapped, blind = whole.get((snr, jsr, "p_r_e_soft_da")), whole.get((snr, jsr, "lmmse_da"))
+        if mapped is not None and blind is not None and blind < mapped:
+            text += (
+                f" With every pilot jammed at {snr:g} dB SNR and {jsr:+g} dB JSR, the passes "
+                f"without a map end lower than with it ({blind:.1f}% against {mapped:.1f}%)."
+            )
+    return text
 
 
 def _recovery_files(directory: Path, stem: str) -> tuple[Path, Path]:

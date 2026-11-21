@@ -88,7 +88,7 @@ details > summary { font-size: 0.87rem; }
 .figure-paper figcaption { margin-top: 0.4rem; }
 .numbers {
   display: grid; gap: 0.5rem 1.5rem; margin: 0.75rem 0 0; padding: 0;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
 }
 .numbers article { min-width: 0; }
 .numbers strong { display: block; font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; }

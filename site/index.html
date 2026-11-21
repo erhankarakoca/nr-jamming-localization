@@ -105,8 +105,8 @@
     <li>A jammer that hops between PRBs from symbol to symbol needs a detector trained on such
       jammers; the nominally trained map leaves 21% BLER on hopping data jamming at +9 dB.</li>
     <li>If every pilot of the allocation is jammed, no clean pilot remains. Data-aided passes
-      (decoded data cells used as extra pilots) lower the BLER with the U-Net map at +9 dB from 39%
-      to 24%, but not to zero, and with the noise power estimated from the jammed pilot comb even the
+      (decoded data cells used as extra pilots) lower the BLER with the U-Net map at +9 dB JSR and
+      15 dB SNR from 39% to 24%, but not to zero, and with the noise power estimated from the jammed pilot comb even the
       true map does not beat the standard receiver.</li>
     <li>The detector also flags legitimate interference such as a neighbouring UE; telling intent
       apart needs other information.</li>
