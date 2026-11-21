@@ -1,6 +1,8 @@
 """Simulation parameters (proposal Table 1) in one place."""
 
 from dataclasses import dataclass, field
+from functools import cached_property
+from numbers import Integral
 
 
 @dataclass(frozen=True)
@@ -13,7 +15,7 @@ class SimConfig:
     # PUSCH
     mcs_index: int = 5  # QPSK, code rate ~0.37 (MCS table 1)
     min_alloc_prb: int = 6  # smallest allocation
-    dmrs_symbol: int = 2  # one front-loaded DMRS symbol (mapping type A)
+    dmrs_symbol: int = 2  # first (front-loaded) DMRS symbol, mapping type A
 
     # Channel: 3GPP TDL-A / TDL-C, low mobility
     carrier_frequency: float = 3.5e9  # [Hz]
@@ -27,7 +29,7 @@ class SimConfig:
 
     # Noise power the receiver assumes (jamloc.noise). "true": the simulator's noise variance,
     # off by the per-slot error ``noise_error_db`` of the scenario (0 unless an experiment sets
-    # it). "comb": estimated in every slot from the empty comb of the DMRS symbol.
+    # it). "comb": estimated in every slot from the empty comb on the DMRS symbols.
     noise_estimate: str = "true"
 
     # Largest channel delay assumed by the DMRS residual feature
@@ -38,7 +40,7 @@ class SimConfig:
     # "qpsk"     - random constant-envelope QPSK symbols;
     # "tone"     - a continuous tone on each jammed subcarrier (random phase, the same on every
     #              OFDM symbol), usually combined with jammer_tones below;
-    # "dmrs"     - pilot spoofing: on the DMRS symbol the jammer replays the UE's pilot sequence
+    # "dmrs"     - pilot spoofing: on DMRS symbols the jammer replays the UE's pilot sequence
     #              (scaled, one random phase per slot), elsewhere it sends Gaussian noise;
     # "ue"       - synchronized neighbor-cell PUSCH (partial-band): unit-energy QPSK on data
     #              symbols and double-energy QPSK on the even DMRS comb, with the odd comb empty.
@@ -46,7 +48,7 @@ class SimConfig:
     jammer_waveform: str = "gaussian"
 
     # Smarter jammers, only used to test generalization (both off in the threat model):
-    # on the DMRS symbol, jam only the comb of subcarriers that carries the pilots (type-1 DMRS,
+    # on DMRS symbols, jam only the comb of subcarriers that carries the pilots (type-1 DMRS,
     # port 0: the even subcarriers), not the empty comb next to it
     jammer_pilot_comb: bool = False
     # draw a new block of PRBs (same size) for every OFDM symbol: hopping from symbol to symbol
@@ -57,6 +59,29 @@ class SimConfig:
     # sparse (multi-tone) jammer: jam only this many subcarriers of every jammed PRB, at random
     # positions drawn per slot and PRB and kept for the whole slot; 0 = all 12 subcarriers
     jammer_tones: int = 0
+
+    dmrs_additional_position: int = 0  # single-symbol DMRS occasions, up to four per slot
+    jammer_dmrs: str = "all"  # "first": a pilot attack hits only the front-loaded DMRS
+
+    def __post_init__(self):
+        if not isinstance(self.dmrs_additional_position, Integral) or not (
+            0 <= self.dmrs_additional_position <= 3
+        ):
+            raise ValueError("dmrs_additional_position must be an integer from 0 to 3")
+        if self.jammer_dmrs not in ("all", "first"):
+            raise ValueError('jammer_dmrs must be "all" or "first"')
+
+    @cached_property
+    def dmrs_symbols(self) -> tuple[int, ...]:
+        """DMRS rows in the slot, from the same Sionna configuration used by the transmitter."""
+        from jamloc.ue import make_pusch_config
+
+        # Time placement is independent of the allocation bandwidth; no transmitter is needed.
+        return tuple(make_pusch_config(self, 1).dmrs_symbol_indices)
+
+    @cached_property
+    def data_symbols(self) -> tuple[int, ...]:
+        return tuple(s for s in range(self.num_symbols) if s not in self.dmrs_symbols)
 
     @property
     def num_subcarriers(self) -> int:

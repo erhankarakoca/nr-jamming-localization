@@ -54,7 +54,7 @@ MISMATCH_DB = NOISE_ERRORS_DB
 _IDX = {name: i for i, name in enumerate(FEATURE_NAMES)}
 
 
-def shift_noise(d: dict, delta_db: float) -> dict:
+def shift_noise(d: dict, delta_db: float, *, cfg: SimConfig | None = None) -> dict:
     """The split as seen with a noise estimate ``delta_db`` above the true noise power, applied to
     the stored features (first-order approximation, as in the jitter training of
     ``model.noise_shift``; the experiment itself uses the full-chain ``noise_*`` grids)."""
@@ -64,7 +64,7 @@ def shift_noise(d: dict, delta_db: float) -> dict:
     f[:, _IDX["power_db"]] -= delta_db
     f[:, _IDX["residual_db"]] -= delta_db * f[:, _IDX["dmrs_mask"]]
     f[:, _IDX["evm_db"]] -= delta_db * f[:, _IDX["data_mask"]]
-    f[:, _IDX["comb_db"], :, SimConfig().dmrs_symbol] -= delta_db
+    f[:, _IDX["comb_db"]][..., (cfg or SimConfig()).dmrs_symbols] -= delta_db
     return {**d, "features": f}
 
 

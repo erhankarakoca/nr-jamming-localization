@@ -200,6 +200,15 @@ uv run python -m jamloc.experiments.recovery --channel C --jammer hopping --seed
 uv run python -m jamloc.experiments.recovery --channel C --snr-db 5 --seeds 0 1 2   # little link margin
 ```
 
+To compare one and two DMRS symbols, reuse the nominal test data and checkpoints from
+`paper_run`. The experiment generates missing two-DMRS splits and trains the corresponding
+P+R+E and P+E models. It writes detection and BLER tables under `results/dmrs_count/`.
+
+```bash
+uv run python -m jamloc.experiments.dmrs_count --seeds 0 1 2
+uv run python -m jamloc.experiments.dmrs_count --small
+```
+
 New in this round: `experiments.intervals` (bootstrap intervals over batches, paired differences,
 PRB-level F1), `experiments.neighbor` (a synchronized neighbor-cell UE as legitimate
 interference), `experiments.calibration --estimator` (per-slot noise estimate), `ber_bler

@@ -207,7 +207,7 @@ def simulate_case(case: Case, *, load_detector: Callable = _load_detector) -> Ca
         alloc = slice(case.alloc[0], sum(case.alloc))
         truth = batch.labels[:, alloc]
         sources = {name: maps[name][1][:, alloc] for name in case.decode_maps}
-        sources.update(true=truth, true_prb=coarsen_to_prb(truth, cfg.dmrs_symbol))
+        sources.update(true=truth, true_prb=coarsen_to_prb(truth, cfg.dmrs_symbols))
         receivers = {"standard": batch.rx}
         for name, cells in sources.items():
             for mode in ("soft", "hard") if name == "fused" else ("soft",):

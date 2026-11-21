@@ -31,6 +31,8 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   where the receiver's noise power is off by a fixed error (minus or plus, in dB) in the whole
   receiver chain; ``train_nest`` / ``val_nest`` / ``test_nest`` / ``sched_nest`` - the receiver
   estimates the noise power in every slot from the empty DMRS comb (``jamloc.noise``).
+* ``train_dmrs2`` / ``val_dmrs2`` / ``test_dmrs2`` / ``sched_dmrs2`` - nominal splits with two
+  DMRS symbols per slot.
 
 Grid splits use batches of 16 slots (8 for ``margin``), and the allocation is drawn once per
 batch, so a grid point of 500 slots mixes about 31 allocations. Each split is one ``.npz`` file
@@ -212,6 +214,13 @@ SPLITS["train_nest"] = {"seed": 21_000_000, "num_slots": 40_000, "cfg": _NEST}
 SPLITS["val_nest"] = {"seed": 22_000_000, "num_slots": 5_000, "cfg": _NEST}
 SPLITS["test_nest"] = {**SPLITS["test"], "seed": 23_000_000, "cfg": _NEST}
 SPLITS["sched_nest"] = {**SPLITS["sched"], "seed": 24_000_000, "cfg": _NEST}
+
+for _k, _split in enumerate(CORE_SPLITS):
+    SPLITS[f"{_split}_dmrs2"] = {
+        **SPLITS[_split],
+        "seed": (30 + _k) * 1_000_000,
+        "cfg": {"dmrs_additional_position": 1},
+    }
 
 # Detection before damage: the setting of the BLER curves (jammer on the scheduled PRBs, SNR
 # 15 dB), with JSRs low enough to find where detection starts

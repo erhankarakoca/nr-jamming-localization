@@ -12,7 +12,8 @@ import torch
 from sionna.phy import config
 from torch import nn
 
-from jamloc.dataset import load
+from jamloc.config import SimConfig
+from jamloc.dataset import SPLITS, load
 from jamloc.model import ALL_VARIANTS, VARIANTS, PixelMLP, TinyUNet, noise_shift, select_inputs
 from jamloc.paths import results_dir
 
@@ -77,7 +78,7 @@ def train(
 ):
     """Train a variant and save its best weights. Returns the checkpoint path.
 
-    ``data="mix"`` trains on ``train_mix`` / ``val_mix`` instead of ``train`` / ``val``;
+    ``data="dmrs2"`` trains on ``train_dmrs2`` / ``val_dmrs2`` instead of ``train`` / ``val``;
     ``arch="pixel"`` trains the per-cell MLP (``hidden`` units) instead of the U-Net.
     ``jitter > 0`` shows every training slot as if the noise power had been estimated with an
     error drawn uniformly from +-``jitter`` dB (``model.noise_shift``); validation stays exact.
@@ -87,6 +88,7 @@ def train(
     suffix = f"_{data}" if data else ""
     x_tr, y_tr = _tensors(f"train{suffix}", variant, device)
     x_va, y_va = _tensors(f"val{suffix}", variant, device)
+    cfg = SimConfig(**SPLITS.get(f"train{suffix}", {}).get("cfg", {}))
 
     model = build_model(arch, x_tr.shape[1], width, hidden).to(device)
     # Jammed cells are rare, so weight them up in the loss
@@ -108,7 +110,7 @@ def train(
             x = x_tr[idx]
             if jitter:
                 delta = (torch.rand(len(idx), generator=gen) * 2 - 1) * jitter
-                x = noise_shift(x, variant, delta.to(device))
+                x = noise_shift(x, variant, delta.to(device), cfg=cfg)
             loss = loss_fn(model(x), y_tr[idx])
             opt.zero_grad()
             loss.backward()
@@ -187,7 +189,7 @@ def main(argv=None):
     p.add_argument("--width", type=int, default=DEFAULT_WIDTH, help="channels of the first level")
     p.add_argument("--arch", choices=ARCHS, default="unet", help="pixel: per-cell MLP ablation")
     p.add_argument("--hidden", type=int, default=PIXEL_HIDDEN, help="hidden units of the MLP")
-    p.add_argument("--data", default="", help="train on train_<data> / val_<data> (e.g. nest)")
+    p.add_argument("--data", default="", help="train on train_<data> / val_<data> (e.g. dmrs2)")
     p.add_argument(
         "--noise-jitter-db", type=float, default=0.0, help="train with +-this noise-estimate error"
     )

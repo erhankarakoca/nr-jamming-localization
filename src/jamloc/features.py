@@ -7,8 +7,8 @@ divided by the noise level:
   About 1 on empty cells and about 1 + SNR on scheduled cells without jamming.
 * **DMRS residual R** - the LS channel estimates at the pilots, minus their projection onto the
   set of channels that are physically possible (delays up to ``tau_max``). The user's own signal
-  lies in that set, so what remains is interference plus noise. Defined on the DMRS symbol of the
-  scheduled PRBs. About 1 without jamming, at any SNR and on every PRB.
+  lies in that set, so what remains is interference plus noise. Computed separately on each
+  DMRS symbol of the scheduled PRBs. About 1 without jamming, at any SNR and on every PRB.
 * **EVM E** - distance from each equalized symbol to the nearest QPSK point, divided by the noise
   variance the LMMSE equalizer expects. Defined on the data symbols of the scheduled PRBs. About 1
   without jamming at moderate SNR, but it grows at high SNR (mean ~2 at 25 dB and ~4 at 30 dB on
@@ -17,11 +17,10 @@ divided by the noise level:
   that contains this effect.
 
 A fourth map, **empty-comb power C**, is stored for baselines and ablations: the received energy on
-the subcarriers of the DMRS symbol that carry no pilot (type-1 DMRS leaves every second subcarrier
-empty) divided by the noise variance, one value per PRB on the DMRS symbol of the whole carrier.
-Without jamming it is the mean of 6 unit exponentials, at any SNR, also inside the allocation. A
-jammer on the whole DMRS symbol raises it; one that hits only the pilot comb, or replays the
-pilots, does not.
+the subcarriers that carry no pilot (type-1 DMRS leaves every second subcarrier empty) divided by
+the noise variance, one value per PRB and DMRS symbol across the carrier. Without jamming it is
+the mean of 6 unit exponentials, at any SNR, also inside the allocation. A jammer on the whole
+DMRS symbol raises it; one that hits only the pilot comb, or replays the pilots, does not.
 """
 
 from functools import cache
@@ -64,18 +63,18 @@ def power_map(y: torch.Tensor, no: torch.Tensor, cfg: SimConfig) -> torch.Tensor
 
 
 def comb_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
-    """Energy on the empty DMRS comb per PRB divided by the noise variance, on the DMRS symbol of
-    every PRB of the carrier; 0 elsewhere. ``[B, 24, 14]``."""
+    """Energy on the empty comb per PRB and DMRS symbol divided by noise; 0 elsewhere."""
     from jamloc.noise import empty_comb
 
     # The allocation starts at a PRB boundary (12 subcarriers), so the empty comb has the same
     # parity on the whole carrier
     _, sc = empty_comb(batch.tx)
     parity = int(sc[0]) % 2
-    row = batch.y[:, cfg.dmrs_symbol, parity::2]  # [B, 6 x 24]
-    energy = (row.abs() ** 2).reshape(row.shape[0], cfg.num_prb, 6).mean(-1)
-    out = energy.new_zeros(energy.shape[0], cfg.num_prb, cfg.num_symbols)
-    out[:, :, cfg.dmrs_symbol] = energy / batch.no[:, None]
+    out = batch.y.real.new_zeros(batch.y.shape[0], cfg.num_prb, cfg.num_symbols)
+    for symbol in cfg.dmrs_symbols:
+        row = batch.y[:, symbol, parity::2]  # [B, 6 x 24]
+        energy = (row.abs() ** 2).reshape(row.shape[0], cfg.num_prb, 6).mean(-1)
+        out[:, :, symbol] = energy / batch.no[:, None]
     return out
 
 
@@ -86,6 +85,7 @@ def dmrs_ls(y_alloc: torch.Tensor, tx: PUSCHTransmitter):
     """Raw LS channel estimates ``y / x`` at the DMRS pilots of the allocation.
 
     Returns ``h_ls`` ``[B, N_p]``, the pilot subcarrier indices ``[N_p]`` and the pilot power.
+    Pilots are stacked in symbol order, so their subcarrier indices repeat on each DMRS symbol.
     (Sionna's PUSCH estimator averages neighbouring pilots; here every pilot stays separate.)
     """
     pp = tx.resource_grid.pilot_pattern
@@ -136,12 +136,24 @@ def residual_per_prb(
     return (residual.abs() ** 2).reshape(b, -1, 6).sum(-1) / noise_only.reshape(b, -1, 6).sum(-1)
 
 
+def dmrs_residuals(h_ls, pilot_sc, no, pilot_power, cfg, num_dmrs: int) -> torch.Tensor:
+    """Independent delay projections, yielding the residuals ``[B, num_dmrs, n]``."""
+    return torch.stack(
+        [
+            residual_per_prb(h, sc, no, pilot_power, cfg)
+            for h, sc in zip(h_ls.chunk(num_dmrs, dim=1), pilot_sc.chunk(num_dmrs), strict=True)
+        ],
+        dim=1,
+    )
+
+
 def residual_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
-    """DMRS residual per PRB, on the DMRS symbol of the scheduled PRBs; 0 elsewhere."""
+    """DMRS residual per PRB and DMRS symbol of the allocation; 0 elsewhere."""
     h_ls, pilot_sc, pilot_power = dmrs_ls(batch.y_alloc, batch.tx)
-    r = residual_per_prb(h_ls, pilot_sc, batch.no, pilot_power, cfg)
-    cells = r.new_zeros(r.shape[0], r.shape[1], cfg.num_symbols)
-    cells[:, :, cfg.dmrs_symbol] = r
+    dmrs = cfg.dmrs_symbols
+    r = dmrs_residuals(h_ls, pilot_sc, batch.no, pilot_power, cfg, len(dmrs))
+    cells = r.new_zeros(r.shape[0], r.shape[2], cfg.num_symbols)
+    cells[:, :, dmrs] = r.transpose(1, 2)
     return _to_carrier(cells, batch, cfg)
 
 
@@ -183,7 +195,7 @@ def masks(batch: SlotBatch, cfg: SimConfig):
         :, batch.scenario.alloc_start : batch.scenario.alloc_start + batch.scenario.alloc_size
     ] = 1
     dmrs = torch.zeros_like(alloc)
-    dmrs[:, :, cfg.dmrs_symbol] = alloc[:, :, cfg.dmrs_symbol]
+    dmrs[:, :, cfg.dmrs_symbols] = alloc[:, :, cfg.dmrs_symbols]
     return alloc, dmrs, alloc - dmrs
 
 
@@ -198,6 +210,6 @@ def extract(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
     r = _db(residual_map(batch, cfg)) * dmrs
     e = _db(evm_map(batch, cfg)) * data
     row = torch.zeros_like(alloc)
-    row[:, :, cfg.dmrs_symbol] = 1  # the empty comb exists on the DMRS symbol of every PRB
+    row[:, :, cfg.dmrs_symbols] = 1  # the empty comb exists on every DMRS symbol of every PRB
     c = _db(comb_map(batch, cfg)) * row
     return torch.stack([p, r, e, alloc, dmrs, data, c], dim=1).float()

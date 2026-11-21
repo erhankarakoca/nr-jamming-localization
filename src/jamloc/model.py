@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from jamloc.config import SimConfig
 from jamloc.features import FEATURE_NAMES
 
 # Which feature channels each detector variant sees (all variants get the masks)
@@ -37,17 +38,17 @@ def select_inputs(features: torch.Tensor, variant: str) -> torch.Tensor:
     return features[:, idx] * scale[None, :, None, None]
 
 
-def noise_shift(x: torch.Tensor, variant: str, delta_db: torch.Tensor) -> torch.Tensor:
+def noise_shift(
+    x: torch.Tensor, variant: str, delta_db: torch.Tensor, *, cfg: SimConfig | None = None
+) -> torch.Tensor:
     """Inputs (from ``select_inputs``) as seen with a noise estimate ``delta_db`` ``[B]`` dB above
     the true noise power.
 
     Every feature is divided by the estimated noise variance, so P, R and E move by ``-delta_db``
     (``-delta_db / 10`` after the input scaling) where they are defined: P everywhere, R on the
-    DMRS cells, E on the data cells, C on the DMRS symbol. Used to train detectors that tolerate
+    DMRS cells, E on the data cells, C on the DMRS symbols. Used to train detectors that tolerate
     noise-estimation error.
     """
-    from jamloc.config import SimConfig
-
     idx = ALL_VARIANTS[variant]
     shift = -delta_db.to(x.dtype)[:, None, None] / 10
     out = x.clone()
@@ -59,7 +60,8 @@ def noise_shift(x: torch.Tensor, variant: str, delta_db: torch.Tensor) -> torch.
         elif ch == _E:
             out[:, pos] += shift * x[:, idx.index(_DATA)]
         elif ch == _COMB:
-            out[:, pos, :, SimConfig().dmrs_symbol] += shift[:, :, 0]
+            dmrs = (cfg or SimConfig()).dmrs_symbols
+            out[:, pos, :, dmrs] += shift
     return out
 
 
