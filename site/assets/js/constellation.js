@@ -1,21 +1,26 @@
 import { receiverName } from "./data.js";
 import { element } from "./nav.js";
+import { symbols } from "./points.js";
 
 const AXIS_LIMIT = 4;
 const INSET = 20;
 const SIZE = 160;
 const SPAN = SIZE - 2 * INSET;
 const SCALE = SPAN / (2 * AXIS_LIMIT);
-const SUBCARRIERS_PER_PRB = 12;
-
 export function crcBadge(passed) {
   return element("span", passed ? "CRC pass" : "CRC fail", `badge ${passed ? "pass" : "fail"}`);
+}
+
+function plotReceiverName(name) {
+  if (name === "standard") return "Standard receiver";
+  if (name === "fused_soft") return "Map-aware receiver";
+  return receiverName(name);
 }
 
 export function crcList(slot, names) {
   const list = element("ul", null, "badge-list");
   for (const name of names) {
-    const item = element("li", `${receiverName(name)} `);
+    const item = element("li", `${plotReceiverName(name)} `);
     item.append(crcBadge(slot.receivers[name].crc));
     list.append(item);
   }
@@ -38,11 +43,7 @@ export function comparisonReceivers(slot) {
 
 function draw(slot, name, prbs) {
   const receiver = slot.receivers[name];
-  const [start, width] = slot.metadata.alloc;
-  const dmrs = slot.metadata.config.dmrs_symbol;
-  const points = slot.x_hat[receiver.x_hat];
-  const llrs = slot.abs_llr[receiver.abs_llr];
-  const label = receiverName(name);
+  const label = plotReceiverName(name);
   const canvas = element("canvas");
   canvas.setAttribute("role", "img");
   const density = Math.min(3, window.devicePixelRatio || 1);
@@ -80,36 +81,30 @@ function draw(slot, name, prbs) {
   ctx.beginPath();
   ctx.rect(INSET, INSET, SPAN, SPAN);
   ctx.clip();
-  const selected = new Set(prbs);
-  const rowLength = width * SUBCARRIERS_PER_PRB;
   let shown = 0;
   let outside = 0;
-  for (const [index, point] of points.entries()) {
-    const prb = start + Math.floor((index % rowLength) / SUBCARRIERS_PER_PRB);
-    if (!selected.has(prb) || point.some(v => v == null)) continue;
-    const ordinal = Math.floor(index / rowLength);
-    const symbol = ordinal + Number(ordinal >= dmrs);
-    if (point.some(v => Math.abs(v) > AXIS_LIMIT)) {
+  for (const { x, y, alpha, jammed } of symbols(slot, name, prbs)) {
+    if (Math.abs(x) > AXIS_LIMIT || Math.abs(y) > AXIS_LIMIT) {
       outside++;
       continue;
     }
     shown++;
-    ctx.globalAlpha = 0.14 + 0.76 * (1 - Math.exp(-(llrs[index] ?? 0) / 14));
-    ctx.fillStyle = slot.grids.truth[prb][symbol] ? "#cc0000" : "#0033cc";
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = jammed ? "#cc0000" : "#0033cc";
     ctx.beginPath();
-    ctx.arc(xOf(point[0]), yOf(point[1]), 1.1, 0, Math.PI * 2);
+    ctx.arc(xOf(x), yOf(y), 1.1, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
   const extent = `I and Q axes from −${AXIS_LIMIT} to +${AXIS_LIMIT}.`;
-  const description = `${label}, ${shown.toLocaleString()} points on the plot. ${extent}`;
-  canvas.setAttribute("aria-label", outside ? `${description} ${outside} outside the axes.` : description);
+  const outsideLabel = `${outside.toLocaleString()} ${outside === 1 ? "point" : "points"} outside the axes`;
+  const description = `${label}, ${shown.toLocaleString()} points on the plot. ${extent} ${outsideLabel}.`;
+  canvas.setAttribute("aria-label", description);
   canvas.textContent = description;
 
   const figure = element("figure");
   const caption = element("figcaption");
-  caption.append(element("strong", label), crcBadge(receiver.crc));
-  if (outside) caption.append(element("span", `${outside.toLocaleString()} points off the axes`, "context"));
+  caption.append(element("strong", label), crcBadge(receiver.crc), element("span", outsideLabel, "context"));
   figure.append(canvas, caption);
   return figure;
 }
