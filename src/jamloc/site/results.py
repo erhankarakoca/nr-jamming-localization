@@ -12,6 +12,20 @@ MATCHED_CSV = "intervals/test_matched_by_attack_f1_ci.csv"
 MATCHED_PAIRED_CSV = "intervals/test_matched_by_attack_paired.csv"
 DMRS_DETECTION_CSV = "dmrs_count/detection.csv"
 DMRS_RECOVERY_CSV = "dmrs_count/recovery.csv"
+# The data-aided receiver study: its own results folder, one recovery run per SNR
+DATA_AIDED_RUNS = {
+    15.0: "receiver_study/recovery/recovery_C",
+    8.0: "receiver_study/recovery/recovery_C_snr8",
+}
+DATA_AIDED_RECEIVERS = (
+    "standard",
+    "lmmse",
+    "lmmse_da",
+    "p_r_e_soft",
+    "p_r_e_soft_da",
+    "true_soft",
+    "true_soft_da",
+)
 RECOVERY_RUNS = {
     "nominal": "recovery_C",
     "pulsed": "recovery_C_pulsed",
@@ -22,8 +36,8 @@ POPULATIONS = {
     "pd": (
         "Detection probability is the fraction of jammed cells inside the scheduled allocation "
         "that are flagged on the test split, pooling TDL-A and TDL-C. Thresholds target 1% "
-        "per-cell false alarms on validation. Lines are means over training seeds 0, 1, and 2. "
-        "The plotted bands span one standard deviation on either side, clipped to [0, 1]."
+        "per-cell false alarms on validation. Curves are means over training seeds 0, 1, and 2; the "
+        "hover text and the table give the standard deviation over the seeds."
     ),
     "margin": (
         "The fused U-Net's smallest margin over pilot, data, and partial-band jamming on the "
@@ -50,9 +64,19 @@ POPULATIONS = {
         "The values average over training seeds 0, 1, and 2. The 95% batch-bootstrap intervals hold "
         "the matched decisions fixed."
     ),
+    "data_aided": (
+        "Pilot jamming of every DMRS cell of the 12-PRB allocation (PRBs 6-17), TDL-C, known noise "
+        "power; at 8 dB SNR also data and partial-band jamming of 4 PRBs. Errors pool detector "
+        "training seeds 0, 1, and 2, up to 1,600 slots each; a receiver stops after 100 block "
+        "errors, so denominators differ. Data-aided: up to three passes after a failed decoding, "
+        "in which the decoded symbols of the data cells the map calls clean act as extra pilots; a "
+        "block keeps the first decoding whose CRC passes. The paired CSVs give each difference "
+        "with a 95% interval on the slots both receivers decoded."
+    ),
     "dmrs": (
-        "One DMRS symbol per slot against two (symbols 2 and 11), each with detectors trained "
-        "on its own data. F1 and false alarms cover the whole carrier of the test split; Pd counts "
+        "One DMRS symbol per slot against two (symbols 2 and 11). The U-Nets are trained on their own "
+        "DMRS configuration; the block test and the EVM threshold are calibrated on the matching "
+        "validation data. F1 and false alarms cover the whole carrier of the test split; Pd counts "
         "the jammed cells inside the allocation at −15 dB JSR. U-Net values average training "
         "seeds 0, 1, and 2. BLER pools the same seeds at +9 dB JSR on TDL-C at 15 dB SNR with the "
         "UE on 12 PRBs and the jammer on 4. In the last row the jammer assumes one front-loaded "
@@ -195,6 +219,50 @@ def _dmrs_recovery(rows):
     ]
 
 
+def _data_aided(paths):
+    """BLER per SNR, attack, JSR and receiver of the data-aided study, pooled over seeds."""
+    pooled = {}
+    for snr, path in paths.items():
+        for r in _read(path):
+            if r["receiver"] not in DATA_AIDED_RECEIVERS or r["jsr_db"] in ("", "nan"):
+                continue
+            key = (snr, r["attack"], float(r["jsr_db"]), r["receiver"])
+            p = pooled.setdefault(key, [0, 0])
+            p[0] += int(r["block_errors"])
+            p[1] += int(r["blocks"])
+    return [
+        {
+            "snr_db": snr,
+            "attack": attack,
+            "jsr_db": jsr,
+            "receiver": receiver,
+            "block_errors": errors,
+            "blocks": blocks,
+            "bler": errors / blocks,
+        }
+        for (snr, attack, jsr, receiver), (errors, blocks) in sorted(pooled.items())
+    ]
+
+
+def _data_aided_summary(rows):
+    """One sentence from the pooled 15 dB whole-allocation counts, or "" if a value is missing."""
+    found = {
+        (r["jsr_db"], r["receiver"]): f"{100 * r['bler']:.1f}%"
+        for r in rows
+        if r["snr_db"] == 15.0 and r["attack"] == "pilot_whole_allocation"
+    }
+    needed = [(j, rx) for j in (9.0, 3.0) for rx in ("p_r_e_soft", "p_r_e_soft_da", "lmmse_da")]
+    if any(key not in found for key in needed):
+        return ""
+    return (
+        "With every pilot of the allocation jammed there is no clean pilot to estimate the "
+        "channel from. At 15 dB SNR, data-aided passes lower the BLER with the U-Net map from "
+        f"{found[9.0, 'p_r_e_soft']} to {found[9.0, 'p_r_e_soft_da']} at +9 dB JSR and from "
+        f"{found[3.0, 'p_r_e_soft']} to {found[3.0, 'p_r_e_soft_da']} at +3 dB; the same passes "
+        f"without a map reach {found[9.0, 'lmmse_da']} and {found[3.0, 'lmmse_da']}."
+    )
+
+
 def _recovery_files(directory: Path, stem: str) -> tuple[Path, Path]:
     for name in (f"{stem}_replay", stem):
         points = directory / f"{name}.csv"
@@ -214,10 +282,10 @@ def write_results(source: Path, build: Path) -> None:
     downloads.mkdir(parents=True, exist_ok=True)
     paths = {kind: [] for kind in POPULATIONS}
 
-    def copy(kind, path):
+    def copy(kind, path, prefix=""):
         if not path.is_file():
             raise FileNotFoundError(f"Missing paper result {path}")
-        target = downloads / path.name
+        target = downloads / f"{prefix}{path.name}"  # a prefix keeps same-named files apart
         shutil.copyfile(path, target)
         paths[kind].append(target.relative_to(build).as_posix())
         return path
@@ -236,6 +304,12 @@ def write_results(source: Path, build: Path) -> None:
         if path.stem.removesuffix("_replay_paired") not in RECOVERY_RUNS.values():
             copy("recovery", path)
 
+    aided = {}
+    for snr, stem in DATA_AIDED_RUNS.items():
+        if snr != 15.0 and not (source / f"{stem}.csv").is_file():
+            continue  # the lower-SNR run is optional; the 15 dB one is required
+        aided[snr] = copy("data_aided", source / f"{stem}.csv", "data_aided_")
+        copy("data_aided", source / f"{stem}_paired.csv", "data_aided_")
     dmrs_detection = copy("dmrs", source / DMRS_DETECTION_CSV)
     dmrs_recovery = copy("dmrs", source / DMRS_RECOVERY_CSV)
 
@@ -247,6 +321,7 @@ def write_results(source: Path, build: Path) -> None:
             "rows": _matched(_read(matched)),
             "paired": _matched_paired(_read(matched_paired)),
         },
+        "data_aided": {"rows": _data_aided(aided)},
         "dmrs": {
             "rows": _dmrs_detection(_read(dmrs_detection)),
             "recovery": _dmrs_recovery(_read(dmrs_recovery)),
@@ -256,6 +331,7 @@ def write_results(source: Path, build: Path) -> None:
         if not section["rows"]:
             raise ValueError(f"No eligible {kind} rows in {', '.join(paths[kind])}")
         section.update(population=POPULATIONS[kind], downloads=paths[kind])
+    payload["data_aided"]["summary"] = _data_aided_summary(payload["data_aided"]["rows"])
     (build / "data" / "results.json").write_text(
         json.dumps(payload, separators=(",", ":"), allow_nan=False), encoding="utf-8"
     )

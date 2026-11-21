@@ -172,8 +172,51 @@ th, .numeric { font-variant-numeric: tabular-nums; }
 tbody th { font-weight: 400; }
 .error { color: var(--red); }
 
+/* Project page */
+.project { text-align: center; padding-block: 1rem 0.5rem; }
+.project h1 { font-family: var(--serif); font-weight: 600; font-size: 1.85rem; line-height: 1.2; max-width: 46rem; margin-inline: auto; }
+.project .author { margin-top: 0.8rem; font-size: 1.05rem; max-width: none; }
+.project .affiliation { margin: 0.2rem auto 0; color: var(--muted); font-size: 0.87rem; max-width: none; }
+.links { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin: 1rem auto 0; max-width: none; }
+.link-button {
+  display: inline-block; padding: 0.35rem 0.9rem; border-radius: 999px; background: var(--ink); color: #fff;
+  text-decoration: none; font-size: 0.87rem;
+}
+.link-button:hover { background: #444; color: #fff; }
+.link-button[aria-disabled="true"] { background: #e6e6e6; color: var(--muted); }
+main > .project + .teaser { margin-top: 1.5rem; }
+.teaser { border: 1px solid var(--line); padding: 1rem; background: #fafafa; }
+.teaser-body { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.teaser .grid-wrap { max-width: none; }
+.panel-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem; }
+.toggle { display: inline-flex; margin-bottom: 0.5rem; }
+.toggle button { border-radius: 0; }
+.toggle button + button { border-left: 0; }
+#teaser-canvas { display: block; width: 100%; max-width: 320px; height: auto; border: 0; }
+.crc-line { font-size: 0.87rem; margin-top: 0.3rem; }
+.teaser figcaption { margin-top: 0.8rem; font-size: 0.87rem; color: var(--ink); max-width: none; }
+.teaser figcaption .context { display: block; margin-top: 0.25rem; }
+main > figure + section { margin-top: 2rem; }
+.strip {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1.4rem; margin-top: 0.8rem; position: relative;
+}
+.strip-panel { position: relative; min-width: 0; }
+.strip-panel + .strip-panel::before {
+  content: "→"; position: absolute; left: -1.15rem; top: 42%; color: var(--muted); font-size: 1rem;
+}
+.strip-panel figcaption { color: var(--ink); font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+.mini-grid, .strip-panel canvas { display: block; width: 100%; height: auto; }
+.panel-note { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
+.limits { margin: 0.5rem 0 0; padding-left: 1.2rem; max-width: 75ch; }
+.limits li + li { margin-top: 0.3rem; }
+.bars { display: block; width: 100%; max-width: 40rem; height: auto; margin-block: 0.5rem; }
+.bars text { font-family: var(--serif); fill: var(--ink); }
+
 @media (max-width: 760px) {
-  .inspection, .slot-row { grid-template-columns: minmax(0, 1fr); }
+  .inspection, .slot-row, .teaser-body { grid-template-columns: minmax(0, 1fr); }
+  .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .strip-panel + .strip-panel::before { content: none; }
+  .project h1 { font-size: 1.45rem; }
 }
 @media (max-width: 500px) {
   .controls label:not(.check) { flex: 1 1 100%; }

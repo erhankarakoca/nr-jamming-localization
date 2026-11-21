@@ -17,7 +17,7 @@ export function svgNode(tag, attributes = {}, text) {
   return node;
 }
 
-function featureScale(values) {
+export function featureScale(values) {
   const finite = values.flat().filter(Number.isFinite);
   if (!finite.length) return null;
   return [Math.floor(Math.min(...finite)), Math.ceil(Math.max(...finite))];
@@ -30,7 +30,7 @@ const PARULA = [
   [0.5044, 0.7993, 0.348], [0.8634, 0.7406, 0.1596], [0.9763, 0.9831, 0.0538],
 ];
 
-function heatColor(value, [min, max]) {
+export function heatColor(value, [min, max]) {
   const level = max === min ? 0.5 : Math.min(1, Math.max(0, (value - min) / (max - min)));
   const position = level * (PARULA.length - 1);
   const i = Math.min(PARULA.length - 2, Math.floor(position));
@@ -304,7 +304,7 @@ async function explorer(root) {
       feature.disabled = truth.disabled = false;
       context.replaceChildren(conditions(slot), slotDetails(slot));
       if (slot.metadata.noise_estimate === "comb") {
-        unavailable.textContent = "Only the U-Net map exists for this noise estimate.";
+        unavailable.textContent = "This slot's maps were made with the noise power estimated from the empty pilot comb.";
       }
       inspect(affectedPRBs(slot)[0], slot.metadata.config.dmrs_symbol);
       redraw();

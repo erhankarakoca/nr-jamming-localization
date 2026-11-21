@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Localizing jamming in the 5G uplink</title>
+  <title>Receiver-Informed Localization of Resource-Selective Jamming in the 5G NR Uplink</title>
   <link rel="stylesheet" href="assets/style.css">
   <script type="module" src="assets/js/nav.js"></script>
-  <script type="module" src="assets/js/grid.js"></script>
+  <script type="module" src="assets/js/story.js"></script>
+  <script type="module" src="assets/js/sweep.js"></script>
   <script type="module" src="assets/js/results.js"></script>
 </head>
 <body>
@@ -16,40 +17,100 @@
       <a class="wordmark" href="index.html">NR Jamming Localization</a>
       <nav aria-label="Main navigation">
         <a href="index.html" aria-current="page">Overview</a>
-        <a href="walkthrough.html">Walkthrough</a>
         <a href="explore.html">Explore</a>
         <a href="results.html">Results</a>
       </nav>
     </div>
   </header>
   <main class="shell" id="main" tabindex="-1">
-<header class="page-intro">
-  <h1>Localizing jamming in the 5G uplink</h1>
-  <p>For every uplink slot, a small U-Net marks the resource cells (PRB × OFDM symbol) a jammer
-    transmitted on, from three receiver measurements: received power <var>P</var>, pilot
-    residual <var>R</var>, and error vector magnitude <var>E</var>. The receiver then decodes
-    the same buffered slot again with the map.</p>
+<header class="project">
+  <h1>Receiver-Informed Localization of Resource-Selective Jamming in the 5G NR Uplink</h1>
+  <p class="author">Erhan Karakoca</p>
+  <p class="affiliation">Department of Electrical and Electronics Engineering, Boğaziçi University, Istanbul<br>
+    Communications and Signal Processing Research (HİSAR) Lab., TÜBİTAK BİLGEM, Kocaeli</p>
+  <p class="links">
+    <span class="link-button" aria-disabled="true">Paper (in preparation)</span>
+    <a class="link-button" href="https://github.com/erhankarakoca/nr-jamming-localization">Code</a>
+    <a class="link-button" href="explore.html">Explore slots</a>
+    <a class="link-button" href="results.html">All results</a>
+  </p>
 </header>
-<section aria-labelledby="findings-heading">
-  <h2 id="findings-heading">Main results</h2>
-  <div id="home-results" class="numbers" aria-live="polite">Loading the results…</div>
+
+<figure class="teaser" aria-labelledby="teaser-caption">
+  <div class="teaser-body">
+    <div class="teaser-grid">
+      <p class="panel-title">Where the jammer transmitted, and what the U-Net flagged</p>
+      <div id="teaser-grid" aria-busy="true">Loading the slot…</div>
+    </div>
+    <div class="teaser-plot">
+      <p class="panel-title">Equalized data symbols of the jammed PRBs</p>
+      <div class="toggle" role="group" aria-label="Receiver">
+        <button type="button" id="show-standard" aria-pressed="true">Standard receiver</button>
+        <button type="button" id="show-map" aria-pressed="false">With the jamming map</button>
+      </div>
+      <canvas id="teaser-canvas" width="320" height="320" role="img" aria-label="Equalized symbols"></canvas>
+      <p id="teaser-crc" class="crc-line" aria-live="polite"></p>
+    </div>
+  </div>
+  <figcaption id="teaser-caption"></figcaption>
+</figure>
+
+<section aria-labelledby="abstract-heading">
+  <h2 id="abstract-heading">Abstract</h2>
+  <p>A jammer can attack only part of a 5G NR uplink slot: the pilots (DMRS), the data symbols, or a
+    band of physical resource blocks (PRBs). We estimate, for every PRB and OFDM symbol, whether a
+    jammer transmitted there. Three quantities of the received slot feed a small U-Net: the received
+    power <var>P</var>, a pilot residual <var>R</var> (the part of the least-squares pilot estimates
+    outside a delay-limited channel subspace, whose distribution in noise we derive for an ideal
+    channel model), and the
+    decision-directed error vector magnitude <var>E</var>. A map-aware receiver then decodes the same
+    buffered slot again, giving flagged pilots and the bits of flagged data cells less weight. In
+    simulations of a single-antenna PUSCH link, the map reaches a cell F1 of 0.952 at a 1% validation
+    false-alarm target. On TDL-C at 15 dB SNR, decoding with it lowers the block error rate under
+    pilot, data and partial-band jamming at +9 dB JSR from 33.5–87.8% to at most 0.06%.</p>
 </section>
-<section class="slot-row" aria-labelledby="example-heading">
-  <div>
-    <h2 id="example-heading">One jammed slot</h2>
-    <p class="context">A jammer hits the pilot (DMRS) symbol of four PRBs. Red outlines mark the
-      jammed cells and blue the cells the U-Net flags.</p>
-    <div id="overview-grid" aria-busy="true"></div>
-    <p id="overview-caption" class="context"></p>
-  </div>
-  <div>
-    <h2>On this site</h2>
-    <ul class="page-list">
-      <li><a href="walkthrough.html">Walkthrough</a>: one slot from the received grid to the decoded block.</li>
-      <li><a href="explore.html">Explore</a>: nine recorded slots, cell by cell, with constellations.</li>
-      <li><a href="results.html">Results</a>: detection, recovery, and where the method fails.</li>
-    </ul>
-  </div>
+
+<section aria-labelledby="method-heading">
+  <h2 id="method-heading">Method</h2>
+  <p>The receiver buffers the slot. From the same samples it computes three maps, the U-Net turns them
+    into one map of jammed cells, and the receiver decodes again with that map.</p>
+  <div id="method-strip" class="strip" aria-busy="true">Loading the slot…</div>
+  <p id="method-caption" class="context"></p>
+</section>
+
+<section aria-labelledby="sweep-title">
+  <h2 id="sweep-title">Why the pilot residual</h2>
+  <p>When only the pilots are jammed, the damage shows up on every data symbol, but the evidence of
+    where the jammer was sits in the pilots. The residual measures it directly. In this fixed slot only
+    the jammer power changes; the dashed line is the analytic threshold for 1% false alarms in noise.</p>
+  <label class="range-label" for="jsr">Jammer-to-signal ratio <output id="jsr-value" for="jsr"></output></label>
+  <input id="jsr" type="range" min="0" max="0" value="0" disabled>
+  <div id="sweep" aria-busy="true">Loading the power sweep…</div>
+</section>
+
+<section aria-labelledby="findings-heading">
+  <h2 id="findings-heading">Results</h2>
+  <div id="home-results" class="numbers" aria-live="polite">Loading the results…</div>
+  <p class="context">Simulated single-antenna PUSCH, QPSK, 3GPP TDL-A and TDL-C channels, known noise
+    power unless stated. <a href="results.html">All results, with their populations and data</a>.</p>
+</section>
+
+<section aria-labelledby="limits-heading">
+  <h2 id="limits-heading">Limitations</h2>
+  <ul class="limits">
+    <li>Everything is simulated: one receive antenna, one MCS, perfect synchronization, and, in
+      the nominal case, a noise-like jammer aligned with the slot grid.</li>
+    <li>Detection lags block errors at low SNR: the smallest margin is 8.6 dB at 15 dB SNR but
+      −6.1 dB at 5 dB SNR (TDL-C).</li>
+    <li>A jammer that hops between PRBs from symbol to symbol needs a detector trained on such
+      jammers; the nominally trained map leaves 21% BLER on hopping data jamming at +9 dB.</li>
+    <li>If every pilot of the allocation is jammed, no clean pilot remains. Data-aided passes
+      (decoded data cells used as extra pilots) lower the BLER with the U-Net map at +9 dB from 39%
+      to 24%, but not to zero, and with the noise power estimated from the jammed pilot comb even the
+      true map does not beat the standard receiver.</li>
+    <li>The detector also flags legitimate interference such as a neighbouring UE; telling intent
+      apart needs other information.</li>
+  </ul>
 </section>
   </main>
   <footer class="site-footer">

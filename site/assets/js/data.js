@@ -73,6 +73,9 @@ const receiverNames = {
   dmrs_ie: "DMRS only",
   block_soft: "Block test, soft",
   power_hard: "Power test, hard",
+  lmmse_da: "LMMSE, data-aided",
+  p_r_e_soft_da: "U-Net, soft, data-aided",
+  true_soft_da: "True map, soft, data-aided",
 };
 
 export function receiverName(name) {
