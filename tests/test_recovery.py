@@ -188,3 +188,47 @@ def test_unknown_mode_is_rejected():
     out = link(_scenario(NONE, 0.0, 15.0, n=2))
     with pytest.raises(ValueError, match="mode"):
         MapAwareReceiver(out.tx)(out.y_alloc, out.no, _cells(out), mode="gentle")
+
+
+def test_soft_decoder_returns_the_transmitted_codeword():
+    out = link(_scenario(NONE, -30.0, 30.0, n=8), decode=True)
+    rx = MapAwareReceiver(out.tx)
+    llr = rx(out.y_alloc, out.no, _cells(out), mode="soft")["llr"]
+    post = rx.soft_decoder(rx.layer_demapper(llr))
+    codeword = out.tx._tb_encoder(out.b)
+    assert post.shape == codeword.shape
+    assert torch.equal(post > 0, codeword > 0.5)  # LLR > 0 means bit 1
+
+
+def test_soft_qpsk_matches_the_constellation():
+    from sionna.phy.mapping import Constellation
+
+    from jamloc.recovery import soft_qpsk
+
+    points = Constellation("qam", 2).points
+    bits = torch.tensor([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=torch.float32)
+    mean, var = soft_qpsk(40.0 * (2 * bits - 1))  # confident LLRs of each point's label
+    assert torch.allclose(mean, points, atol=1e-6)
+    assert torch.allclose(var, torch.zeros(4), atol=1e-6)
+    mean, var = soft_qpsk(torch.zeros(1, 2))  # nothing known: mean 0, unit variance
+    assert mean.abs().item() == 0 and var.item() == 1
+
+
+def test_data_aided_passes_rescue_blocks_without_clean_pilots():
+    sc = _scenario(PILOT, 9.0, 15.0, n=32, jam=ALLOC)  # every DMRS cell of the allocation
+    out = link(sc, decode=True)
+    rx = MapAwareReceiver(out.tx)
+    first = rx(out.y_alloc, out.no, _cells(out), mode="soft")
+    aided = rx(out.y_alloc, out.no, _cells(out), mode="soft", iterations=3)
+    assert (aided["tb_crc"] | ~first["tb_crc"]).all()  # a decoded block stays decoded
+    assert aided["tb_crc"].sum() > first["tb_crc"].sum()  # and some failed ones are rescued
+    passed = first["tb_crc"].reshape(-1)
+    assert torch.equal(aided["b_hat"][passed], first["b_hat"][passed])
+
+
+def test_data_aided_passes_need_decoding():
+    out = link(_scenario(PILOT, 9.0, 15.0, n=4, jam=ALLOC), decode=True)
+    rx = MapAwareReceiver(out.tx)
+    plain = rx(out.y_alloc, out.no, _cells(out), mode="soft", decode=False)
+    passes = rx(out.y_alloc, out.no, _cells(out), mode="soft", decode=False, iterations=3)
+    assert torch.equal(plain["llr"], passes["llr"]) and "b_hat" not in passes

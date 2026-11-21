@@ -31,8 +31,8 @@ from jamloc.baselines import block_test_scores, evm_scores
 from jamloc.config import SimConfig
 from jamloc.dataset import generate, load
 from jamloc.evaluate import FA, _logits, _write_csv
-from jamloc.features import FEATURE_NAMES
 from jamloc.experiments.recovery import ALLOC, JAM_SIZE, _scenario, simulate_point
+from jamloc.features import FEATURE_NAMES
 from jamloc.jammer import ATTACKS
 from jamloc.link import JammedPUSCHLink, seed_everything
 from jamloc.metrics import detection_rate, f1, threshold_at_fa

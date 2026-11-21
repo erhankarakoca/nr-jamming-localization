@@ -26,6 +26,10 @@ allocation. Every simulated batch is decoded by every receiver, on exactly the s
 * ``true_prb_soft`` - the true map coarsened to the block test's resolution (one decision for the
                     DMRS cell and one for all data cells of each PRB), soft: separates the value of
                     resolution from the quality of a detector
+* ``lmmse_da`` / ``p_r_e_soft_da`` / ``true_soft_da`` - ``lmmse``, ``p_r_e_soft`` and ``true_soft``
+                    with ``DATA_AIDED`` data-aided passes (``jamloc.recovery``): after a failed
+                    decoding, the decoded symbols of the data cells the map calls clean become
+                    pilots. ``lmmse_da`` has no map, so it also feeds back jammed data cells.
 
 With the receiver held fixed (soft mode), ``slot_ie`` -> ``dmrs_ie`` -> ``block_soft`` ->
 ``p_r_e_soft`` -> ``true_soft`` changes only where the jamming is assumed to be: nowhere in
@@ -106,7 +110,12 @@ RECEIVERS = {
     "true_hard": ("true", "hard"),
     "true_soft": ("true", "soft"),
     "true_prb_soft": ("true_prb", "soft"),
+    "lmmse_da": (None, "lmmse"),
+    "p_r_e_soft_da": ("fused", "soft"),
+    "true_soft_da": ("true", "soft"),
 }
+# Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
+DATA_AIDED = {"lmmse_da": 3, "p_r_e_soft_da": 3, "true_soft_da": 3}
 DETECTORS = ("power_threshold", "block_test", "no_residual", "fused", "fused_atk")
 # Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
 TRAINED_ON = {"fused_atk": ({"data": "atk"}, "val_atk")}
@@ -156,6 +165,24 @@ STYLE = {
     "p_r_e_soft": {"label": "Map P+R+E, soft", "color": "#0072B2", "marker": "o", "linestyle": "-"},
     "true_hard": {"label": "True map, hard", "color": "#D55E00", "marker": "<", "linestyle": ":"},
     "true_soft": {"label": "True map, soft", "color": "#009E73", "marker": "^", "linestyle": "-."},
+    "lmmse_da": {
+        "label": "LMMSE, no map, data-aided",
+        "color": "#777777",
+        "marker": "1",
+        "linestyle": "-.",
+    },
+    "p_r_e_soft_da": {
+        "label": "P+R+E map, soft, data-aided",
+        "color": "#CC0000",
+        "marker": "s",
+        "linestyle": "-",
+    },
+    "true_soft_da": {
+        "label": "True map, soft, data-aided",
+        "color": "#000000",
+        "marker": "d",
+        "linestyle": "-",
+    },
     "true_prb_soft": {
         "label": "True map per PRB, soft",
         "color": "#117733",
@@ -302,7 +329,8 @@ def simulate_point(
                 b_hat = out.rx["b_hat"]
             else:
                 cells = maps[source] if source else None
-                b_hat = map_aware(out.y_alloc, out.no, cells, mode=mode)["b_hat"]
+                passes = DATA_AIDED.get(rx, 0)
+                b_hat = map_aware(out.y_alloc, out.no, cells, mode=mode, iterations=passes)["b_hat"]
             errors = out.b != b_hat
             block_errors = errors.any(-1).reshape(-1)
             counts[rx] += [
@@ -329,10 +357,12 @@ def simulate(
     jammer="nominal",
     noise_estimate="true",
     replay=None,
+    attacks=None,
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
     ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
-    batches, decoding only the receivers ``decode[point]``."""
+    batches, decoding only the receivers ``decode[point]``. ``attacks``: simulate only these cases
+    (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``)."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
     link = JammedPUSCHLink(cfg)
     nest = noise_estimate != "true"
@@ -365,9 +395,8 @@ def simulate(
         cases = [("none", False, tuple(RECEIVERS))]
         cases += [(attack, False, tuple(RECEIVERS)) for attack in ("pilot", "data", "partial")]
         # limit case: no clean pilot left
-        cases.append(
-            ("pilot", True, ("standard", "true_hard", "true_soft"))
-        )  # per PRB = exact here
+        whole = ("standard", "lmmse", "p_r_e_soft", "true_hard", "true_soft", *DATA_AIDED)
+        cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]
     # leave out receivers whose detector is not available (e.g. a model that was not trained)
@@ -377,6 +406,8 @@ def simulate(
     if only and replay is None:  # re-run some receivers only
         cases = [(a, w, tuple(rx for rx in rxs if rx in only)) for a, w, rxs in cases]
         cases = [c for c in cases if c[2]]
+    if attacks:
+        cases = [c for c in cases if ("pilot_whole_allocation" if c[1] else c[0]) in attacks]
     rows, slots = [], {}
     for attack, whole, receivers in cases:
         name = "pilot_whole_allocation" if whole else attack
@@ -686,6 +717,12 @@ def main(argv=None):
         default="true",
         help="noise power of the receiver: the true one, or estimated per slot (jamloc.noise)",
     )
+    p.add_argument(
+        "--attacks",
+        nargs="+",
+        choices=("none", "pilot", "data", "partial", "pilot_whole_allocation"),
+        help="simulate only these cases",
+    )
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     p.add_argument(
         "--replay",
@@ -746,6 +783,7 @@ def main(argv=None):
                 args.jammer,
                 args.noise_estimate,
                 replay,
+                args.attacks,
             )
             if args.replay:
                 bad = check_replay(rows, before)
@@ -768,6 +806,10 @@ def main(argv=None):
     slot_files = sorted(stem.parent.glob(f"{stem.name}_seed*_slots.npz"))
     if slot_files:
         _write_rows(paired_rows(slot_files), stem.with_name(f"{stem.name}_paired.csv"))
+    if not any(r["attack"] in ("pilot", "data", "partial") for r in pooled):
+        # e.g. --attacks pilot_whole_allocation: the figures plot the nominal attacks only
+        print(f"Wrote {stem}.csv and {stem.name}_paired.csv (no nominal attack to plot)")
+        return
     with paper_style():
         main_fig = plot(pooled, args.channel)  # the message: no protection vs map vs true map
         ablation = plot(
