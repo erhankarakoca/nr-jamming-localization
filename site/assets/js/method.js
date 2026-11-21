@@ -1,188 +1,139 @@
-// "How it works": the method animated step by step on one recorded slot, and the data-aided
-// passes animated on a slot whose every pilot is jammed. Each step is a state of two panels (the
-// resource grid on the left, the channel or the symbols on the right); moving to a step shows all
-// earlier states at once and animates only the new one. With reduced motion, states just switch.
+// "How it works": the method on one recorded partial-band slot, step by step, and the data-aided
+// passes on a slot whose every pilot is jammed. Every step is a complete state of the two panels
+// (the resource grid on the left, the channel, the three clues or the symbols on the right), so
+// any step can be reached from any other; only a move to the next step is animated.
 import { conditions, loadCase, selectionText } from "./data.js";
-import { affectedPRBs, crcBadge } from "./constellation.js";
+import { crcBadge } from "./constellation.js";
 import { featureScale, heatColor, svgNode } from "./grid.js";
 import { element, reportError } from "./nav.js";
-import { constellationCanvas, drawFrame, symbols } from "./points.js";
+import {
+  BLUE, BOX, RED, allocationGrid, cellTrust, constellationView, drawFrame, fadeTo, mean, median,
+  shareText, symbols, tween,
+} from "./points.js";
 
-const RED = "#cc0000";
-const BLUE = "#0033cc";
 const GREY = "#9a9a9a";
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const abs = ([re, im]) => Math.hypot(re, im);
-const sqErr = (est, ref, ks) => ks.reduce((sum, k) => sum + (est[k][0] - ref[k][0]) ** 2 + (est[k][1] - ref[k][1]) ** 2, 0) / ks.length;
+const sqErr = (est, ref, ks) => mean(ks.map(k => (est[k][0] - ref[k][0]) ** 2 + (est[k][1] - ref[k][1]) ** 2));
+const dB = v => `${v >= 0 ? "" : "−"}${Math.abs(v).toFixed(1)} dB`;
 
-function tween(duration, draw) {
-  if (reduceMotion || duration <= 0) {
-    draw(1);
-    return Promise.resolve();
-  }
-  return new Promise(resolve => {
-    const begin = performance.now();
-    const frame = now => {
-      const k = Math.min(1, (now - begin) / duration);
-      draw(k < 0.5 ? 4 * k ** 3 : 1 - (-2 * k + 2) ** 3 / 2);
-      if (k < 1) requestAnimationFrame(frame);
-      else resolve();
-    };
-    requestAnimationFrame(frame);
-  });
-}
-
-// The allocation's resource grid with layers that the steps switch on: jammed cells, the three
-// feature maps, and the U-Net flags.
-function gridPanel(slot) {
-  const [start, count] = slot.metadata.alloc;
-  const cols = slot.grids.allocation[0].length;
-  const dmrs = slot.metadata.config.dmrs_symbol;
-  const cw = 20;
-  const ch = 11;
-  const x0 = 34;
-  const y0 = 16;
-  const width = x0 + cols * cw + 6;
-  const height = y0 + count * ch + 30;
-  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, class: "anim-grid", role: "img",
-    "aria-label": "The user's resource grid: PRBs by OFDM symbols" });
-  const layer = name => {
-    const g = svgNode("g", { class: `layer ${name}`, opacity: 0 });
-    return g;
-  };
-  const base = svgNode("g");
-  const features = { power_db: layer("power"), residual_db: layer("residual"), evm_db: layer("evm") };
-  const jam = layer("jam");
-  const flags = layer("flags");
-  for (let r = 0; r < count; r++) {
-    const prb = start + count - 1 - r;
-    for (let s = 0; s < cols; s++) {
-      const x = x0 + s * cw;
-      const y = y0 + r * ch;
-      base.append(svgNode("rect", { x, y, width: cw, height: ch, fill: "#d9d9d9", stroke: "#fff", "stroke-width": 0.8 }));
-      if (slot.grids.truth[prb][s]) {
-        jam.append(svgNode("rect", { x: x + 0.8, y: y + 0.8, width: cw - 1.6, height: ch - 1.6, fill: "none", stroke: RED, "stroke-width": 1.8, class: "pulse" }));
-      }
-      if (slot.detectors.fused.decisions[prb][s]) {
-        flags.append(svgNode("rect", { x: x + 3, y: y + 2.5, width: cw - 6, height: ch - 5, fill: BLUE, "data-col": s }));
-      }
-    }
-    if (prb % 2 === 0) {
-      svg.append(svgNode("text", { x: x0 - 5, y: y0 + r * ch + ch / 2 + 3.5, "text-anchor": "end", "font-size": 9 }, prb));
-    }
-  }
-  for (const [key, g] of Object.entries(features)) {
-    const values = slot.grids[key].slice(start, start + count);
-    const scale = featureScale(values);
-    for (let r = 0; r < count; r++) {
-      const prb = start + count - 1 - r;
-      for (let s = 0; s < cols; s++) {
-        const v = slot.grids[key][prb][s];
-        if (!Number.isFinite(v) || !scale) continue;
-        g.append(svgNode("rect", { x: x0 + s * cw, y: y0 + r * ch, width: cw, height: ch, fill: heatColor(v, scale), stroke: "#fff", "stroke-width": 0.8 }));
-      }
-    }
-  }
-  svg.append(base, ...Object.values(features), jam, flags);
-  for (let s = 0; s < cols; s++) {
-    svg.append(svgNode("text", { x: x0 + s * cw + cw / 2, y: y0 - 4, "text-anchor": "middle", "font-size": 9, "font-weight": s === dmrs ? 700 : 400 }, s));
-  }
-  svg.append(svgNode("text", { x: x0 + cols * cw / 2, y: height - 8, "text-anchor": "middle", "font-size": 10 }, `OFDM symbol (pilots on symbol ${dmrs})`));
-  const mid = y0 + count * ch / 2;
-  svg.append(svgNode("text", { x: 9, y: mid, "text-anchor": "middle", "font-size": 10, transform: `rotate(-90 9 ${mid})` }, "PRB"));
-  const label = svgNode("text", { x: width - 6, y: y0 - 4, "text-anchor": "end", "font-size": 9.5, fill: "#555" }, "");
-  svg.append(label);
-  return { svg, features, jam, flags, label };
-}
-
-// The channel across the allocation's subcarriers (magnitude), with the residual per PRB below.
-function channelPanel(slot, channel, { residual = true } = {}) {
+// The channel across the allocation's subcarriers (magnitude): true channel, least-squares pilot
+// estimates and one receiver's estimate. Pilots above the axis are drawn as triangles at its top.
+function channelPanel(slot, channel, { jammedPRBs = [] } = {}) {
+  const { width, height } = BOX;
   const n = channel.num_sc;
-  const width = 480;
-  const left = 40;
-  const right = 470;
-  const top = 14;
-  const bottom = residual ? 190 : 230;
-  const height = residual ? 330 : 270;
-  const all = [...channel.true.map(abs), ...channel.ls.map(abs), ...channel.standard.map(abs)];
-  const ymax = Math.min(3, Math.ceil(Math.max(...all) * 2) / 2);
-  const x = k => left + (k + 0.5) / n * (right - left);
-  const y = v => bottom - Math.min(v, ymax) / ymax * (bottom - top);
-  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, class: "anim-plot", role: "img",
-    "aria-label": "Channel magnitude across the allocation's subcarriers" });
+  const [start] = slot.metadata.alloc;
+  const left = 50;
+  const right = width - 10;
+  const top = 22;
+  const bottom = height - 58;
+  const lines = [channel.true, channel.standard, channel.map].flatMap(v => v.map(abs));
+  const ymax = Math.min(3, Math.max(1, Math.ceil(Math.max(...lines) * 1.15)));
+  const x = k => left + ((k + 0.5) / n) * (right - left);
+  const y = v => bottom - (Math.min(v, ymax) / ymax) * (bottom - top);
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, class: "viz", role: "img",
+    "aria-label": "Channel magnitude across the user's subcarriers" });
+  for (const b of jammedPRBs) {
+    svg.append(svgNode("rect", { x: x(12 * (b - start) - 0.5), y: top, width: x(12) - x(0), height: bottom - top, fill: "#fbe3e3" }));
+  }
   for (let b = 0; b <= n / 12; b++) {
-    svg.append(svgNode("line", { x1: x(b * 12 - 0.5), x2: x(b * 12 - 0.5), y1: top, y2: bottom, stroke: "#eee", "stroke-width": 0.6 }));
+    svg.append(svgNode("line", { x1: x(b * 12 - 0.5), x2: x(b * 12 - 0.5), y1: top, y2: bottom, stroke: "#e6e6e6", "stroke-width": 0.6 }));
   }
   for (const v of [0, ymax / 2, ymax]) {
-    svg.append(svgNode("text", { x: left - 5, y: y(v) + 3.5, "text-anchor": "end", "font-size": 10 }, v.toFixed(1)));
+    svg.append(svgNode("text", { x: left - 5, y: y(v) + 3.5, "text-anchor": "end", "font-size": 10 }, String(v)));
   }
-  svg.append(svgNode("rect", { x: left, y: top, width: right - left, height: bottom - top, fill: "none", stroke: "#000", "stroke-width": 0.7 }));
+  for (let b = 0; b < n / 12; b++) {
+    svg.append(svgNode("text", { x: x(b * 12 + 5.5), y: bottom + 14, "text-anchor": "middle", "font-size": 10 }, start + b));
+  }
+  svg.append(svgNode("text", { x: (left + right) / 2, y: bottom + 30, "text-anchor": "middle", "font-size": 11 }, "PRB (12 subcarriers each)"));
   const midY = (top + bottom) / 2;
-  svg.append(svgNode("text", { x: 11, y: midY, "text-anchor": "middle", "font-size": 10.5, transform: `rotate(-90 11 ${midY})` }, "|channel|"));
-  const [start] = slot.metadata.alloc;
-  const prbs = n / 12;
-  for (let b = 0; b < prbs; b += 2) {
-    svg.append(svgNode("text", { x: x(b * 12 + 6), y: bottom + 13, "text-anchor": "middle", "font-size": 9 }, start + b));
-  }
-  svg.append(svgNode("text", { x: (left + right) / 2, y: bottom + 26, "text-anchor": "middle", "font-size": 10 }, "PRB (12 subcarriers each)"));
+  svg.append(svgNode("text", { x: 13, y: midY, "text-anchor": "middle", "font-size": 11, transform: `rotate(-90 13 ${midY})` }, "Channel magnitude"));
+  svg.append(svgNode("rect", { x: left, y: top, width: right - left, height: bottom - top, fill: "none", stroke: "#000", "stroke-width": 0.8 }));
 
   const path = values => values.map((v, k) => `${k ? "L" : "M"}${x(k).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-  const trueLine = svgNode("path", { d: path(channel.true.map(abs)), fill: "none", stroke: GREY, "stroke-width": 3, opacity: 0 });
-  const estimate = svgNode("path", { d: path(channel.standard.map(abs)), fill: "none", stroke: "#000", "stroke-width": 1.6, "stroke-dasharray": "5 3", opacity: 0 });
-  const fit = svgNode("path", {
-    d: channel.pilot_sc.map((k, i) => `${i ? "L" : "M"}${x(k).toFixed(1)},${y(abs(channel.fit[i])).toFixed(1)}`).join(" "),
-    fill: "none", stroke: BLUE, "stroke-width": 1.2, opacity: 0,
-  });
-  const pilots = svgNode("g");
+  const trueLine = svgNode("path", { d: path(channel.true.map(abs)), fill: "none", stroke: GREY, "stroke-width": 3.2, opacity: 0 });
+  const ghost = svgNode("path", { d: path(channel.standard.map(abs)), fill: "none", stroke: "#000", "stroke-width": 1.2, "stroke-dasharray": "5 3", opacity: 0 });
+  const estimate = svgNode("path", { d: path(channel.standard.map(abs)), fill: "none", stroke: "#000", "stroke-width": 1.8, "stroke-dasharray": "5 3", opacity: 0 });
+  const pilots = svgNode("g", { opacity: 0 });
+  let above = 0;
   const dots = channel.pilot_sc.map((k, i) => {
     const jammed = channel.pilot_jammed[i];
-    const dot = svgNode("circle", { cx: x(k), cy: y(abs(channel.ls[i])), r: 3, fill: jammed ? RED : "#fff", stroke: jammed ? RED : BLUE, "stroke-width": 1.2, opacity: 0 });
+    const v = abs(channel.ls[i]);
+    const style = { fill: jammed ? RED : "#fff", stroke: jammed ? RED : BLUE, "stroke-width": 1.2 };
+    let dot;
+    if (v > ymax) {
+      above++;
+      const cx = x(k);
+      dot = svgNode("path", { d: `M${cx - 3.5},${top + 7} L${cx + 3.5},${top + 7} L${cx},${top + 1} Z`, ...style });
+    } else {
+      dot = svgNode("circle", { cx: x(k), cy: y(v), r: 3, ...style });
+    }
     pilots.append(dot);
     return dot;
   });
-  svg.append(trueLine, fit, estimate, pilots);
-
-  let bars = [];
-  if (residual) {
-    const rTop = 238;
-    const rBottom = 305;
-    const values = channel.residual_prb.map(v => 10 * Math.log10(Math.max(v, 1e-3)));
-    const thresholds = channel.threshold_prb.map(v => 10 * Math.log10(v));
-    const lo = -5;
-    const hi = Math.max(15, Math.ceil(Math.max(...values) / 5) * 5);
-    const ry = v => rBottom - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo) * (rBottom - rTop);
-    const barGroup = svgNode("g", { opacity: 0, class: "bars" });
-    barGroup.append(svgNode("text", { x: left, y: rTop - 8, "font-size": 10 }, "Pilot residual per PRB (dB), dashed: 1% threshold in noise"));
-    barGroup.append(svgNode("line", { x1: left, x2: right, y1: rBottom, y2: rBottom, stroke: "#000", "stroke-width": 0.7 }));
-    bars = values.map((v, b) => {
-      const jammed = channel.pilot_jammed.some((j, i) => j && Math.floor(channel.pilot_sc[i] / 12) === b);
-      const bx = x(b * 12) - 2;
-      const bw = x(b * 12 + 11) - x(b * 12) + 4;
-      const rect = svgNode("rect", { x: bx, y: rBottom, width: bw, height: 0, fill: jammed ? RED : "#bbb", "data-y": ry(v) });
-      rect.append(svgNode("title", {}, `PRB ${start + b}: ${v.toFixed(1)} dB`));
-      barGroup.append(rect);
-      barGroup.append(svgNode("line", { x1: bx - 1, x2: bx + bw + 1, y1: ry(thresholds[b]), y2: ry(thresholds[b]), stroke: "#000", "stroke-width": 1, "stroke-dasharray": "3 2" }));
-      return rect;
-    });
-    svg.append(barGroup);
-    bars.group = barGroup;
-    bars.bottom = rBottom;
-  }
-  return { svg, trueLine, estimate, fit, dots, bars, path, channel };
+  const aboveNote = svgNode("text", { x: right - 4, y: top - 7, "text-anchor": "end", "font-size": 10, fill: "#555", opacity: 0 },
+    above ? `${above} pilot estimates above ${ymax.toFixed(1)}: triangles at the top` : "");
+  svg.append(trueLine, ghost, pilots, estimate, aboveNote);
+  return { svg, trueLine, ghost, estimate, pilots, dots, aboveNote, path };
 }
 
-function morphPath(panel, from, to) {
-  const a = from.map(abs);
-  const b = to.map(abs);
-  return tween(1400, t => panel.estimate.setAttribute("d", panel.path(a.map((v, k) => v + (b[k] - v) * t))));
+// Power, residual and EVM of the allocation as three small maps, and the U-Net map, in a 2 x 2
+// layout; each map is outlined where the jammer was.
+function cluesPanel(slot, numbers) {
+  const { width, height } = BOX;
+  const [start, count] = slot.metadata.alloc;
+  const cols = slot.grids.allocation[0].length;
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, class: "viz", role: "img",
+    "aria-label": "The three measurements per cell and the U-Net map" });
+  const panels = [
+    ["power_db", "Power P", numbers.power_db],
+    ["residual_db", "Pilot residual R", numbers.residual_db],
+    ["evm_db", "EVM E", numbers.evm_db],
+    ["map", "→ U-Net map", "blue: flagged, red outline: jammed"],
+  ];
+  const pw = width / 2;
+  const ph = height / 2;
+  const cw = (pw - 24) / cols;
+  const ch = (ph - 48) / count;
+  const groups = {};
+  panels.forEach(([key, title, note], i) => {
+    const ox = (i % 2) * pw + 12;
+    const oy = Math.floor(i / 2) * ph + 4;
+    const g = svgNode("g", { opacity: key === "map" ? 0 : 1 });
+    g.append(svgNode("text", { x: ox, y: oy + 13, "font-size": 12, "font-weight": 600 }, title));
+    const values = key === "map" ? null : slot.grids[key];
+    const scale = values ? featureScale(values.slice(start, start + count)) : null;
+    for (let prb = start; prb < start + count; prb++) {
+      for (let s = 0; s < cols; s++) {
+        const x = ox + s * cw;
+        const y = oy + 20 + (start + count - 1 - prb) * ch;
+        let fill = "#f2f2f2";
+        if (key === "map") fill = slot.detectors.fused.decisions[prb][s] ? BLUE : "#dedede";
+        else if (Number.isFinite(values[prb][s])) fill = heatColor(values[prb][s], scale);
+        g.append(svgNode("rect", { x, y, width: cw, height: ch, fill, stroke: "#fff", "stroke-width": 0.4 }));
+        if (slot.grids.truth[prb][s]) {
+          g.append(svgNode("rect", { x: x + 0.4, y: y + 0.4, width: cw - 0.8, height: ch - 0.8, fill: "none", stroke: RED, "stroke-width": 0.9 }));
+        }
+      }
+    }
+    g.append(svgNode("text", { x: ox, y: oy + 20 + count * ch + 13, "font-size": 10, fill: "#444" }, note));
+    groups[key] = g;
+    svg.append(g);
+  });
+  return { svg, groups };
 }
 
-function stepper(host, steps, { autoplay = true, param = null } = {}) {
+// Back / Play / Next, numbered steps and (optionally) a bar of stages above the panels. Each
+// step's `render(animate, from)` draws its complete state; ?<param>=N opens step N.
+function stepper(host, steps, { param, stages = null, dwell = 5200 } = {}) {
   const caption = host.querySelector(".anim-caption");
   const prev = host.querySelector(".anim-prev");
   const next = host.querySelector(".anim-next");
   const play = host.querySelector(".anim-play");
   const dots = host.querySelector(".anim-dots");
+  const stageBar = host.querySelector(".anim-stages");
+  let index = -1;
+  let timer = null;
   const buttons = steps.map((step, i) => {
     const b = element("button", String(i + 1));
     b.type = "button";
@@ -192,21 +143,25 @@ function stepper(host, steps, { autoplay = true, param = null } = {}) {
     return b;
   });
   dots.replaceChildren(...buttons);
-  let index = -1;
-  let timer = null;
-  let busy = Promise.resolve();
+  const stageItems = (stages ?? []).map((name, s) => {
+    const li = element("li");
+    const b = element("button", name);
+    b.type = "button";
+    b.addEventListener("click", () => { stop(); go(steps.findIndex(step => step.stage === s)); });
+    li.append(b);
+    return li;
+  });
+  if (stageBar) stageBar.replaceChildren(...stageItems);
 
   async function go(i) {
+    const from = index;
     index = Math.max(0, Math.min(steps.length - 1, i));
     buttons.forEach((b, k) => b.setAttribute("aria-pressed", String(k === index)));
+    stageItems.forEach((li, s) => li.classList.toggle("current", steps[index].stage === s));
     prev.disabled = index === 0;
     next.disabled = index === steps.length - 1;
     caption.replaceChildren(element("h3", `${index + 1}. ${steps[index].title}`), element("p", steps[index].text));
-    // Earlier steps are shown at once, the current one is animated
-    steps.forEach((step, k) => k < index && step.show(false));
-    for (let k = index + 1; k < steps.length; k++) steps[k].hide?.();
-    busy = steps[index].show(true) ?? Promise.resolve();
-    await busy;
+    await steps[index].render(from === index - 1 && !reduceMotion, from);
   }
   function stop() {
     clearTimeout(timer);
@@ -217,7 +172,7 @@ function stepper(host, steps, { autoplay = true, param = null } = {}) {
     play.textContent = "Pause";
     while (timer !== null && index < steps.length - 1) {
       await go(index + 1);
-      await new Promise(resolve => { timer = setTimeout(resolve, 2600); });
+      await new Promise(resolve => { timer = setTimeout(resolve, dwell); });
     }
     stop();
   }
@@ -225,180 +180,224 @@ function stepper(host, steps, { autoplay = true, param = null } = {}) {
   next.addEventListener("click", () => { stop(); go(index + 1); });
   play.addEventListener("click", () => {
     if (timer !== null) return stop();
-    if (index >= steps.length - 1) index = -1;
+    if (index >= steps.length - 1) go(0);
     timer = 0;
     run();
   });
-  // ?step=N (or the given parameter) opens the animation at step N, e.g. to link a step in a talk
   const linked = Number(new URLSearchParams(location.search).get(param));
-  if (param && linked >= 1) {
-    steps.slice(0, linked - 1).forEach(step => step.show(false));
-    go(linked - 1);
-    return;
-  }
-  go(0);
-  if (autoplay && !reduceMotion) {
+  go(linked >= 1 ? linked - 1 : 0);
+  if (!(linked >= 1) && !reduceMotion) {
+    // Play once when the animation first comes into view
     let started = false;
     new IntersectionObserver((entries, observer) => {
       if (started || !entries.some(e => e.isIntersecting)) return;
       started = true;
       observer.disconnect();
       timer = 0;
-      setTimeout(run, 800);
-    }, { threshold: 0.5 }).observe(host);
+      setTimeout(run, 900);
+    }, { threshold: 0.6 }).observe(host.querySelector(".anim-stage"));
   }
 }
 
-const fade = (node, to, ms = 500) => {
-  const from = Number(node.getAttribute("opacity") ?? 1);
-  return tween(ms, t => node.setAttribute("opacity", String(from + (to - from) * t)));
-};
+function legendItems(items) {
+  const list = element("ul", null, "legend");
+  for (const [className, label, style] of items) {
+    const li = element("li");
+    const mark = element("i", null, `swatch ${className}`);
+    if (style) Object.assign(mark.style, style);
+    mark.setAttribute("aria-hidden", "true");
+    li.append(mark, label);
+    list.append(li);
+  }
+  return list;
+}
 
 async function methodAnimation(host) {
-  const slot = await loadCase("walkthrough_flip");
+  const slot = await loadCase("partial_flip");
   const channel = slot.channel;
-  if (!channel) throw new Error("The recorded slot has no channel data yet.");
-  const grid = gridPanel(slot);
-  const plot = channelPanel(slot, channel);
-  const canvas = element("canvas", null, "anim-canvas");
-  canvas.hidden = true;
-  const crc = element("p", null, "crc-line");
-  host.querySelector(".anim-left").replaceChildren(grid.svg);
-  host.querySelector(".anim-right").replaceChildren(plot.svg, canvas, crc);
-  const view = constellationCanvas(canvas, 2);
-  const prbs = affectedPRBs(slot);
-  const before = symbols(slot, "standard", prbs);
-  const after = symbols(slot, "fused_soft", prbs);
-  const showPlot = () => { plot.svg.style.display = ""; canvas.hidden = true; crc.replaceChildren(); };
-  const featureCycle = async animate => {
-    const order = ["power_db", "residual_db", "evm_db"];
-    const names = { power_db: "power P", residual_db: "pilot residual R", evm_db: "EVM E" };
-    if (!animate) {
-      order.forEach(k => grid.features[k].setAttribute("opacity", 0));
-      return;
-    }
-    for (const key of order) {
-      grid.label.textContent = names[key];
-      await fade(grid.features[key], 1, 450);
-      await new Promise(r => setTimeout(r, reduceMotion ? 0 : 700));
-      await fade(grid.features[key], 0, 350);
-    }
-    grid.label.textContent = "";
-  };
+  if (!channel) throw new Error("The recorded slot has no channel data.");
+  const [start, count] = slot.metadata.alloc;
+  const dmrs = slot.metadata.config.dmrs_symbol;
+  const truth = slot.grids.truth;
+  const flags = slot.detectors.fused.decisions;
+  // The allocation's cells [prb, symbol, jammed] for which pick(prb, symbol, jammed) holds
+  const cellsWhere = pick => Array.from({ length: count }, (_, b) => start + b)
+    .flatMap(prb => truth[prb].map((t, s) => [prb, s, t])).filter(([p, s, t]) => pick(p, s, t));
 
-  // Numbers the step texts quote, taken from the slot itself
-  const [allocStart, allocCount] = slot.metadata.alloc;
-  const jammedCells = slot.grids.truth.flat().filter(Boolean).length;
-  const flagged = slot.detectors.fused.decisions.flat().filter(Boolean).length;
-  const hits = slot.grids.truth.flatMap((row, p) => row.map((t, s) => t && slot.detectors.fused.decisions[p][s])).filter(Boolean).length;
-  const mapText = hits === jammedCells && flagged === jammedCells
-    ? `Here the map matches the jammer exactly: all ${jammedCells} jammed pilot cells, and none of the data cells whose EVM rose only because of the wrong channel estimate.`
-    : `Here the map flags ${hits} of the ${jammedCells} jammed cells and ${flagged - hits} other cells; the data cells whose EVM rose only because of the wrong channel estimate are mostly left alone.`;
-  // How much closer the map-aware estimate gets on the jammed PRBs (squared error against the
-  // true channel), quoted by step 7
-  const dmrsSym = slot.metadata.config.dmrs_symbol;
-  const jammedSc = slot.grids.truth.slice(allocStart, allocStart + allocCount)
-    .flatMap((row, b) => (row[dmrsSym] ? Array.from({ length: 12 }, (_, k) => 12 * b + k) : []));
-  const errBefore = sqErr(channel.standard, channel.true, jammedSc);
-  const errAfter = sqErr(channel.map, channel.true, jammedSc);
-  const cut = Math.round(100 * (1 - errAfter / errBefore));
+  // Numbers the step texts quote, all taken from the slot
+  const jammedPRBs = Array.from({ length: count }, (_, b) => start + b).filter(p => truth[p].some(Boolean));
+  const jammedCells = cellsWhere((p, s, t) => t).length;
+  const flagged = cellsWhere((p, s) => flags[p][s]).length;
+  const hits = cellsWhere((p, s, t) => t && flags[p][s]).length;
+  const before = symbols(slot, "standard");
+  const after = symbols(slot, "fused_soft");
+  const trust = { standard: cellTrust(before), map: cellTrust(after) };
+  const llr = (points, jammed) => mean(points.filter(p => p.jammed === jammed).map(p => p.llr));
+  const featureNumbers = {};
+  for (const key of ["power_db", "residual_db", "evm_db"]) {
+    const j = median(cellsWhere((p, s, t) => t).map(([p, s]) => slot.grids[key][p][s]));
+    const c = median(cellsWhere((p, s, t) => !t).map(([p, s]) => slot.grids[key][p][s]));
+    featureNumbers[key] = { jammed: j, clean: c, text: `median: jammed ${dB(j)}, clean ${dB(c)}` };
+  }
+  const jammedSc = jammedPRBs.flatMap(p => (truth[p][dmrs] ? Array.from({ length: 12 }, (_, k) => 12 * (p - start) + k) : []));
+  const cleanSc = Array.from({ length: 12 * count }, (_, k) => k).filter(k => !jammedSc.includes(k));
+  const errStd = sqErr(channel.standard, channel.true, jammedSc);
+  const errStdClean = sqErr(channel.standard, channel.true, cleanSc);
+  const errMap = sqErr(channel.map, channel.true, jammedSc);
+  const cut = Math.round(100 * (1 - errMap / errStd));
+  const ratio = Math.round(errStd / errStdClean);
+  const flaggedPilot = channel.pilot_sc.map(k => Boolean(flags[start + Math.floor(k / 12)][dmrs]));
+  const batch = slot.metadata.batch_crc;
+  const range = jammedPRBs.length ? `${jammedPRBs[0]}–${jammedPRBs.at(-1)}` : "none";
+  const share = `${jammedPRBs.length} of the user's ${count} PRBs`;
+  const jammedShare = shareText(jammedPRBs.length / count);
+  const cleanShare = shareText(1 - jammedPRBs.length / count);
+
+  // The panels
+  const grid = allocationGrid(slot, { trust, label: "The user's resource grid" });
+  const plot = channelPanel(slot, channel, { jammedPRBs });
+  const clues = cluesPanel(slot, {
+    power_db: featureNumbers.power_db.text,
+    residual_db: featureNumbers.residual_db.text,
+    evm_db: featureNumbers.evm_db.text,
+  });
+  const canvas = element("canvas", null, "viz");
+  canvas.setAttribute("role", "img");
+  const view = constellationView(canvas, 2.5);
+  const crc = element("p", null, "crc-line");
+  const right = host.querySelector(".anim-right");
+  host.querySelector(".anim-left").replaceChildren(grid.svg);
+  right.replaceChildren(plot.svg, clues.svg, canvas);
+  const legend = host.querySelector(".anim-legend");
+  let shownPoints = null;
+  let token = 0;
+
+  // A step's state: grid layers, which right-hand view, and what that view shows
+  const states = [
+    { stage: 0, jam: 1, view: "channel", trueLine: 1 },
+    { stage: 1, jam: 1, view: "channel", trueLine: 1, pilots: "all", estimate: "standard" },
+    { stage: 1, jam: 1, trust: "standard", view: "points", points: "standard", crc: ["standard"] },
+    { stage: 2, jam: 1, view: "clues" },
+    { stage: 3, jam: 1, flags: 1, view: "clues", map: 1 },
+    { stage: 4, jam: 1, flags: 1, view: "channel", trueLine: 1, pilots: "flagged faded", estimate: "map", ghost: 1 },
+    { stage: 4, jam: 1, flags: 1, trust: "map", view: "points", points: "map" },
+    { stage: 4, jam: 1, flags: 1, trust: "map", view: "points", points: "map", crc: ["standard", "fused_soft"] },
+  ];
+
+  async function apply(i, animate, from) {
+    const s = states[i];
+    const was = states[from] ?? {};
+    const mine = ++token;
+    const alive = () => mine === token;
+    const fade = (node, to, ms) => (animate ? fadeTo(node, to, ms, alive) : (node.setAttribute("opacity", to), null));
+    const jobs = [];
+    // Grid
+    jobs.push(fade(grid.layers.jam, s.jam ? 1 : 0));
+    jobs.push(fade(grid.layers.flags, s.flags ? 1 : 0, 700));
+    for (const name of Object.keys(trust)) jobs.push(fade(grid.layers[`trust_${name}`], s.trust === name ? 1 : 0, 900));
+    // Right-hand view
+    plot.svg.style.visibility = s.view === "channel" ? "visible" : "hidden";
+    clues.svg.style.visibility = s.view === "clues" ? "visible" : "hidden";
+    canvas.style.visibility = s.view === "points" ? "visible" : "hidden";
+    if (s.view === "channel") {
+      jobs.push(fade(plot.trueLine, s.trueLine ? 1 : 0));
+      plot.pilots.setAttribute("opacity", s.pilots ? 1 : 0);
+      plot.aboveNote.setAttribute("opacity", s.pilots ? 1 : 0);
+      plot.dots.forEach((dot, k) => {
+        const faded = s.pilots === "flagged faded" && flaggedPilot[k];
+        const target = faded ? 0.15 : 1;
+        if (animate && was.pilots && was.pilots !== s.pilots) jobs.push(fadeTo(dot, target, 700, alive));
+        else if (animate && !was.pilots && s.pilots) {
+          dot.setAttribute("opacity", 0);
+          jobs.push(new Promise(r => setTimeout(r, k * 10)).then(() => fadeTo(dot, target, 250, alive)));
+        } else dot.setAttribute("opacity", target);
+      });
+      plot.ghost.setAttribute("opacity", s.ghost ? 0.45 : 0);
+      plot.estimate.setAttribute("opacity", s.estimate ? 1 : 0);
+      const red = s.estimate === "map";
+      plot.estimate.setAttribute("stroke", red ? RED : "#000");
+      plot.estimate.setAttribute("stroke-dasharray", red ? "" : "5 3");
+      const target = (red ? channel.map : channel.standard).map(abs);
+      if (animate && red && was.estimate === "standard") {
+        const a = channel.standard.map(abs);
+        jobs.push(tween(1500, t => plot.estimate.setAttribute("d", plot.path(a.map((v, k) => v + (target[k] - v) * t))), alive));
+      } else plot.estimate.setAttribute("d", plot.path(target));
+    }
+    if (s.view === "clues") {
+      jobs.push(fade(clues.groups.map, s.map ? 1 : 0, 700));
+    }
+    if (s.view === "points") {
+      const to = s.points === "map" ? after : before;
+      if (animate && was.view === "points" && shownPoints && shownPoints !== to) {
+        const a = shownPoints;
+        jobs.push(tween(1700, t => drawFrame(view, a, to, t), alive));
+      } else drawFrame(view, to, to, 0);
+      shownPoints = to;
+      canvas.setAttribute("aria-label", `Equalized data symbols of the user's ${count} PRBs, ${s.points === "map" ? "decoded with the jamming map" : "standard receiver"}`);
+    }
+    // Legend and CRC line under the panels
+    const items = [["alloc", "data cell"], ["pilot", "pilot cell (symbol 2)"], ["truth", "jammed"]];
+    if (s.flags) items.push(["flag-dot", "flagged by the U-Net"]);
+    if (s.trust) items.push(["trust", "darker: decoder trusts the cell's bits more"]);
+    if (s.view === "channel") {
+      items.push(["line grey-line", "true channel"]);
+      if (s.pilots) items.push(["circle", "clean pilot"], ["dot", "jammed pilot"]);
+      if (s.estimate === "standard") items.push(["dash", "standard estimate"]);
+      if (s.estimate === "map") items.push(["dash faint", "standard estimate"], ["line red-line", "estimate with the map"]);
+    }
+    if (s.view === "points") items.push(["dot blue-dot", "clean cell"], ["dot", "jammed cell (fainter: less trusted)"]);
+    const crcLine = element("p", null, "crc-line");
+    if (s.crc) {
+      s.crc.forEach((name, k) => {
+        if (k) crcLine.append("  →  ");
+        crcLine.append(name === "standard" ? "Standard receiver: " : "With the jamming map: ", crcBadge(slot.receivers[name].crc));
+      });
+    }
+    legend.replaceChildren(legendItems(items), crcLine);
+    await Promise.all(jobs.filter(Boolean));
+  }
+
   const steps = [
     {
-      title: "A jammer hits only the pilots",
-      text: `The user sends one slot on PRBs ${allocStart} to ${allocStart + allocCount - 1}. The jammer transmits only on the pilot (DMRS) symbol of ${jammedCells} PRBs, outlined in red. The grey line is the channel the receiver has to estimate.`,
-      show: animate => { showPlot(); grid.jam.setAttribute("opacity", 1); grid.svg.classList.toggle("pulsing", animate); return animate ? fade(plot.trueLine, 1) : plot.trueLine.setAttribute("opacity", 1); },
-      hide: () => { grid.jam.setAttribute("opacity", 0); plot.trueLine.setAttribute("opacity", 0); },
+      title: "One uplink slot, and a jammer on part of it",
+      text: `The user sends one slot on PRBs ${start}–${start + count - 1}: ${count} PRBs (frequency) by 14 OFDM symbols (time). Symbol ${dmrs} carries pilots, symbols the receiver knows and uses to learn the channel (grey line, right); the other 13 symbols carry data. The jammer sends noise on every symbol of PRBs ${range} (red): ${share}, so ${jammedShare} of the pilots and ${jammedShare} of the data cells.`,
     },
     {
-      title: "Each pilot gives one noisy look at the channel",
-      text: "Dividing each received pilot by the known pilot symbol gives a least-squares estimate. Clean pilots (open circles) sit near the channel; the jammed ones (red) scatter far from it.",
-      show: animate => {
-        grid.svg.classList.remove("pulsing");
-        if (!animate) return plot.dots.forEach(d => d.setAttribute("opacity", 1));
-        return Promise.all(plot.dots.map((d, i) => new Promise(r => setTimeout(() => fade(d, 1, 250).then(r), reduceMotion ? 0 : i * 12))));
-      },
-      hide: () => plot.dots.forEach(d => d.setAttribute("opacity", 0)),
+      title: "Standard receiver: the jammed pilots pull the channel estimate",
+      text: `Dividing each received pilot by the known pilot symbol gives one look at the channel. Clean pilots (open circles) sit on it; jammed pilots (red) scatter. The standard receiver interpolates between all of them (dashed), so on PRBs ${range} its squared error is ${ratio} times its error on the clean PRBs.`,
     },
     {
-      title: "The standard receiver trusts every pilot",
-      text: "Interpolating between all pilots, it follows the jammed ones (dashed line). The data symbols of those PRBs are then equalized with a wrong channel, so the damage spreads to symbols the jammer never touched.",
-      show: animate => (animate ? fade(plot.estimate, 1, 700) : plot.estimate.setAttribute("opacity", 1)),
-      hide: () => { plot.estimate.setAttribute("opacity", 0); plot.estimate.setAttribute("d", plot.path(channel.standard.map(abs))); },
+      title: "Standard receiver: every bit is trusted, and the block fails",
+      text: `It equalizes the data and passes each bit to the decoder with a confidence (darker cells, left). The jammed cells' symbols are scattered (red points), yet their bits get almost the confidence of clean ones: mean |LLR| ${llr(before, true).toFixed(0)} against ${llr(before, false).toFixed(0)}. The decoder is misled and the CRC check fails.`,
     },
     {
-      title: "A smooth channel cannot explain the jammed pilots",
-      text: "A real channel varies slowly across frequency (its delays are short). Fitting such a channel (blue) to the pilots and measuring what is left gives the residual: about 0 dB in noise alone, far higher where the jammer was.",
-      show: animate => {
-        plot.fit.setAttribute("opacity", 1);
-        plot.bars.group.setAttribute("opacity", 1);
-        const grow = t => plot.bars.forEach(b => {
-          const target = Number(b.getAttribute("data-y"));
-          const yv = plot.bars.bottom + (target - plot.bars.bottom) * t;
-          b.setAttribute("y", Math.min(yv, plot.bars.bottom));
-          b.setAttribute("height", Math.abs(plot.bars.bottom - yv));
-        });
-        return animate ? tween(900, grow) : grow(1);
-      },
-      hide: () => { plot.fit.setAttribute("opacity", 0); plot.bars.group.setAttribute("opacity", 0); },
+      title: "Three clues per cell",
+      text: `From the received slot, its pilots and the standard receiver's equalized symbols, the receiver measures for every cell: the received power P (signal plus anything else, relative to the noise), on the pilot symbol the residual R (how far the pilots of a PRB are from a smooth channel), and on the data symbols the EVM E (how far the equalized symbols are from the four QPSK points). On the jammed cells the power rises by only ${(featureNumbers.power_db.jammed - featureNumbers.power_db.clean).toFixed(1)} dB, the residual by ${(featureNumbers.residual_db.jammed - featureNumbers.residual_db.clean).toFixed(0)} dB and the EVM by ${(featureNumbers.evm_db.jammed - featureNumbers.evm_db.clean).toFixed(0)} dB (medians).`,
     },
     {
-      title: "Power, residual and EVM go into a small U-Net",
-      text: "For every cell the receiver measures the received power, the pilot residual and the error of the equalized data symbols (EVM). The U-Net, 66,553 parameters, reads the three maps of the whole slot together.",
-      show: animate => featureCycle(animate),
+      title: "A small U-Net turns the clues into a map",
+      text: `A U-Net with 66,553 parameters reads the three maps of the whole slot and scores each cell. Cells scoring above a cutoff, set so that 1% of clean cells are flagged, are marked (blue). ${hits === jammedCells && flagged === jammedCells ? `Here it flags all ${jammedCells} jammed cells and no other cell.` : `Here it flags ${hits} of the ${jammedCells} jammed cells and ${flagged - hits} other cells.`}`,
     },
     {
-      title: "The U-Net marks the jammed cells",
-      text: `Blue cells are flagged. ${mapText}`,
-      show: animate => {
-        if (!animate) return grid.flags.setAttribute("opacity", 1);
-        grid.flags.setAttribute("opacity", 1);
-        const rects = [...grid.flags.children];
-        rects.forEach(r => r.setAttribute("opacity", 0));
-        return Promise.all(rects.map((r, i) => new Promise(res => setTimeout(() => fade(r, 1, 300).then(res), i * 120))));
-      },
-      hide: () => { grid.flags.setAttribute("opacity", 0); [...grid.flags.children].forEach(r => r.setAttribute("opacity", 1)); },
+      title: "Decoding again: the channel from the clean pilots",
+      text: `The receiver decodes the same buffered samples again, now with the map. Pilots in flagged cells get a noise variance scaled up by their residual, so they barely count (faded), and the estimate across PRBs ${range} is interpolated from the clean pilots around them (red line). Its squared error there falls by ${cut}%.`,
     },
     {
-      title: "Decoding again, the flagged pilots count less",
-      text: `The receiver processes the same buffered samples again. Each flagged pilot's noise variance is multiplied by its residual, so those pilots pull less on the estimate (red line). On the jammed PRBs its squared error against the channel falls by ${cut}%; a missed PRB and the strongest jammed pilots still pull it off in places.`,
-      show: animate => {
-        showPlot();
-        plot.estimate.setAttribute("stroke", RED);
-        plot.estimate.setAttribute("stroke-dasharray", "");
-        const jammed = plot.dots.filter((_, i) => channel.pilot_jammed[i]);
-        if (!animate) {
-          jammed.forEach(d => d.setAttribute("opacity", 0.2));
-          plot.estimate.setAttribute("d", plot.path(channel.map.map(abs)));
-          return;
-        }
-        return Promise.all([...jammed.map(d => fade(d, 0.2, 700)), morphPath(plot, channel.standard, channel.map)]);
-      },
-      hide: () => {
-        plot.estimate.setAttribute("stroke", "#000");
-        plot.estimate.setAttribute("stroke-dasharray", "5 3");
-        plot.dots.forEach((d, i) => channel.pilot_jammed[i] && d.getAttribute("opacity") !== "0" && d.setAttribute("opacity", 1));
-      },
+      title: "Decoding again: jammed data bits count less",
+      text: `For each flagged data cell the receiver adds the jammer power it measured there to the noise variance. Those bits reach the decoder with almost no confidence (mean |LLR| ${llr(after, true).toFixed(1)}, against ${llr(after, false).toFixed(0)} for clean bits; the jammed cells turn light on the left), so the decoder fills them in from the clean ${cleanShare} of the block.`,
     },
     {
-      title: "The symbols tighten and the block decodes",
-      text: "The equalized data symbols of the jammed PRBs move back to the four QPSK points. The standard receiver failed its CRC on this slot; decoding with the map passes.",
-      show: animate => {
-        plot.svg.style.display = "none";
-        canvas.hidden = false;
-        crc.replaceChildren("Standard receiver: ", crcBadge(slot.receivers.standard.crc));
-        const done = () => crc.replaceChildren("Standard: ", crcBadge(slot.receivers.standard.crc), "  →  with the map: ", crcBadge(slot.receivers.fused_soft.crc));
-        if (!animate) {
-          drawFrame(view, before, after, 1, 2);
-          return done();
-        }
-        drawFrame(view, before, after, 0, 2);
-        return new Promise(r => setTimeout(r, 700)).then(() => tween(1600, t => drawFrame(view, before, after, t, 2))).then(done);
-      },
-      hide: () => showPlot(),
+      title: "The block decodes",
+      text: `Same received samples, one small network and one more decoding: the CRC passes. Over all ${batch.standard.slots} slots simulated under these conditions, the standard receiver failed ${batch.standard.failures} and the receiver with the map ${batch.fused_soft.failures}.`,
     },
-  ];
-  stepper(host, steps, { param: "step" });
-  host.querySelector(".anim-note").replaceChildren(`${conditions(slot)}. ${selectionText(slot)}`);
+  ].map((step, i) => ({ ...step, stage: states[i].stage, render: (animate, from) => apply(i, animate, from) }));
+
+  stepper(host, steps, {
+    param: "step",
+    stages: ["The slot", "Standard receiver", "Three clues", "U-Net map", "Decoding with the map"],
+  });
+  host.querySelector(".anim-note").replaceChildren(
+    `${conditions(slot)}, partial-band jamming of PRBs ${range}. ${selectionText(slot)}`);
   host.setAttribute("aria-busy", "false");
 }
 
@@ -407,57 +406,67 @@ async function methodAnimation(host) {
 async function aidedAnimation(host) {
   const slot = await loadCase("aided_flip");
   const { channel, passes } = slot;
-  if (!channel || !passes) throw new Error("The recorded slot has no data-aided passes yet.");
-  const plot = channelPanel(slot, channel, { residual: false });
+  if (!channel || !passes) throw new Error("The recorded slot has no data-aided passes.");
+  const [start, width] = slot.metadata.alloc;
+  const plot = channelPanel(slot, channel, { jammedPRBs: Array.from({ length: width }, (_, i) => start + i) });
   plot.trueLine.setAttribute("opacity", 1);
+  plot.pilots.setAttribute("opacity", 1);
+  plot.aboveNote.setAttribute("opacity", 1);
   plot.dots.forEach(d => d.setAttribute("opacity", 0.35));
   plot.estimate.setAttribute("opacity", 1);
   plot.estimate.setAttribute("stroke", RED);
   plot.estimate.setAttribute("stroke-dasharray", "");
-  const canvas = element("canvas", null, "anim-canvas");
-  const crc = element("p", null, "crc-line");
+  const canvas = element("canvas", null, "viz");
+  canvas.setAttribute("role", "img");
   host.querySelector(".anim-left").replaceChildren(plot.svg);
-  host.querySelector(".anim-right").replaceChildren(canvas, crc);
-  const view = constellationCanvas(canvas, 2);
-  const [start, width] = slot.metadata.alloc;
-  const prbs = Array.from({ length: width }, (_, i) => start + i);
+  host.querySelector(".anim-right").replaceChildren(canvas);
+  const view = constellationView(canvas, 2.5);
   // A pass's symbols are stored like a receiver's; build a pseudo-receiver entry per pass
   const passSymbols = passes.map((p, i) => {
     const name = `__pass${i}`;
     slot.receivers[name] = { x_hat: p.x_hat, abs_llr: p.abs_llr ?? slot.receivers.fused_soft.abs_llr, crc: p.crc };
-    return symbols(slot, name, prbs);
+    return symbols(slot, name);
   });
-  let current = 0;
-  const show = async (i, animate) => {
-    const from = current;
-    current = i;
-    const badges = passes.slice(0, i + 1).map((p, k) => {
+  const legend = host.querySelector(".anim-legend");
+  const firstPass = passes.findIndex(p => p.crc);
+  const estimate = i => passes[i].h.map(abs);
+  const errors = passes.map(p => sqErr(p.h, channel.true, Array.from({ length: channel.num_sc }, (_, k) => k)));
+  let token = 0;
+  const render = async (i, animate, from) => {
+    const mine = ++token;
+    const alive = () => mine === token;
+    const crcLine = element("p", null, "crc-line");
+    passes.slice(0, i + 1).forEach((p, k) => {
       const span = element("span", null, "pass-crc");
       span.append(k === 0 ? "first decoding " : `pass ${k} `, crcBadge(p.crc));
-      return span;
+      crcLine.append(span);
     });
-    crc.replaceChildren(...badges);
-    if (!animate) {
-      plot.estimate.setAttribute("d", plot.path(passes[i].h.map(abs)));
-      drawFrame(view, passSymbols[i], passSymbols[i], 0, 2);
+    legend.replaceChildren(legendItems([
+      ["line grey-line", "true channel"], ["dot", "jammed pilot (all of them)"], ["line red-line", "estimate"],
+      ["dot blue-dot", "data symbol"],
+    ]), crcLine);
+    if (!animate || from < 0) {
+      plot.estimate.setAttribute("d", plot.path(estimate(i)));
+      drawFrame(view, passSymbols[i], passSymbols[i], 0);
       return;
     }
+    const a = estimate(from);
+    const b = estimate(i);
     await Promise.all([
-      morphPath(plot, passes[from].h, passes[i].h),
-      tween(1400, t => drawFrame(view, passSymbols[from], passSymbols[i], t, 2)),
+      tween(1400, t => plot.estimate.setAttribute("d", plot.path(a.map((v, k) => v + (b[k] - v) * t))), alive),
+      tween(1400, t => drawFrame(view, passSymbols[from], passSymbols[i], t), alive),
     ]);
   };
-  const firstPass = passes.findIndex(p => p.crc);
   const steps = passes.map((p, i) => ({
     title: i === 0 ? "Every pilot is jammed: the first estimate is poor" : `Pass ${i}: decoded data cells act as pilots`,
     text: i === 0
-      ? "All pilots are red: even down-weighted, they leave the estimate (red line) far from the channel (grey), and the block fails."
+      ? `All pilots are red: even down-weighted, they leave the estimate (red line) far from the channel (grey; mean squared error ${errors[0].toFixed(2)}), and the block fails.`
       : i <= firstPass || firstPass < 0
-        ? `The decoder's soft output says which symbol each data cell carried and how sure it is. These cells join the pilots, the estimate moves towards the channel, and the slot is decoded again${p.crc ? ": the CRC passes." : "."}`
-        : `The block already decoded at pass ${firstPass}, where the receiver would stop. This pass is shown only to watch the estimate settle onto the channel.`,
-    show: animate => show(i, animate),
+        ? `The decoder's soft output says which symbol each data cell probably carried and how sure it is. The cells it is sure of join the pilots, the estimate moves towards the channel (mean squared error ${errors[i].toFixed(2)}), and the slot is decoded again${p.crc ? ": the CRC passes, and the receiver stops here." : "."}`
+        : `The block already decoded at pass ${firstPass}, where the receiver stops. This pass is shown only to watch the estimate settle (mean squared error ${errors[i].toFixed(2)}).`,
+    render: (animate, from) => render(i, animate, from),
   }));
-  stepper(host, steps, { param: "pass" });
+  stepper(host, steps, { param: "pass", dwell: 4200 });
   host.querySelector(".anim-note").replaceChildren(`${conditions(slot)}, every pilot of the allocation jammed. ${selectionText(slot)}`);
   host.setAttribute("aria-busy", "false");
 }

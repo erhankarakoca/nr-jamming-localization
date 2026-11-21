@@ -45,6 +45,7 @@ class Case:
 
 
 _PILOT = Case("pilot", "Pilot jamming, +3 dB", "pilot", 3, include_channel=True)
+_PARTIAL = Case("partial", "Partial-band jamming, +3 dB", "partial", 3)
 CASES = {
     case.name: case
     for case in (
@@ -52,7 +53,7 @@ CASES = {
         _PILOT,
         Case("pilot_weak", "Weak pilot jamming, −12 dB", "pilot", -12),
         Case("data", "Data jamming, +3 dB", "data", 3),
-        Case("partial", "Partial-band jamming, +3 dB", "partial", 3),
+        _PARTIAL,
         Case(
             "hopping",
             "Hopping jammer, +9 dB",
@@ -92,11 +93,14 @@ CASES = {
             batch_size=1,
             selection_rule="paper_realization",
         ),
+        # The overview's walkthrough (and the paper's Fig. 2): the jammer hits pilots and data, so
+        # both uses of the map show; the same batch as "partial", first slot the map recovers
         replace(
-            _PILOT,
-            name="walkthrough_flip",
-            title="Pilot jamming with a recovered CRC",
+            _PARTIAL,
+            name="partial_flip",
+            title="Partial-band jamming with a recovered CRC",
             selection_rule="first_crc_flip",
+            include_channel=True,
         ),
         Case(
             "aided_flip",

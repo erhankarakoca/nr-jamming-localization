@@ -485,6 +485,24 @@ def export(cases):
             "git_commit": commit,
             "git_dirty": dirty,
             "created_at": datetime.now(UTC).isoformat(),
-            "cases": entries,
+            "cases": _merged_entries(directory, entries),
         },
     )
+
+
+def _merged_entries(directory: Path, entries: list[dict]) -> list[dict]:
+    """The new entries plus the cases an earlier export left in ``directory``, so exporting a few
+    cases does not drop the others from the manifest (each case file records its own commit).
+    Registered cases come first, in registry order; an old file whose case is no longer
+    registered is left out."""
+    from jamloc.site.cases import CASES
+
+    previous = {}
+    manifest = directory / "manifest.json"
+    if manifest.is_file():
+        for entry in json.loads(manifest.read_text(encoding="utf-8")).get("cases", []):
+            if entry.get("name") in CASES and (directory / entry.get("file", "")).is_file():
+                previous[entry["name"]] = entry
+    fresh = {entry["name"]: entry for entry in entries}
+    merged = [fresh.get(name) or previous[name] for name in CASES if name in fresh | previous]
+    return merged + [entry for name, entry in fresh.items() if name not in CASES]

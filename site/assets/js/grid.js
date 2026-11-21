@@ -1,5 +1,5 @@
-import { batchText, conditions, detectors, loadCase, loadManifest, slotDetails } from "./data.js";
-import { affectedPRBs, comparisonReceivers, constellations, crcList } from "./constellation.js";
+import { batchText, calibrationText, conditions, detectors, loadCase, loadManifest, selectionText } from "./data.js";
+import { comparisonReceivers, constellations, crcList } from "./constellation.js";
 import { element, options, reportError } from "./nav.js";
 
 export const FEATURES = {
@@ -62,7 +62,7 @@ export function drawGrid(slot, {
   const cols = grids.allocation[0].length;
   const dmrs = metadata.config.dmrs_symbol;
   const dx = 20;
-  const dy = compact ? 6 : 8;
+  const dy = onSelect ? 10 : (compact ? 6 : 8);
   const x0 = 28;
   const y0 = 14;
   const width = x0 + dx * cols + 4;
@@ -73,15 +73,17 @@ export function drawGrid(slot, {
     viewBox: `0 0 ${width} ${height}`, class: "visual-grid",
     role: onSelect ? "group" : "img", "aria-label": label,
   });
-  const defs = svgNode("defs");
-  const hatch = svgNode("pattern", {
-    id: patternId, width: 5, height: 5, patternUnits: "userSpaceOnUse",
-    patternTransform: "rotate(45)",
-  });
-  hatch.append(svgNode("rect", { width: 5, height: 5, fill: "#fff" }));
-  hatch.append(svgNode("line", { x1: 1, x2: 1, y1: 0, y2: 5, stroke: "#999", "stroke-width": 0.6 }));
-  defs.append(hatch);
-  svg.append(defs);
+  if (!onSelect) {
+    const defs = svgNode("defs");
+    const hatch = svgNode("pattern", {
+      id: patternId, width: 5, height: 5, patternUnits: "userSpaceOnUse",
+      patternTransform: "rotate(45)",
+    });
+    hatch.append(svgNode("rect", { width: 5, height: 5, fill: "#fff" }));
+    hatch.append(svgNode("line", { x1: 1, x2: 1, y1: 0, y2: 5, stroke: "#999", "stroke-width": 0.6 }));
+    defs.append(hatch);
+    svg.append(defs);
+  }
 
   for (let s = 0; s < cols; s++) {
     const x = x0 + dx * s + dx / 2;
@@ -110,15 +112,25 @@ export function drawGrid(slot, {
       const value = values?.[prb][s];
       let fill = allocated ? "#d9d9d9" : "#fff";
       if (scale && Number.isFinite(value)) fill = heatColor(value, scale);
-      if (unscored) fill = `url(#${patternId})`;
+      if (unscored && !onSelect) fill = `url(#${patternId})`;
       if (hit && injected) fill = RED;
-      if (flag && !values && !injected) fill = BLUE;
+      if (flag && !values && !injected && !onSelect) fill = BLUE;
 
       const cell = svgNode("g", { opacity: highlighted ? 1 : 0.4 });
       cell.append(svgNode("rect", {
         x, y, width: dx, height: dy, fill, stroke: "#b3b3b3", "stroke-width": 0.3,
       }));
-      if (flag && (values || injected)) {
+      if (unscored && onSelect) {
+        cell.append(svgNode("line", {
+          x1: x + dx / 2 - 2.5, y1: y + dy - 2.5, x2: x + dx / 2 + 2.5, y2: y + 2.5,
+          stroke: "#999", "stroke-width": 1, "stroke-linecap": "round",
+        }));
+      }
+      if (flag && onSelect) {
+        cell.append(svgNode("circle", {
+          cx: x + dx / 2, cy: y + dy / 2, r: 2, fill: BLUE, stroke: "#fff", "stroke-width": 0.7,
+        }));
+      } else if (flag && (values || injected)) {
         cell.append(svgNode("rect", {
           x: x + 2, y: y + 1.5, width: 5, height: dy - 3, fill: BLUE,
         }));
@@ -137,7 +149,7 @@ export function drawGrid(slot, {
         cell.setAttribute("aria-label", `PRB ${prb}, OFDM symbol ${s}, ${allocated ? "scheduled" : "unscheduled"}`);
         cell.setAttribute("aria-pressed", active);
         cell.append(svgNode("rect", {
-          x: x + 1, y: y + 1, width: dx - 2, height: dy - 2, fill: "transparent",
+          x: x + 2, y: y + 2, width: dx - 4, height: dy - 4, fill: "transparent",
           class: "cell-border",
         }));
         cell.addEventListener("click", () => choose(prb, s));
@@ -166,6 +178,7 @@ export function drawGrid(slot, {
     cell.setAttribute("tabindex", "0");
     cell.setAttribute("aria-pressed", "true");
     cell.focus({ preventScroll: true });
+    cell.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
     onSelect(prb, s);
   }
 
@@ -189,14 +202,23 @@ export function drawGrid(slot, {
 
   const wrap = element("div", null, "grid-wrap");
   const legend = element("ul", null, "legend");
-  legend.append(legendItem("Allocation", "alloc"));
+  if (!onSelect || !scale) {
+    legend.append(legendItem("Allocation", "alloc"));
+  } else if (values.some(row => row.some(value => !Number.isFinite(value)))) {
+    legend.append(legendItem("Scheduled cell without a feature value", "alloc"),
+      legendItem("Unscheduled cell without a feature value", "empty"));
+  }
   if (truth) legend.append(legendItem("Jammed", injected ? "injected" : "truth"));
   if (map) {
-    legend.append(legendItem(`${detectors[detector] ?? detector} flag`, "flag"));
-    if (map.unscored.some(row => row.some(Boolean))) legend.append(legendItem("Unscored", "hatched"));
+    legend.append(legendItem(`${detectors[detector] ?? detector} flag`, onSelect ? "flag-dot" : "flag"));
+    if (map.unscored.some(row => row.some(Boolean))) {
+      legend.append(onSelect ? legendItem("No detector score", "unscored") : legendItem("Unscored", "hatched"));
+    }
   }
   if (scale) legend.append(legendItem(`${FEATURES[feature]}, ${scale[0]} to ${scale[1]} dB`, "scale"));
-  wrap.append(svg, legend);
+  const frame = onSelect ? element("div", null, "explore-grid-scroll") : null;
+  frame?.append(svg);
+  wrap.append(frame ?? svg, legend);
   return wrap;
 }
 
@@ -219,8 +241,39 @@ const lessons = {
   pilot_whole_comb: "A failure case: jamming the pilots across the whole allocation inflates the noise estimate, and even the true map does not save the block.",
 };
 
+const explorerExclusions = new Set(["fig3", "jsr_sweep", "aided_flip", "walkthrough_flip", "partial_flip"]);
+
+function initialCell(slot) {
+  const { allocation, truth } = slot.grids;
+  for (const [prb, row] of allocation.entries()) {
+    const symbol = row.findIndex((scheduled, index) => scheduled && truth[prb][index]);
+    if (symbol !== -1) return [prb, symbol];
+  }
+  const [start, count] = slot.metadata.alloc;
+  return [start + Math.floor(count / 2), Math.floor(slot.metadata.config.num_symbols / 2)];
+}
+
+function missingFeature(key, scheduled, pilot) {
+  if (!scheduled && key !== "power_db") return "outside the allocation";
+  if (pilot && key === "evm_db") return "no EVM on pilot cells";
+  if (!pilot && key === "residual_db") return "pilot residual is measured on pilot cells";
+  return "no value recorded for this cell";
+}
+
+function missingScore(key, scheduled, pilot) {
+  if (["evm_threshold", "residual_threshold", "residual_cfar"].includes(key)) {
+    return missingFeature(key === "evm_threshold" ? "evm_db" : "residual_db", scheduled, pilot);
+  }
+  if (key === "power_threshold" && !scheduled) return "outside the allocation";
+  if (key === "comb_threshold") {
+    if (!scheduled) return "outside the allocation";
+    if (!pilot) return "the empty comb is measured on pilot cells";
+  }
+  return "no score recorded for this cell";
+}
+
 async function explorer(root) {
-  const entries = (await loadManifest()).cases.filter(item => !["fig3", "jsr_sweep", "walkthrough_flip", "aided_flip"].includes(item.name));
+  const entries = (await loadManifest()).cases.filter(item => !explorerExclusions.has(item.name));
   const caseSelect = document.querySelector("#case-select");
   const feature = document.querySelector("#feature-select");
   const detector = document.querySelector("#detector-select");
@@ -229,36 +282,48 @@ async function explorer(root) {
   const lesson = document.querySelector("#explore-lesson");
   const context = document.querySelector("#explore-context");
   const grid = document.querySelector("#explore-grid");
+  const pointsHeading = document.querySelector("#points-heading");
   const pointHost = document.querySelector("#explore-points");
   const details = document.querySelector("#cell-details");
   const batch = document.querySelector("#explore-batch");
-  const unavailable = document.querySelector("#unavailable");
   let slot;
   let selected;
   let request = 0;
 
-  const receivers = () => everyReceiver.checked ? Object.keys(slot.receivers) : comparisonReceivers(slot);
+  function receivers() {
+    const names = comparisonReceivers(slot);
+    return everyReceiver.checked ? [...new Set([...names, ...Object.keys(slot.receivers)])] : names;
+  }
 
   function inspect(prb, symbol) {
+    const changedPRB = selected?.[0] !== prb;
     selected = [prb, symbol];
     const onAllocation = Boolean(slot.grids.allocation[prb][symbol]);
+    const pilot = symbol === slot.metadata.config.dmrs_symbol;
     const entries = [
-      ["PRB, symbol", `${prb}, ${symbol}`],
-      ["Allocation", onAllocation ? "Yes" : "No"],
+      ["Location", `PRB ${prb}, OFDM symbol ${symbol}`],
+      ["Allocation", onAllocation ? "Scheduled" : "Outside the allocation"],
       ["Jammed", slot.grids.truth[prb][symbol] ? "Yes" : "No"],
       ...Object.entries(FEATURES).map(([key, label]) => {
         const value = slot.grids[key][prb][symbol];
-        return [label, value == null ? "—" : `${value} dB`];
+        const readout = Number.isFinite(value) ? `${value} dB` :
+          `Unavailable · ${missingFeature(key, onAllocation, pilot)}`;
+        return [label, readout];
       }),
     ];
     const decisions = Object.entries(slot.detectors).map(([key, map]) => {
+      const label = detectors[key] ?? key;
       const score = map.scores[prb][symbol];
-      const decision = map.decisions[prb][symbol] ? "flagged" : "clear";
-      return [detectors[key] ?? key, map.unscored[prb][symbol] ? "not scored" : `${decision} (${score})`];
+      if (map.unscored[prb][symbol] || !Number.isFinite(score)) {
+        return [label, `Unscored · ${missingScore(key, onAllocation, pilot)}`];
+      }
+      const decision = map.decisions[prb][symbol] ? "Flagged" : "Clear";
+      const cutoff = slot.metadata.thresholds[key]?.value;
+      const limit = Number.isFinite(cutoff) ? `flags above ${cutoff}` : "cutoff missing from this export";
+      return [label, `${decision} · score ${score} · ${limit}`];
     });
-    details.replaceChildren(definitionList(entries), element("h3", "Detectors"),
-      definitionList(decisions), element("p", "Scores: logits for the U-Nets, −log₁₀ p for the block test, linear ratios for thresholds.", "context"));
-    showPoints();
+    details.replaceChildren(definitionList(entries), element("h3", "Detector decisions"), definitionList(decisions));
+    if (changedPRB) showPoints();
   }
 
   function showPoints() {
@@ -267,9 +332,12 @@ async function explorer(root) {
     const names = receivers();
     const [start, count] = slot.metadata.alloc;
     if (prb >= start && prb < start + count) {
-      pointHost.replaceChildren(element("p", `PRB ${prb}`, "context"), constellations(slot, names, [prb]));
+      const symbols = slot.metadata.config.num_symbols - 1;
+      pointsHeading.textContent = `Data symbols of PRB ${prb}, all ${symbols} data symbols`;
+      pointHost.replaceChildren(constellations(slot, names, [prb]));
     } else {
-      pointHost.replaceChildren(element("p", "Pick a PRB inside the allocation to see its data symbols.", "context"),
+      pointsHeading.textContent = `Data symbols of PRB ${prb}`;
+      pointHost.replaceChildren(element("p", `PRB ${prb} is outside the allocation. Pick a scheduled PRB to see its data symbols.`),
         crcList(slot, names));
     }
     batch.textContent = batchText(slot, names);
@@ -277,10 +345,13 @@ async function explorer(root) {
 
   function redraw() {
     if (!slot) return;
-    grid.replaceChildren(drawGrid(slot, {
+    const scroll = grid.querySelector(".explore-grid-scroll")?.scrollLeft ?? 0;
+    const drawn = drawGrid(slot, {
       feature: feature.value, detector: detector.value, truth: truth.checked, selected,
       onSelect: inspect, label: `Interactive grid for ${slot.metadata.title}`,
-    }));
+    });
+    grid.replaceChildren(drawn);
+    drawn.querySelector(".explore-grid-scroll").scrollLeft = scroll;
   }
 
   async function changeCase() {
@@ -292,8 +363,9 @@ async function explorer(root) {
     selected = null;
     for (const control of [feature, detector, truth]) control.disabled = true;
     context.textContent = "Loading the slot…";
+    pointsHeading.textContent = "Equalized symbols";
     lesson.textContent = lessons[name] ?? "";
-    for (const host of [grid, details, pointHost, batch, unavailable]) host.replaceChildren();
+    for (const host of [grid, details, pointHost, batch]) host.replaceChildren();
     try {
       const loaded = await loadCase(name);
       if (current !== request) return;
@@ -302,11 +374,15 @@ async function explorer(root) {
       options(detector, [["", "None"], ...maps.map(key => [key, detectors[key] ?? key])]);
       detector.value = previousDetector === "" || maps.includes(previousDetector) ? previousDetector : "fused";
       feature.disabled = truth.disabled = false;
-      context.replaceChildren(conditions(slot), slotDetails(slot));
+      const { batch_size, selection } = slot.metadata;
+      const settings = element("details", null, "more");
+      settings.append(element("summary", "Simulation and detector settings"), element("p", calibrationText(slot)));
       if (slot.metadata.noise_estimate === "comb") {
-        unavailable.textContent = "This slot's maps were made with the noise power estimated from the empty pilot comb.";
+        settings.append(element("p", "The receiver estimated the noise power from the empty pilot comb."));
       }
-      inspect(affectedPRBs(slot)[0], slot.metadata.config.dmrs_symbol);
+      context.replaceChildren(element("p", conditions(slot)),
+        element("p", `Slot ${selection.slot + 1} of ${batch_size} simulated slots. ${selectionText(slot)}`), settings);
+      inspect(...initialCell(slot));
       redraw();
     } catch (error) {
       if (current === request) reportError(grid, error);

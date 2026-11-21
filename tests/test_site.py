@@ -101,11 +101,11 @@ def test_flip_selection():
     standard = torch.tensor([True, False, False, False])
     protected = torch.tensor([True, False, True, True])
     crc = {"standard": standard, "fused_soft": protected}
-    choice = _select(CASES["walkthrough_flip"], truth, truth, crc)
+    choice = _select(CASES["partial_flip"], truth, truth, crc)
     assert choice["slot"] == 2
     assert choice["flip_count"] == 2 and choice["flip_frequency"] == 0.5
     with pytest.raises(ValueError, match="no CRC flip"):
-        _select(CASES["walkthrough_flip"], truth, truth, {**crc, "fused_soft": standard})
+        _select(CASES["partial_flip"], truth, truth, {**crc, "fused_soft": standard})
 
 
 def test_aided_flip_selects_first_soft_crc_recovered_by_passes():
@@ -178,6 +178,22 @@ def test_pilot_whole_comb_selects_first_true_soft_failure():
     assert selection["failure_count"] == 2 and selection["failure_frequency"] == 0.5
     with pytest.raises(ValueError, match="no true_soft CRC failure"):
         _select(case, truth, truth, {**crc, "true_soft": passes})
+
+
+def test_partial_export_keeps_other_cases(tmp_path):
+    import json
+
+    from jamloc.site.export import _merged_entries
+
+    (tmp_path / "pilot.json").write_text("{}", encoding="utf-8")
+    old = [
+        {"name": "pilot", "title": "old", "file": "pilot.json"},
+        {"name": "benign", "title": "old", "file": "benign.json"},  # its file is gone
+        {"name": "retired", "title": "old", "file": "pilot.json"},  # no longer registered
+    ]
+    (tmp_path / "manifest.json").write_text(json.dumps({"cases": old}), encoding="utf-8")
+    fresh = [{"name": "data", "title": "new", "file": "data.json"}]
+    assert [e["name"] for e in _merged_entries(tmp_path, fresh)] == ["pilot", "data"]
 
 
 @pytest.mark.parametrize("dirty", [False, True])
@@ -371,7 +387,7 @@ def _write_case_data(data):
             document["sweep"] = [
                 {"jsr_db": db, "pilots": pilots, "r_b": [0] * width} for db in range(-15, 10, 3)
             ]
-        if case.name in ("pilot", "walkthrough_flip", "aided_flip"):
+        if case.name in ("pilot", "partial_flip", "aided_flip"):
             document["channel"] = {
                 "dmrs_symbol": cfg.dmrs_symbol,
                 "num_sc": width * 12,
@@ -414,7 +430,7 @@ def test_check_build_requires_page_cases(tmp_path):
     manifest["cases"] = [entry for entry in manifest["cases"] if entry["name"] == "pilot"]
     path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(
-        ValueError, match=r"manifest\.json.*aided_flip.*hopping.*jsr_sweep.*walkthrough_flip"
+        ValueError, match=r"manifest\.json.*aided_flip.*hopping.*jsr_sweep.*partial_flip"
     ):
         check_build(tmp_path)
 
@@ -424,14 +440,14 @@ def test_check_build_requires_page_cases(tmp_path):
     [
         ("pilot", ("schema_version",)),
         ("pilot", ("grids", "residual_db")),
-        ("walkthrough_flip", ("metadata", "selection", "flip_count")),
+        ("partial_flip", ("metadata", "selection", "flip_count")),
         ("pilot_whole_comb", ("metadata", "thresholds", "fused", "value")),
         ("hopping", ("detectors", "fused_atk", "decisions")),
         ("hopping", ("metadata", "batch_crc", "fused_atk_soft")),
         ("pilot", ("x_hat", "shared")),
         ("jsr_sweep", ("sweep", 0, "pilots", "residual_power")),
         ("pilot", ("channel", "fit", 0)),
-        ("walkthrough_flip", ("channel", "standard", 0, 1)),
+        ("partial_flip", ("channel", "standard", 0, 1)),
         ("aided_flip", ("passes", 0, "x_hat")),
         ("aided_flip", ("passes", 0, "h", 0)),
     ],
@@ -528,6 +544,18 @@ def test_build_showcase(tmp_path, monkeypatch):
             "bler_first,bler_second,delta,delta_lo,delta_hi\n"
             "p_r_e_soft,p_r_e_soft_da,pilot_whole_allocation,9,20,4,0,0.4,0.2,0.2,0.1,0.3\n"
         ),
+        "width_sweep/width_bler_C.csv": (
+            "jam_prb,cover,attack,jsr_db,receiver,block_errors,blocks,bler,bler_lo,bler_hi\n"
+            "4,0.333,partial,3.0,standard,50,100,0.5,0.4,0.6\n"
+            "4,0.333,partial,3.0,p_r_e_soft,0,4800,0,0,0.001\n"
+            "8,0.667,partial,3.0,p_r_e_soft,90,100,0.9,0.8,0.95\n"
+            "8,0.667,partial,3.0,fused_hard,1,10,0.1,0,0.4\n"
+        ),
+        "width_sweep/width_detection.csv": (
+            "attack,jsr_db,group,value,pd,pd_std,seeds,num_cells,num_slots\n"
+            "pilot,-9.0,width,2.0,0.76,0.02,3,113,81\n"
+            "pilot,-9.0,cover,0.25,0.82,0.01,3,737,274\n"
+        ),
         "recovery_pr9/recovery_C.csv": (
             "receiver,jammer,seed,attack,jsr_db,snr_db,ber,bler,block_errors,blocks\n"
             "standard,nominal,0,pilot,-15,15,0,0.2,2,10\n"
@@ -619,6 +647,11 @@ def test_build_showcase(tmp_path, monkeypatch):
     row = aided[9.0, "p_r_e_soft_da"]
     assert row["blocks"] == 20 and row["bler"] == 0.2
     assert "from 40.0% to 20.0% at +9 dB" in content["data_aided"]["summary"]
+    width = {(r["jam_prb"], r["receiver"]): r["bler"] for r in content["width_sweep"]["rows"]}
+    assert width == {(4, "standard"): 0.5, (4, "p_r_e_soft"): 0, (8, "p_r_e_soft"): 0.9}
+    (by_width,) = content["width_sweep"]["detection"]  # the width groups, not the cover bins
+    assert by_width["jam_prb"] == 2 and by_width["pd"] == 0.76
+    assert content["width_sweep"]["alloc_prb"] == 12
     (pooled,) = content["dmrs"]["recovery"]  # only the +9 dB rows, pooled over the seeds
     assert pooled["jammer_dmrs"] == "first" and pooled["blocks"] == 20 and pooled["bler"] == 0.2
     for section in content.values():
@@ -627,9 +660,11 @@ def test_build_showcase(tmp_path, monkeypatch):
             assert (build / download).is_file()
     for name in inputs:
         folder = Path(name).parts[0]
-        prefix = {"receiver_study": "data_aided_", "recovery_pr9": "recovery_curves_"}.get(
-            folder, ""
-        )
+        prefix = {
+            "receiver_study": "data_aided_",
+            "recovery_pr9": "recovery_curves_",
+            "width_sweep": "width_",
+        }.get(folder, "")
         target = build / "downloads" / f"{prefix}{Path(name).name}"
         assert target.read_bytes() == (papers / name).read_bytes()
     for name in unselected:

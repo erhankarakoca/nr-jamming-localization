@@ -23,28 +23,29 @@
   <main class="shell" id="main" tabindex="-1">
 <header class="page-intro">
   <h1>Explore</h1>
-  <p>Nine saved simulated slots. Pick one and a cell; the arrow keys move between cells once the grid
-    has focus.</p>
+  <p>Explore a saved uplink slot to see where the jammer hit and how the receivers decoded the block.</p>
 </header>
 <div id="explorer" aria-busy="true">
   <section aria-label="Resource grid and layers">
     <div class="controls">
       <label>Slot <select id="case-select" disabled></select></label>
-      <label>Feature <select id="feature-select" disabled>
+    </div>
+    <div id="explore-context" class="context" aria-live="polite">Loading the slots…</div>
+    <p id="explore-lesson"></p>
+    <div class="controls" role="group" aria-label="Grid layers">
+      <label>Colour cells by <select id="feature-select" disabled>
         <option value="">None</option><option value="power_db">Power P</option>
         <option value="residual_db">Pilot residual R</option><option value="evm_db">EVM E</option>
       </select></label>
-      <label>Detector <select id="detector-select" disabled></select></label>
-      <label class="check"><input id="truth-toggle" type="checkbox" checked disabled> Jammed cells</label>
+      <label>Flags from <select id="detector-select" disabled></select></label>
+      <label class="check"><input id="truth-toggle" type="checkbox" checked disabled> Outline the jammed cells</label>
     </div>
-    <p id="explore-lesson"></p>
-    <div id="explore-context" class="context" aria-live="polite">Loading the slots…</div>
     <div class="slot-row">
+      <div id="explore-grid"></div>
       <div>
-        <div id="explore-grid"></div>
-        <div id="unavailable" class="context"></div>
-      </div>
-      <div aria-labelledby="cell-heading">
+        <h2>How to read this</h2>
+        <p>Rows are physical resource blocks (PRBs). Columns are OFDM symbols. Symbol 2 carries the pilots (DMRS).</p>
+        <p>Choose a cell to inspect it. Use the arrow keys when the grid has focus. The layer controls change the grid.</p>
         <h2 id="cell-heading">Selected cell</h2>
         <div id="cell-details" aria-live="polite"></div>
       </div>
@@ -52,9 +53,9 @@
   </section>
   <section class="panel" aria-labelledby="points-heading">
     <h2 id="points-heading">Equalized symbols</h2>
-    <p class="context">Data symbols of the selected PRB; stronger bit reliability is drawn darker.
-      The CRC covers the whole block.</p>
-    <div class="controls"><label class="check"><input id="all-receivers" type="checkbox"> All receivers</label></div>
+    <p>Red points come from jammed cells and blue points from clean cells. Darker points indicate more reliable bits.</p>
+    <p>The map-aware receiver uses the saved U-Net map. The CRC checks the whole decoded block.</p>
+    <div class="controls"><label class="check"><input id="all-receivers" type="checkbox"> Show all saved receivers</label></div>
     <div id="explore-points"></div>
     <p id="explore-batch" class="context"></p>
   </section>
