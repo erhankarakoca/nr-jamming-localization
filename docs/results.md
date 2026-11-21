@@ -1108,7 +1108,8 @@ Design `docs/superpowers/specs/2026-11-20-showcase-site-design.md`, plan
   (`batch_crc`).
 - Examples are chosen by a stated rule: the median U-Net hit rate by default, outcome-conditioned
   for `walkthrough_flip` (2/64) and `pilot_whole_comb` (true map fails in 42/64).
-- The export ran from commit 7725069 on a clean tree.
+- The export ran on a clean tree; after the history rewording of 21 Nov it was repeated from
+  ebff348 with identical data (only the commit stamp changed).
 
 **Site** (`python -m jamloc.site build | serve | deploy`, static, served from the `gh-pages` branch):
 
@@ -1124,3 +1125,63 @@ Design `docs/superpowers/specs/2026-11-20-showcase-site-design.md`, plan
   - 77 recovery cells;
   - 385 paired rows;
   - 11 downloads, byte for byte.
+
+## 20. Two DMRS symbols per slot
+
+NR allows up to three additional single-symbol DMRS per slot. Everything above uses one
+front-loaded DMRS symbol (symbol 2). `SimConfig.dmrs_additional_position = 1` puts a second one on
+symbol 11, as Sionna does. The jammer's pilot attack then hits both DMRS symbols, which costs it
+twice the energy at the same JSR per resource element. The residual is computed on each DMRS
+symbol. The map-aware receiver estimates one slot-constant channel from the pilots of both
+symbols, so a jammed DMRS symbol is down-weighted against a clean one.
+
+Run (Colab T4, about 1.5 h; `python -m jamloc.experiments.dmrs_count --seeds 0 1 2 --batch-size
+64 --batches 25`, then `--no-recovery` locally for the detection tables):
+
+- new splits `train_dmrs2` / `val_dmrs2` / `test_dmrs2` (seeds 30-32 M);
+- U-Nets P+R+E and P+E retrained on them (three seeds, 15 epochs);
+- the one-DMRS rows reuse the nominal models and splits, and reproduce section 17.
+
+**Detection** (test grid, thresholds for 1% false alarm on the matching validation split, mean of
+three seeds; Pd over the jammed cells inside the allocation at -15 dB):
+
+| DMRS | Detector | Pilot F1 | Overall F1 | Test FA | Pilot Pd | Data Pd |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | U-Net P+R+E | 0.824 | 0.952 | 1.2% | 0.574 | 0.783 |
+| 1 | U-Net P+E | 0.750 | 0.945 | 1.3% | 0.394 | 0.756 |
+| 1 | Block test | 0.515 | 0.868 | 1.2% | 0.290 | 0.320 |
+| 2 | U-Net P+R+E | 0.881 | 0.954 | 1.2% | 0.701 | 0.801 |
+| 2 | U-Net P+E | 0.845 | 0.950 | 1.2% | 0.487 | 0.795 |
+| 2 | Block test | 0.671 | 0.877 | 1.2% | 0.311 | 0.398 |
+
+Per seed, the weak-pilot Pd of P+R+E is 0.55-0.60 with one DMRS and 0.69-0.71 with two.
+
+**Recovery** (TDL-C, 15 dB SNR, UE on 12 PRBs, jammer on 4 of them, 4 800 slots per point from
+three seeds of 1 600; BLER in percent at +9 dB):
+
+| DMRS, jammed DMRS | Attack | Standard | LMMSE, no map | U-Net soft | True map soft |
+| --- | --- | --- | --- | --- | --- |
+| 1 | pilot | 31.1 | 16.0 | 0.04 | 0.02 |
+| 2, both | pilot | 24.2 | 4.73 | 0.06 | 0.02 |
+| 2, first only | pilot | 7.33 | 1.17 | 0 | 0 |
+| 1 | data | 81.9 | 81.9 | 0.04 | 0.04 |
+| 2 | data | 79.3 | 78.6 | 0.02 | 0.02 |
+| 1 | partial | 89.3 | 86.3 | 0.12 | 0.12 |
+| 2 | partial | 85.9 | 80.7 | 0.02 | 0.02 |
+
+These slots are new draws, so the one-DMRS row differs slightly from the table of section 17 (31%
+against 33% unprotected under pilot jamming). At -15, -3 and +3 dB the soft U-Net map stays at or
+below 0.04% in every case (`results/dmrs_count/recovery.csv`).
+
+**Reading.**
+
+- A second DMRS symbol makes pilot jamming easier to detect (pilot F1 0.824 to 0.881, weak-pilot
+  Pd 0.57 to 0.70). Part of this is the jammer's doubled energy at the same JSR per resource
+  element. The block test gains most on pilot attacks (0.515 to 0.671), because it now has two
+  residuals per PRB.
+- It also makes pilot jamming less harmful, even though the jammer spends twice the energy: the
+  unprotected BLER at +9 dB falls from 31% to 24%, and the LMMSE filter alone, which averages the
+  two DMRS symbols, brings it to 4.7%. A jammer that hits only the front-loaded DMRS leaves a
+  clean second symbol: 7.3% unprotected, 1.2% with the LMMSE filter, no errors with the map.
+- Data and partial-band jamming are about as harmful as with one DMRS, and the soft map protects
+  against them in both configurations.
