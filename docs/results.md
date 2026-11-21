@@ -1,6 +1,6 @@
 # Results
 
-November 2026. The README lists the experiment commands. Reproducing the reported tables also
+November 2026. [`reproducing.md`](reproducing.md) lists the experiment commands. Reproducing the reported tables also
 requires the recorded run settings, saved replay inputs and benchmark environment. The figure
 gallery with captions is at `results/figures/index.html`.
 
