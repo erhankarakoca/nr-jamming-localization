@@ -7,16 +7,37 @@ same way on every OS and on headless machines such as Colab.
 from pathlib import Path
 
 import matplotlib as mpl
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 
 COLUMN_WIDTH = 3.5  # IEEE two-column layout, single column [inch]
 
-# Okabe-Ito colors; every attack also has its own marker and line style
+# Basic hues, as in the MATLAB figures of most wireless-communications journals. Every curve
+# also gets its own marker shape and line style, so a figure still reads in grayscale.
+RED, BLUE, BLACK, GREEN = "#CC0000", "#0033CC", "#000000", "#008000"
+MAGENTA, CYAN, BROWN, GRAY = "#CC00CC", "#0099CC", "#8B4513", "#666666"
+
+# MATLAB's parula colormap (nine samples), for feature maps
+PARULA = LinearSegmentedColormap.from_list(
+    "parula",
+    [
+        (0.2422, 0.1504, 0.6603),
+        (0.2803, 0.2782, 0.9221),
+        (0.2440, 0.4358, 0.9988),
+        (0.1540, 0.5902, 0.9218),
+        (0.0297, 0.7082, 0.8163),
+        (0.1938, 0.7758, 0.6251),
+        (0.5044, 0.7993, 0.3480),
+        (0.8634, 0.7406, 0.1596),
+        (0.9763, 0.9831, 0.0538),
+    ],
+)
+
 ATTACK_STYLE = {
-    "none": {"color": "#000000", "marker": "x", "linestyle": ":"},
-    "pilot": {"color": "#0072B2", "marker": "o", "linestyle": "-"},
-    "data": {"color": "#D55E00", "marker": "s", "linestyle": "--"},
-    "partial": {"color": "#009E73", "marker": "^", "linestyle": "-."},
+    "none": {"color": BLACK, "marker": "x", "linestyle": ":"},
+    "pilot": {"color": BLUE, "marker": "o", "linestyle": "-", "markerfacecolor": "none"},
+    "data": {"color": RED, "marker": "s", "linestyle": "--", "markerfacecolor": "none"},
+    "partial": {"color": GREEN, "marker": "^", "linestyle": "-.", "markerfacecolor": "none"},
 }
 
 RC = {
@@ -41,11 +62,13 @@ RC = {
     "xtick.major.size": 3,
     "ytick.major.size": 3,
     "axes.grid": True,
-    "grid.linewidth": 0.4,
-    "grid.linestyle": ":",
-    "grid.alpha": 0.6,
+    "axes.prop_cycle": mpl.cycler(color=[BLUE, RED, BLACK, GREEN, MAGENTA, CYAN, BROWN, GRAY]),
+    "grid.color": "0.85",
+    "grid.linewidth": 0.5,
+    "grid.linestyle": "-",
     "legend.fancybox": False,
-    "legend.edgecolor": "0.3",
+    "legend.edgecolor": "black",
+    "patch.linewidth": 0.5,
     "legend.framealpha": 1.0,
     "legend.borderpad": 0.3,
     "pdf.fonttype": 42,  # embed TrueType fonts (editable text in the PDF)

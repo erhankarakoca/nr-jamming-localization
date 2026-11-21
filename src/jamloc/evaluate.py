@@ -34,19 +34,31 @@ from jamloc.jammer import ATTACKS
 from jamloc.metrics import detection_rate, f1, threshold_at_fa
 from jamloc.model import EXTRA_VARIANTS, VARIANTS, select_inputs
 from jamloc.paths import results_dir
-from jamloc.plotting import new_figure, paper_style, save
+from jamloc.plotting import (
+    BLACK,
+    BLUE,
+    BROWN,
+    CYAN,
+    GRAY,
+    GREEN,
+    MAGENTA,
+    RED,
+    new_figure,
+    paper_style,
+    save,
+)
 from jamloc.train import PIXEL_HIDDEN_MATCHED, checkpoint_path, load_model
 
 FA = 0.01
 DETECTOR_STYLE = {
-    "fused": {"label": "U-Net P+R+E", "color": "#0072B2", "marker": "o", "linestyle": "-"},
-    "no_residual": {"label": "U-Net P+E", "color": "#56B4E9", "marker": "v", "linestyle": "--"},
-    "power": {"label": "U-Net P", "color": "#E69F00", "marker": "s", "linestyle": "-."},
-    "evm": {"label": "U-Net E", "color": "#D55E00", "marker": "^", "linestyle": ":"},
+    "fused": {"label": "U-Net P+R+E", "color": RED, "marker": "o", "linestyle": "-"},
+    "no_residual": {"label": "U-Net P+E", "color": BLUE, "marker": "s", "linestyle": "--"},
+    "power": {"label": "U-Net P", "color": BLACK, "marker": "^", "linestyle": "-."},
+    "evm": {"label": "U-Net E", "color": MAGENTA, "marker": "v", "linestyle": ":"},
     "evm_threshold": {
         "label": "EVM threshold",
-        "color": "#CC79A7",
-        "marker": "D",
+        "color": CYAN,
+        "marker": ">",
         "linestyle": ":",
     },
     "residual_threshold": {
@@ -57,20 +69,20 @@ DETECTOR_STYLE = {
     },
     "power_threshold": {
         "label": "Power test",
-        "color": "#999999",
+        "color": GRAY,
         "marker": "*",
         "linestyle": ":",
     },
     "residual_cfar": {
         "label": "Residual test",
-        "color": "#000000",
-        "marker": "+",
+        "color": BROWN,
+        "marker": "x",
         "linestyle": "-.",
     },
     "block_test": {
         "label": "Block test",
-        "color": "#882255",
-        "marker": "P",
+        "color": GREEN,
+        "marker": "d",
         "linestyle": "-",
     },
     "fused_nj1": {
@@ -277,10 +289,7 @@ def plot_pd(pd_rows, cells: str, title: str | None = None):
             if rows:
                 x = np.array([r["jsr_db"] for r in rows])
                 mean = np.array([r["pd_mean"] for r in rows])
-                std = np.array([r["pd_std"] for r in rows])
-                ax.plot(x, mean, **style)
-                # band: +-1 standard deviation over training seeds
-                ax.fill_between(x, mean - std, mean + std, color=style["color"], alpha=0.15, lw=0)
+                ax.plot(x, mean, markerfacecolor="none", markersize=4, **style)
         ax.set(xlabel="JSR (dB)", ylim=(-0.02, 1.02))
         ax.set_title(f"({'abc'[i]}) {ATTACK_TITLES[attack]}", loc="left", pad=3)
     axes[0].set_ylabel(r"$P_\mathrm{d}$")

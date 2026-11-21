@@ -33,7 +33,7 @@ from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
 from jamloc.metrics import threshold_at_fa
 from jamloc.model import VARIANTS, select_inputs
 from jamloc.paths import data_dir, results_dir
-from jamloc.plotting import new_figure, paper_style, save
+from jamloc.plotting import PARULA, new_figure, paper_style, save
 from jamloc.receiver import data_positions
 from jamloc.theory import threshold
 from jamloc.train import checkpoint_path, load_model
@@ -43,8 +43,9 @@ ALLOC = (6, 12)  # example allocation used by the explanatory figures: PRBs 6-17
 JAM = (10, 4)  # example jammer block: PRBs 10-13 (inside the allocation)
 
 # Colours (Okabe-Ito) shared by the explanatory figures
-ALLOC_COLOR, DMRS_COLOR, JAM_COLOR = "#DCEAF4", "#0072B2", "#D55E00"
-CLEAN_COLOR = "#0072B2"
+# Resource-grid colors in the plain style of NR figures: gray allocation, dark DMRS, red jamming
+ALLOC_COLOR, DMRS_COLOR, JAM_COLOR = "#D9D9D9", "#1F3F8F", "#CC0000"
+CLEAN_COLOR = "#0033CC"
 
 
 def _example_batch(
@@ -110,7 +111,7 @@ PATTERN_EXAMPLES = (
     ("Partial-band", "partial", 2, 8),
     ("All pilots", "pilot", ALLOC[0], ALLOC[1]),
 )
-EMPTY_COLOR = "#F2F2F2"
+EMPTY_COLOR = "#FFFFFF"
 
 
 def _cell_grid(ax, codes, colors):
@@ -122,8 +123,8 @@ def _cell_grid(ax, codes, colors):
         cmap=ListedColormap(colors),
         vmin=-0.5,
         vmax=len(colors) - 0.5,
-        edgecolors="white",
-        linewidth=0.15,
+        edgecolors="#B3B3B3",
+        linewidth=0.2,
     )
     ax.set(
         xlim=(-0.5, CFG.num_symbols - 0.5),
@@ -164,7 +165,7 @@ def attack_patterns():
                         last - first + 1,
                         high - low,
                         facecolor="none",
-                        edgecolor="#555555",
+                        edgecolor="#000000",
                         hatch="//////",
                         linewidth=0,
                         zorder=3,
@@ -184,7 +185,7 @@ def attack_patterns():
         Patch(facecolor=ALLOC_COLOR, label="Allocation"),
         Patch(facecolor=DMRS_COLOR, label="DMRS"),
         Patch(facecolor=JAM_COLOR, label="Jammed"),
-        Patch(facecolor="white", edgecolor="#555555", hatch="//////", lw=0.4, label="EVM affected"),
+        Patch(facecolor="white", edgecolor="#000000", hatch="//////", lw=0.4, label="EVM affected"),
     ]
     fig.legend(
         handles=legend,
@@ -230,12 +231,12 @@ def residual_explained():
     seed = _example_seed("C")
     limits = 10 * np.log10([threshold(ALLOC[1], pos, fa=0.01) for pos in range(ALLOC[1])])
     for ax in (fit, prbs):
-        ax.axvspan(JAM[0] - 0.5, sum(JAM) - 0.5, color=JAM_COLOR, alpha=0.10, lw=0)
+        ax.axvspan(JAM[0] - 0.5, sum(JAM) - 0.5, color="0.9", lw=0)
         ax.grid(False)
         ax.grid(axis="y", color="0.89", alpha=1, lw=0.5)
         ax.tick_params(length=2, pad=2)
     for edge in edges[1:-1]:
-        fit.axvline(edge, color="0.85", lw=0.4, zorder=0)
+        fit.axvline(edge, color="0.85", lw=0.5, zorder=0)
 
     # (a) The jammed slot: LS estimate of every pilot and its projection onto the delay subspace,
     # which is the smoothest frequency response a channel with delays up to tau_max can have.
@@ -247,9 +248,10 @@ def residual_explained():
     sc = sc.cpu().numpy()
     x = edges[0] + (sc + 0.5) / 12
     jammed = (ALLOC[0] + sc // 12 >= JAM[0]) & (ALLOC[0] + sc // 12 < sum(JAM))
-    fit.plot(x, smooth, color="0.15", lw=1.0, label="Subspace fit", zorder=3)
+    fit.plot(x, smooth, color="black", lw=0.9, label="Subspace fit", zorder=3)
     fit.plot(
-        x[~jammed], estimates[~jammed], ls="none", marker="o", ms=2.2, mfc="0.5", mec="none",
+        x[~jammed], estimates[~jammed], ls="none", marker="o", ms=2.4, mfc="none", mec=CLEAN_COLOR,
+        mew=0.5,
         label="Clean PRBs",
     )
     fit.plot(
@@ -262,7 +264,7 @@ def residual_explained():
     # (b) The residual of every PRB in the benign and the jammed slot, against its threshold.
     leak_note = ""
     for attack, label, mark, edge_color, face in (
-        ("none", "Benign slot", "o", "0.53", "none"),
+        ("none", "Benign slot", "o", CLEAN_COLOR, "none"),
         ("pilot", "Jammed slot", "s", JAM_COLOR, JAM_COLOR),
     ):
         batch = _example_batch(attack, 0.0, 20.0, "C", seed)
@@ -882,7 +884,7 @@ def _outline(ax, mask, **style):
 
 
 def _constellation(ax, points, jammed_prb, title):
-    ax.scatter(*points[~jammed_prb].T, s=0.6, color="0.6", lw=0, rasterized=True)
+    ax.scatter(*points[~jammed_prb].T, s=0.6, color=CLEAN_COLOR, lw=0, rasterized=True)
     ax.scatter(*points[jammed_prb].T, s=0.6, color=JAM_COLOR, lw=0, rasterized=True)
     ax.set(xlim=(-1.7, 1.7), ylim=(-1.7, 1.7), xticks=[], yticks=[], aspect="equal")
     ax.axhline(0, color="0.85", lw=0.4, zorder=0)
@@ -925,7 +927,7 @@ def system_views():
     arrows = ((0.97, 1.19), (2.4, 2.62), (3.68, 3.9), (4.87, 5.07), (5.75, 5.97))  # inches
 
     # (a) received power, (c) residual on the DMRS cells and EVM on the data cells, same scale
-    scale = {"cmap": "viridis", "vmin": 0, "vmax": 25, "origin": "lower", "aspect": "auto"}
+    scale = {"cmap": PARULA, "vmin": 0, "vmax": 25, "origin": "lower", "aspect": "auto"}
     image = a.imshow(grid["power_db"], interpolation="nearest", **scale)
     features = np.full(grid["power_db"].shape, np.nan)
     features[:, l0] = grid["residual_db"][:, l0]
@@ -937,7 +939,7 @@ def system_views():
     cbar.tick_params(labelsize=6.5, length=2, width=0.5, pad=1)
     cbar.set_ylabel("dB", labelpad=1)
     # (d) the U-Net map
-    _cell_grid(dd, np.where(flags, 2, np.where(alloc, 1, 0)), [EMPTY_COLOR, ALLOC_COLOR, DMRS_COLOR])
+    _cell_grid(dd, np.where(flags, 2, np.where(alloc, 1, 0)), [EMPTY_COLOR, ALLOC_COLOR, JAM_COLOR])
     for ax in (a, c, dd):
         _outline(ax, truth, color="black", lw=0.7)
         ax.set(xticks=[0, l0, 13], yticks=[0, 6, 12, 18, 23])
@@ -958,7 +960,7 @@ def system_views():
     x = a0 - 0.5 + (sc + 0.5) / 12
     hit = (a0 + sc // 12 >= j0) & (a0 + sc // 12 < j0 + jn)
     b.plot(x, smooth, color="0.15", lw=0.8)
-    b.plot(x[~hit], ls[~hit], ls="none", marker="o", ms=1.5, mfc="0.55", mec="none")
+    b.plot(x[~hit], ls[~hit], ls="none", marker="o", ms=1.8, mfc="none", mec=CLEAN_COLOR, mew=0.4)
     b.plot(x[hit], ls[hit], ls="none", marker="s", ms=1.7, mfc=JAM_COLOR, mec="none")
     b.set(xlim=(a0 - 0.5, a0 + n - 0.5), ylim=(0, None), xticks=[a0, j0, j0 + jn - 1, a0 + n - 1])
     b.set_xlabel("PRB", labelpad=1)

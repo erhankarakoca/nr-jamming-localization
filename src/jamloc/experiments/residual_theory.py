@@ -33,7 +33,7 @@ from jamloc.jammer import ATTACKS
 from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
 from jamloc.metrics import wilson_interval
 from jamloc.paths import data_dir, results_dir
-from jamloc.plotting import new_figure, paper_style, save
+from jamloc.plotting import BLACK, BLUE, RED, new_figure, paper_style, save
 
 FA = 0.01
 ALLOC = (6, 12)  # UE on PRBs 6-17
@@ -135,14 +135,14 @@ def theory_curves(jnr_grid) -> dict:
 
 
 CHANNEL_STYLE = {
-    ("test", "A"): ("#0072B2", "o", "-", "TDL-A (100 ns)"),
-    ("test", "C"): ("#D55E00", "s", "--", "TDL-C (300 ns)"),
-    ("longdelay", "C"): ("#CC79A7", "D", "-.", "TDL-C (1000 ns)"),
+    ("test", "A"): (BLUE, "o", "-", "TDL-A (100 ns)"),
+    ("test", "C"): (RED, "s", "--", "TDL-C (300 ns)"),
+    ("longdelay", "C"): (BLACK, "D", "-.", "TDL-C (1000 ns)"),
 }
 GROUP_STYLE = {
-    "next to the block": ("#D55E00", "s", "-.", "Next to the block"),
-    "inside the block": ("#0072B2", "o", "-", "Inside the block"),
-    "block edge": ("#56B4E9", "^", "--", "Block edge"),
+    "next to the block": (BLACK, "s", "-.", "Next to the block"),
+    "inside the block": (RED, "o", "-", "Inside the block"),
+    "block edge": (BLUE, "^", "--", "Block edge"),
 }
 
 
@@ -163,6 +163,7 @@ def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None):
             yerr=[k / n - lo, hi - k / n],
             capsize=2,
             ms=3,
+            mfc="none",
             lw=0.8,
             elinewidth=0.6,
             capthick=0.6,

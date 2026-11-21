@@ -118,9 +118,9 @@ def plot_on_axis(ax, curves, checks, *, show_mc_key=False):
     """Draw the same K-slot comparison in the standalone figure and the theory panel."""
     styles = (
         ("#000000", "-", "o"),
-        ("#0072B2", "--", "s"),
-        ("#D55E00", "-.", "^"),
-        ("#009E73", ":", "D"),
+        ("#0033CC", "--", "s"),
+        ("#CC0000", "-.", "^"),
+        ("#008000", ":", "D"),
     )
     for k, (color, line, marker) in zip(SLOTS, styles, strict=True):
         rows = sorted((r for r in curves if r["slots"] == k), key=lambda r: r["jnr_db"])

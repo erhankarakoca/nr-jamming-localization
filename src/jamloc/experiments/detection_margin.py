@@ -60,9 +60,9 @@ from jamloc.plotting import new_figure, paper_style, save
 from jamloc.train import load_model
 
 DETECTORS = {
-    "fused": ("U-Net, P+R+E", "#0072B2", "o", "-"),
-    "no_residual": ("U-Net, P+E", "#56B4E9", "v", "--"),
-    "block_test": ("Block test (no training)", "#882255", "P", "-"),
+    "fused": ("U-Net P+R+E", "#CC0000", "o", "-"),
+    "no_residual": ("U-Net P+E", "#0033CC", "s", "--"),
+    "block_test": ("Block test", "#008000", "d", "-"),
 }
 TARGET_PD, TARGET_BLER = 0.9, 0.1
 SLOT_FAS = (0.01, 0.001)  # slot false-alarm targets
@@ -743,7 +743,7 @@ def plot_vs_snr(detector: str = "fused"):
                 if r["detector"] == detector
             }
     snrs = sorted(SNRS)
-    styles = {"C": ("#0072B2", "o"), "A": ("#E69F00", "s")}
+    styles = {"C": ("#CC0000", "o"), "A": ("#0033CC", "s")}
     for channel, (color, marker) in styles.items():
         for alpha, ls in ((FA, "-"), (0.001, "--")):
             ys, censored = [], []
@@ -794,7 +794,7 @@ def plot_vs_snr(detector: str = "fused"):
         ),
     )
     spare.set_xlabel("Spare link margin, TDL-C (dB)")
-    fig.legend(loc="outside lower center", ncols=2, frameon=False, fontsize=6)
+    ax.legend(loc="lower right", fontsize=6.5)
     return fig
 
 
