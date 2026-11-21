@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 from jamloc.experiments import figures
 from jamloc.paths import REPO_ROOT
 
-MODEL_FREE = ["attack_patterns", "timing", "residual_explained", "constellations"]
+MODEL_FREE = ["attack_patterns", "residual_explained", "constellations"]
 
 
 def test_drawio_sources_are_xml():
@@ -52,25 +52,35 @@ def test_main_writes_files_and_captions(tmp_path, monkeypatch):
     assert "attack_patterns" in captions
 
 
-def test_residual_panels_pool_the_same_pilots():
+def test_residual_panels_show_the_fit_and_the_pooled_residual():
     from jamloc.features import delay_subspace, dmrs_ls
 
     fig, _ = figures.residual_explained()
-    pilots, prbs = fig.axes
+    fit, prbs = fig.axes
     seed = figures._example_seed("C")
+    series = {line.get_label(): line for ax in (fit, prbs) for line in ax.lines}
     for attack in ("none", "pilot"):
         batch = figures._example_batch(attack, 0.0, 20.0, "C", seed)
         ls, sc, power = dmrs_ls(batch.y_alloc, batch.tx)
         basis = delay_subspace(sc, figures.CFG.scs, figures.CFG.tau_max).cpu().numpy()
         projection = basis @ basis.conj().T
-        residual = ls[0].cpu().numpy() - projection @ ls[0].cpu().numpy()
+        estimates = ls[0].cpu().numpy()
+        residual = estimates - projection @ estimates
         energy = abs(residual) ** 2 / (batch.no.item() / power)
         kept = 1 - np.diag(projection).real
         pooled = energy.reshape(-1, 6).sum(1) / kept.reshape(-1, 6).sum(1)
         label = "Benign" if attack == "none" else "Pilot jammed"
-        for ax, expected in ((pilots, energy), (prbs, pooled)):
-            series = next(line for line in ax.lines if line.get_label() == label)
-            np.testing.assert_allclose(series.get_ydata(), 10 * np.log10(expected), atol=0.002)
+        np.testing.assert_allclose(series[label].get_ydata(), 10 * np.log10(pooled), atol=0.002)
+        if attack == "pilot":
+            # (a) shows the jammed slot: every pilot once, and the smooth curve is its projection
+            shown = np.r_[series["LS, clean PRB"].get_ydata(), series["LS, jammed PRB"].get_ydata()]
+            np.testing.assert_allclose(np.sort(shown), np.sort(abs(estimates)), rtol=1e-5)
+            np.testing.assert_allclose(
+                series["Smooth fit"].get_ydata(), abs(projection @ estimates), rtol=1e-5
+            )
+            jammed = series["LS, jammed PRB"].get_xdata()
+            assert len(jammed) == 6 * figures.JAM[1]
+            assert jammed.min() > figures.JAM[0] - 0.5 and jammed.max() < sum(figures.JAM) - 0.5
 
 
 def _tiny_project(tmp_path, monkeypatch):
@@ -108,6 +118,7 @@ def _tiny_project(tmp_path, monkeypatch):
 def test_data_figures_and_gallery(tmp_path, monkeypatch):
     _tiny_project(tmp_path, monkeypatch)
     for name in (
+        "system_views",
         "feature_distributions",
         "detector_outputs",
         "training_curves",

@@ -35,3 +35,18 @@ def test_init_and_figure_sync(tmp_path, monkeypatch):
 def test_figure_paths():
     tex = r"\includegraphics[width=\columnwidth]{a/b.pdf} \includegraphics{c/d} \includegraphics{a/b.pdf}"
     assert paper.figure_paths(tex) == ["a/b.pdf", "c/d.pdf"]
+
+
+def test_sync_copies_the_figures_of_every_version(tmp_path, monkeypatch):
+    results = tmp_path / "results"
+    for rel in ("figures/a.pdf", "figures/b.pdf"):
+        (results / rel).parent.mkdir(parents=True, exist_ok=True)
+        (results / rel).write_bytes(b"%PDF-")
+    monkeypatch.setenv("JAMLOC_RESULTS_DIR", str(results))
+    dest = tmp_path / "clone"
+    dest.mkdir()
+    (dest / "main.tex").write_text("\\includegraphics{figures/a.pdf}", encoding="utf-8")
+    (dest / "conference.tex").write_text("\\includegraphics[width=1in]{figures/b}", encoding="utf-8")
+    copied, missing = paper.sync_figures(dest)
+    assert sorted(copied) == ["figures/a.pdf", "figures/b.pdf"] and not missing
+    assert (dest / "figures" / "figures" / "b.pdf").is_file()
