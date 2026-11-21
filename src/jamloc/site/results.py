@@ -28,6 +28,12 @@ DATA_AIDED_RECEIVERS = (
     "true_soft",
     "true_soft_da",
 )
+# The jammer-width sweep (experiments/width_sweep): BLER against the jammed PRBs of a 12-PRB
+# allocation, and the detector's Pd against the width of the test split's jammer blocks
+WIDTH_BLER_CSV = "width_sweep/width_bler_C.csv"
+WIDTH_DETECTION_CSV = "width_sweep/width_detection.csv"
+WIDTH_RECEIVERS = ("standard", "lmmse", "p_r_e_soft", "p_r_e_soft_da", "true_soft", "true_soft_da")
+WIDTH_ALLOC_PRB = 12
 RECOVERY_RUNS = {
     "nominal": "recovery_C",
     "pulsed": "recovery_C_pulsed",
@@ -81,6 +87,17 @@ POPULATIONS = {
         "in which the decoded symbols of the data cells the map calls clean act as extra pilots; a "
         "block keeps the first decoding whose CRC passes. The paired CSVs give each difference "
         "with a 95% interval on the slots both receivers decoded."
+    ),
+    "width_sweep": (
+        "BLER with the jammer on 2-12 of the UE's 12 PRBs (PRBs 6-17), a block placed at random "
+        "inside the allocation, so it covers that share of the UE's pilots (pilot and partial-band "
+        "jamming) and data cells (data and partial-band jamming); TDL-C, 15 dB SNR, known noise "
+        "power, at -3, +3 and +9 dB JSR. Errors pool detector training seeds 0, 1, and 2, up to "
+        "1,600 slots each; a receiver stops after 100 block errors, so denominators differ. "
+        "Detection: Pd of the fused U-Net on the test split, whose jammer blocks are 2-12 PRBs wide "
+        "anywhere on the carrier, grouped by the block's width; jammed cells inside the "
+        "allocation, means over training seeds 0, 1, and 2 with 1% per-cell false alarms on "
+        "validation."
     ),
     "dmrs": (
         "One DMRS symbol per slot against two (symbols 2 and 11). The U-Nets are trained on their own "
@@ -322,6 +339,40 @@ def _data_aided_summary(rows):
     return text
 
 
+def _width_bler(rows):
+    """BLER per jammer width, attack, JSR and receiver (already pooled over the seeds)."""
+    return [
+        {
+            "jam_prb": int(r["jam_prb"]),
+            "attack": r["attack"],
+            "jsr_db": float(r["jsr_db"]),
+            "receiver": r["receiver"],
+            "block_errors": int(r["block_errors"]),
+            "blocks": int(r["blocks"]),
+            "bler": int(r["block_errors"]) / int(r["blocks"]),
+        }
+        for r in rows
+        if r["receiver"] in WIDTH_RECEIVERS and int(r["blocks"])
+    ]
+
+
+def _width_detection(rows):
+    """Pd of the U-Net per attack, JSR and width of the test split's jammer blocks."""
+    return [
+        {
+            "attack": r["attack"],
+            "jsr_db": float(r["jsr_db"]),
+            "jam_prb": int(float(r["value"])),
+            "pd": _number(r["pd"]),
+            "pd_std": _number(r["pd_std"]),
+            "num_cells": int(r["num_cells"]),
+            "num_slots": int(r["num_slots"]),
+        }
+        for r in rows
+        if r["group"] == "width"
+    ]
+
+
 def _recovery_files(directory: Path, stem: str) -> tuple[Path, Path]:
     for name in (f"{stem}_replay", stem):
         points = directory / f"{name}.csv"
@@ -370,6 +421,11 @@ def write_results(source: Path, build: Path) -> None:
             continue  # the lower-SNR run is optional; the 15 dB one is required
         aided[snr] = copy("data_aided", source / f"{stem}.csv", "data_aided_")
         copy("data_aided", source / f"{stem}_paired.csv", "data_aided_")
+    width_bler = width_detection = None
+    if (source / WIDTH_BLER_CSV).is_file():  # optional: the sweep may not have been run
+        width_bler = copy("width_sweep", source / WIDTH_BLER_CSV, "width_")
+        if (source / WIDTH_DETECTION_CSV).is_file():
+            width_detection = copy("width_sweep", source / WIDTH_DETECTION_CSV, "width_")
     dmrs_detection = copy("dmrs", source / DMRS_DETECTION_CSV)
     dmrs_recovery = copy("dmrs", source / DMRS_RECOVERY_CSV)
 
@@ -388,6 +444,12 @@ def write_results(source: Path, build: Path) -> None:
             "recovery": _dmrs_recovery(_read(dmrs_recovery)),
         },
     }
+    if width_bler:
+        payload["width_sweep"] = {
+            "rows": _width_bler(_read(width_bler)),
+            "detection": _width_detection(_read(width_detection)) if width_detection else [],
+            "alloc_prb": WIDTH_ALLOC_PRB,
+        }
     for kind, section in payload.items():
         if not section["rows"]:
             raise ValueError(f"No eligible {kind} rows in {', '.join(paths[kind])}")

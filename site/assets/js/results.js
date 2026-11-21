@@ -415,6 +415,92 @@ function dataAided(section) {
       percent(r.bler, 2), `${integer(r.block_errors)}/${integer(r.blocks)}`])));
 }
 
+// BLER against the jammer's width (jammed PRBs of the UE's allocation), and the U-Net's Pd
+// against the width of the test set's jammer blocks
+const WIDTH_STYLE = {
+  standard: ["#000000", "x-thin-open", "dot"],
+  lmmse: ["#777777", "y-down-open", "dot"],
+  p_r_e_soft: ["#0072b2", "circle-open", "solid"],
+  p_r_e_soft_da: ["#cc0000", "square-open", "solid"],
+  true_soft: ["#009e73", "triangle-up-open", "dashdot"],
+  true_soft_da: ["#000000", "diamond-open", "solid"],
+};
+const JSR_COLORS = { "-15": "#666666", "-9": "#008000", "-3": "#0033cc", "3": "#cc0000", "9": "#000000" };
+
+function widthSweep(section) {
+  const summary = document.querySelector("#width-summary");
+  if (!section) {
+    summary.textContent = "This experiment is still running; its results will appear here.";
+    return;
+  }
+  sectionContent("width", section);
+  const attackPick = document.querySelector("#width-attack");
+  const jsrPick = document.querySelector("#width-jsr");
+  const total = section.alloc_prb;
+  const levels = ["partial", "pilot", "data"].filter(a => section.rows.some(r => r.attack === a));
+  const jsrs = [...new Set(section.rows.map(r => r.jsr_db))].sort((a, b) => b - a);
+  options(attackPick, levels.map(key => [key, attacks[key] ?? key]));
+  options(jsrPick, jsrs.map(j => [String(j), signedDb(j)]));
+  jsrPick.value = String(jsrs.includes(3) ? 3 : jsrs[0]);
+  const widths = [...new Set(section.rows.map(r => r.jam_prb))].sort((a, b) => a - b);
+  const what = key => key === "pilot" ? "pilots" : key === "data" ? "data cells" : "pilots and data cells";
+
+  function show() {
+    const key = attackPick.value;
+    const jsr = Number(jsrPick.value);
+    const rows = section.rows.filter(r => r.attack === key && r.jsr_db === jsr);
+    const traces = Object.keys(WIDTH_STYLE).flatMap(rx => {
+      const series = rows.filter(r => r.receiver === rx).sort((a, b) => a.jam_prb - b.jam_prb);
+      if (!series.length) return [];
+      const [color, symbol, dash] = WIDTH_STYLE[rx];
+      return [{
+        x: series.map(r => r.jam_prb),
+        y: series.map(r => (r.block_errors ? r.bler : 1 / r.blocks)),
+        customdata: series.map(r => [r.block_errors, r.blocks, Math.round(100 * r.jam_prb / total)]),
+        type: "scatter", mode: "lines+markers", name: receiverName(rx),
+        line: { color, dash, width: 1.2 }, marker: { symbol, size: 7, color, line: { width: 1.1, color } },
+        hovertemplate: "%{x} of " + total + " PRBs jammed (%{customdata[2]}%)<br>BLER %{y:.2%} (%{customdata[0]} of %{customdata[1]} blocks; with no error, drawn at 1 in the sample)<extra>%{fullData.name}</extra>",
+      }];
+    });
+    renderPlot("width-chart", traces, `Jammed PRBs of the UE's ${total}`, "BLER", {
+      xaxis: { ...axis(`Jammed PRBs of the UE's ${total}`), tickvals: widths },
+      yaxis: { ...axis("BLER"), type: "log", range: [-4.2, 0.1], tickformat: ".1%" },
+    });
+    const det = (section.detection ?? []).filter(r => r.attack === key);
+    const pdTraces = Object.keys(JSR_COLORS).map(Number).flatMap(j => {
+      const series = det.filter(r => r.jsr_db === j).sort((a, b) => a.jam_prb - b.jam_prb);
+      if (!series.length) return [];
+      const color = JSR_COLORS[String(j)];
+      return [{
+        x: series.map(r => r.jam_prb), y: series.map(r => r.pd),
+        customdata: series.map(r => [r.pd_std ?? 0, r.num_cells, r.num_slots]),
+        type: "scatter", mode: "lines+markers", name: signedDb(j),
+        line: { color, width: 1.2 }, marker: { size: 6, color },
+        hovertemplate: "%{x}-PRB blocks<br>Pd %{y:.3f} ± %{customdata[0]:.3f} (SD over seeds)<br>%{customdata[1]} jammed cells in %{customdata[2]} slots<extra>%{fullData.name} JSR</extra>",
+      }];
+    });
+    if (pdTraces.length) {
+      renderPlot("width-pd-chart", pdTraces, "Jammer block width (PRBs of the 24-PRB carrier)", "Pd", {
+        yaxis: { ...axis("Detection probability (U-Net)"), range: [-0.02, 1.02] },
+      });
+    }
+    const at = (rx, w) => rows.find(r => r.receiver === rx && r.jam_prb === w);
+    const safe = widths.filter(w => at("p_r_e_soft", w) && at("p_r_e_soft", w).bler < 0.01);
+    const widest = safe.length ? Math.max(...safe) : null;
+    const helped = widths.filter(w => at("p_r_e_soft_da", w) && at("p_r_e_soft", w) && at("p_r_e_soft_da", w).bler < at("p_r_e_soft", w).bler);
+    summary.replaceChildren(element("p", widest
+      ? `${attacks[key]} jamming at ${signedDb(jsr)}: with the jammer on up to ${widest} of the UE's ${total} PRBs (${Math.round(100 * widest / total)}% of its ${what(key)}), the U-Net map keeps the BLER under 1%. Wider than that, too little of the block is clean for the code to recover the rest${helped.length ? `; the data-aided passes lower the BLER at ${helped.join(", ")} PRBs` : ""}.`
+      : `${attacks[key]} jamming at ${signedDb(jsr)}: even the narrowest jammer costs the receiver with the U-Net map 1% of blocks or more.`));
+  }
+  attackPick.addEventListener("change", show);
+  jsrPick.addEventListener("change", show);
+  show();
+  document.querySelector("#width-table").replaceChildren(table("BLER against the jammer's width",
+    ["Receiver", "Attack", "JSR", "Jammed PRBs", "BLER", "Errors / blocks"],
+    section.rows.map(r => [receiverName(r.receiver), attacks[r.attack] ?? r.attack, signedDb(r.jsr_db),
+      `${r.jam_prb} of ${total}`, percent(r.bler, 2), `${integer(r.block_errors)}/${integer(r.blocks)}`])));
+}
+
 function dmrs(section) {
   sectionContent("dmrs", section);
   const bler = (count, jammer, receiver) => {
@@ -459,7 +545,7 @@ async function failures(host, data) {
       "blocks of this batch fail even with the true map (15 dB SNR, +3 dB JSR, noise power estimated from the empty pilot comb, which the jammer inflates).",
       "explore.html?case=pilot_whole_comb"),
     ...(block && mixed ? [finding("Hopping jammer", `${percent(block.bler)} → ${percent(mixed.bler)}`,
-      `BLER on data jamming at ${signedDb(block.jsr_db)} JSR with the block-trained map → the map trained on mixed attacks.`,
+      `BLER on data-only hopping at ${signedDb(block.jsr_db)} JSR with the block-trained map → the map trained on mixed attacks. The link opens a partial-band hopping slot.`,
       "explore.html?case=hopping")] : []),
   );
 }
@@ -475,6 +561,7 @@ if (resultsHost) {
     recovery(data.recovery);
     dmrs(data.dmrs);
     dataAided(data.data_aided);
+    widthSweep(data.width_sweep);
     matched(data.matched);
     resultsHost.setAttribute("aria-busy", "false");
     const target = document.querySelector("#failure-results");
