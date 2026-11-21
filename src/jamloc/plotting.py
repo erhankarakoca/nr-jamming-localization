@@ -20,16 +20,34 @@ ATTACK_STYLE = {
 }
 
 RC = {
+    # Times-like text and math, as in the IEEEtran body text. STIX ships with matplotlib, so the
+    # figures look the same on every machine.
+    "font.family": "serif",
+    "font.serif": ["STIXGeneral", "Times New Roman", "Times", "DejaVu Serif"],
+    "mathtext.fontset": "stix",
     "font.size": 8,
     "axes.labelsize": 8,
     "axes.titlesize": 8,
     "legend.fontsize": 7,
     "xtick.labelsize": 7,
     "ytick.labelsize": 7,
-    "lines.linewidth": 1.2,
-    "lines.markersize": 4,
+    "axes.linewidth": 0.6,
+    "lines.linewidth": 1.0,
+    "lines.markersize": 3.5,
+    "xtick.direction": "in",
+    "ytick.direction": "in",
+    "xtick.major.width": 0.6,
+    "ytick.major.width": 0.6,
+    "xtick.major.size": 3,
+    "ytick.major.size": 3,
     "axes.grid": True,
-    "grid.alpha": 0.3,
+    "grid.linewidth": 0.4,
+    "grid.linestyle": ":",
+    "grid.alpha": 0.6,
+    "legend.fancybox": False,
+    "legend.edgecolor": "0.3",
+    "legend.framealpha": 1.0,
+    "legend.borderpad": 0.3,
     "pdf.fonttype": 42,  # embed TrueType fonts (editable text in the PDF)
     "savefig.dpi": 300,
 }

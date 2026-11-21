@@ -768,7 +768,7 @@ def plot_vs_snr(detector: str = "fused"):
                 finite = [m for m in margins if np.isfinite(m)]
                 ys.append(min(finite) if finite else np.nan)
                 censored.append(len(finite) < len(margins))
-            label = f"TDL-{channel}, {alpha:.1%} slot false alarm"
+            label = f"TDL-{channel}, {alpha:.1%} false alarm".replace(".0%", "%")
             ax.plot(snrs, ys, color=color, ls=ls, label=label)
             for x, y, c in zip(snrs, ys, censored, strict=True):
                 r = intervals.get((x, channel, alpha))
@@ -785,7 +785,7 @@ def plot_vs_snr(detector: str = "fused"):
                 face = "white" if c else color
                 ax.plot(x, y, marker=marker, color=color, markerfacecolor=face, ls="none")
     ax.axhline(0, color="k", lw=0.8)
-    ax.set(xlabel="SNR [dB]", ylabel="smallest detection margin [dB]")
+    ax.set(xlabel="SNR (dB)", ylabel="Smallest margin (dB)")
     spare = ax.secondary_xaxis(
         "top",
         functions=(
@@ -793,7 +793,7 @@ def plot_vs_snr(detector: str = "fused"):
             lambda m: m + benign_snr_at_bler("C"),
         ),
     )
-    spare.set_xlabel("spare link margin, TDL-C [dB]")
+    spare.set_xlabel("Spare link margin, TDL-C (dB)")
     fig.legend(loc="outside lower center", ncols=2, frameon=False, fontsize=6)
     return fig
 

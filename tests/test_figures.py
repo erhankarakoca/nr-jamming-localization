@@ -69,16 +69,16 @@ def test_residual_panels_show_the_fit_and_the_pooled_residual():
         energy = abs(residual) ** 2 / (batch.no.item() / power)
         kept = 1 - np.diag(projection).real
         pooled = energy.reshape(-1, 6).sum(1) / kept.reshape(-1, 6).sum(1)
-        label = "Benign" if attack == "none" else "Pilot jammed"
+        label = "Benign slot" if attack == "none" else "Jammed slot"
         np.testing.assert_allclose(series[label].get_ydata(), 10 * np.log10(pooled), atol=0.002)
         if attack == "pilot":
             # (a) shows the jammed slot: every pilot once, and the smooth curve is its projection
-            shown = np.r_[series["LS, clean PRB"].get_ydata(), series["LS, jammed PRB"].get_ydata()]
+            shown = np.r_[series["Clean PRBs"].get_ydata(), series["Jammed PRBs"].get_ydata()]
             np.testing.assert_allclose(np.sort(shown), np.sort(abs(estimates)), rtol=1e-5)
             np.testing.assert_allclose(
-                series["Smooth fit"].get_ydata(), abs(projection @ estimates), rtol=1e-5
+                series["Subspace fit"].get_ydata(), abs(projection @ estimates), rtol=1e-5
             )
-            jammed = series["LS, jammed PRB"].get_xdata()
+            jammed = series["Jammed PRBs"].get_xdata()
             assert len(jammed) == 6 * figures.JAM[1]
             assert jammed.min() > figures.JAM[0] - 0.5 and jammed.max() < sum(figures.JAM) - 0.5
 

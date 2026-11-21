@@ -39,10 +39,10 @@ from jamloc.train import PIXEL_HIDDEN_MATCHED, checkpoint_path, load_model
 
 FA = 0.01
 DETECTOR_STYLE = {
-    "fused": {"label": "U-Net, P+R+E", "color": "#0072B2", "marker": "o", "linestyle": "-"},
-    "no_residual": {"label": "U-Net, P+E", "color": "#56B4E9", "marker": "v", "linestyle": "--"},
-    "power": {"label": "U-Net, power only", "color": "#E69F00", "marker": "s", "linestyle": "-."},
-    "evm": {"label": "U-Net, EVM only", "color": "#D55E00", "marker": "^", "linestyle": ":"},
+    "fused": {"label": "U-Net P+R+E", "color": "#0072B2", "marker": "o", "linestyle": "-"},
+    "no_residual": {"label": "U-Net P+E", "color": "#56B4E9", "marker": "v", "linestyle": "--"},
+    "power": {"label": "U-Net P", "color": "#E69F00", "marker": "s", "linestyle": "-."},
+    "evm": {"label": "U-Net E", "color": "#D55E00", "marker": "^", "linestyle": ":"},
     "evm_threshold": {
         "label": "EVM threshold",
         "color": "#CC79A7",
@@ -56,19 +56,19 @@ DETECTOR_STYLE = {
         "linestyle": "--",
     },
     "power_threshold": {
-        "label": "Power threshold (Li et al.)",
+        "label": "Power test",
         "color": "#999999",
         "marker": "*",
         "linestyle": ":",
     },
     "residual_cfar": {
-        "label": "Residual, exact p-value",
+        "label": "Residual test",
         "color": "#000000",
         "marker": "+",
         "linestyle": "-.",
     },
     "block_test": {
-        "label": "Block test (no training)",
+        "label": "Block test",
         "color": "#882255",
         "marker": "P",
         "linestyle": "-",
@@ -256,9 +256,14 @@ def aggregate(rows: list[dict], values) -> list[dict]:
     return out
 
 
-def plot_pd(pd_rows, cells: str, title: str):
-    fig, axes = new_figure(7.16, 2.9, ncols=3, sharey=True)
-    for ax, attack in zip(axes, ("pilot", "data", "partial"), strict=True):
+ATTACK_TITLES = {"pilot": "Pilot jamming", "data": "Data jamming", "partial": "Partial-band jamming"}
+
+
+def plot_pd(pd_rows, cells: str, title: str | None = None):
+    """Pd against JSR, one panel per attack. ``title`` (the population) is not drawn: the paper
+    gives it in the caption."""
+    fig, axes = new_figure(7.16, 2.6, ncols=3, sharey=True)
+    for i, (ax, attack) in enumerate(zip(axes, ("pilot", "data", "partial"), strict=True)):
         for name in PLOT_DETECTORS:
             style = DETECTOR_STYLE[name]
             rows = [
@@ -276,12 +281,28 @@ def plot_pd(pd_rows, cells: str, title: str):
                 ax.plot(x, mean, **style)
                 # band: +-1 standard deviation over training seeds
                 ax.fill_between(x, mean - std, mean + std, color=style["color"], alpha=0.15, lw=0)
-        ax.set(title=f"{attack} jamming", xlabel="JSR per jammed RE [dB]", ylim=(-0.02, 1.02))
-    axes[0].set_ylabel(f"Pd at {FA:.0%} per-cell false alarm")
+        ax.set(xlabel="JSR (dB)", ylim=(-0.02, 1.02))
+        ax.set_title(f"({'abc'[i]}) {ATTACK_TITLES[attack]}", loc="left", pad=3)
+    axes[0].set_ylabel(r"$P_\mathrm{d}$")
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="outside lower center", ncols=4, frameon=False)
-    fig.suptitle(title)
+    fig.legend(handles, labels, loc="outside lower center", ncols=8, frameon=False, columnspacing=1.0,
+               handlelength=2.2, handletextpad=0.4)
     return fig
+
+
+def replot(name: str = "test") -> None:
+    """Redraw the Pd figures of a split from its saved ``{name}_pd_vs_jsr.csv``."""
+    out = results_dir() / "eval"
+    with open(out / f"{name}_pd_vs_jsr.csv", encoding="utf-8", newline="") as f:
+        rows = [
+            {k: (float(v) if k in ("jsr_db", "pd_mean", "pd_std") else v) for k, v in r.items()}
+            for r in csv.DictReader(f)
+        ]
+    for cells in ("all", "scheduled"):
+        with paper_style():
+            fig = plot_pd(rows, cells)
+        save(fig, out / f"{name}_pd_vs_jsr_{cells}")
+    print(f"Redrew {out / name}_pd_vs_jsr_*.pdf/.png")
 
 
 def _write_csv(rows, path):
@@ -296,6 +317,9 @@ def main(argv=None):
     splits = [s for s in SPLITS if not s.startswith(("train", "val"))]
     p.add_argument("--split", choices=splits, default="test")
     p.add_argument(
+        "--plot-only", action="store_true", help="redraw the Pd figures from the saved CSV"
+    )
+    p.add_argument(
         "--snr-db",
         type=float,
         nargs=2,
@@ -303,6 +327,9 @@ def main(argv=None):
         help="only evaluate slots with MIN <= SNR < MAX",
     )
     args = p.parse_args(argv)
+    if args.plot_only:
+        replot(args.split)
+        return
 
     data = "dmrs2" if args.split.endswith("_dmrs2") else ""
     seeds = available_seeds(data)

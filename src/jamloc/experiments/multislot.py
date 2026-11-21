@@ -151,8 +151,8 @@ def plot_on_axis(ax, curves, checks, *, show_mc_key=False):
             color=color,
         )
     ax.set(
-        xlabel="JNR per pilot [dB]",
-        ylabel=r"$P_d$ at 1% false alarm",
+        xlabel="JNR (dB)",
+        ylabel=r"$P_\mathrm{d}$",
         ylim=(0, 1.02),
     )
     if show_mc_key:
