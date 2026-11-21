@@ -357,10 +357,12 @@ def simulate(
     jammer="nominal",
     noise_estimate="true",
     replay=None,
+    attacks=None,
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
     ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
-    batches, decoding only the receivers ``decode[point]``."""
+    batches, decoding only the receivers ``decode[point]``. ``attacks``: simulate only these cases
+    (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``)."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
     link = JammedPUSCHLink(cfg)
     nest = noise_estimate != "true"
@@ -404,6 +406,8 @@ def simulate(
     if only and replay is None:  # re-run some receivers only
         cases = [(a, w, tuple(rx for rx in rxs if rx in only)) for a, w, rxs in cases]
         cases = [c for c in cases if c[2]]
+    if attacks:
+        cases = [c for c in cases if ("pilot_whole_allocation" if c[1] else c[0]) in attacks]
     rows, slots = [], {}
     for attack, whole, receivers in cases:
         name = "pilot_whole_allocation" if whole else attack
@@ -713,6 +717,12 @@ def main(argv=None):
         default="true",
         help="noise power of the receiver: the true one, or estimated per slot (jamloc.noise)",
     )
+    p.add_argument(
+        "--attacks",
+        nargs="+",
+        choices=("none", "pilot", "data", "partial", "pilot_whole_allocation"),
+        help="simulate only these cases",
+    )
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     p.add_argument(
         "--replay",
@@ -773,6 +783,7 @@ def main(argv=None):
                 args.jammer,
                 args.noise_estimate,
                 replay,
+                args.attacks,
             )
             if args.replay:
                 bad = check_replay(rows, before)
