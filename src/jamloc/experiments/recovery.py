@@ -806,6 +806,10 @@ def main(argv=None):
     slot_files = sorted(stem.parent.glob(f"{stem.name}_seed*_slots.npz"))
     if slot_files:
         _write_rows(paired_rows(slot_files), stem.with_name(f"{stem.name}_paired.csv"))
+    if not any(r["attack"] in ("pilot", "data", "partial") for r in pooled):
+        # e.g. --attacks pilot_whole_allocation: the figures plot the nominal attacks only
+        print(f"Wrote {stem}.csv and {stem.name}_paired.csv (no nominal attack to plot)")
+        return
     with paper_style():
         main_fig = plot(pooled, args.channel)  # the message: no protection vs map vs true map
         ablation = plot(
