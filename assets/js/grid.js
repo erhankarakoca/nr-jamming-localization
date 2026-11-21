@@ -220,7 +220,7 @@ const lessons = {
 };
 
 async function explorer(root) {
-  const entries = (await loadManifest()).cases.filter(item => !["fig3", "jsr_sweep", "walkthrough_flip"].includes(item.name));
+  const entries = (await loadManifest()).cases.filter(item => !["fig3", "jsr_sweep", "walkthrough_flip", "aided_flip"].includes(item.name));
   const caseSelect = document.querySelector("#case-select");
   const feature = document.querySelector("#feature-select");
   const detector = document.querySelector("#detector-select");
