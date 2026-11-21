@@ -912,15 +912,18 @@ def system_views():
     sc_of_point = np.arange(12 * n * num_data) % (12 * n)
     jammed_point = (a0 + sc_of_point // 12 >= j0) & (a0 + sc_of_point // 12 < j0 + jn)
 
-    width, height = 7.16, 1.66
+    # One row in processing order: (a) grid -> (b) channel estimate -> (c) equalized symbols ->
+    # (d) features -> (e) U-Net map -> (f) the same slot equalized again with the map
+    width, height = 7.16, 1.6
     fig = Figure(figsize=(width, height))
 
-    def axes(left, w, bottom=0.46, h=1.0):  # inches
+    def axes(left, w, bottom=0.44, h=0.95):  # inches
         return fig.add_axes((left / width, bottom / height, w / width, h / height))
 
-    a, b, c = axes(0.36, 0.62), axes(1.4, 1.05), axes(2.86, 0.62)
-    cbar = axes(3.52, 0.05, bottom=0.56, h=0.8)
-    dd, e, f = axes(4.02, 0.62), axes(4.98, 1.0), axes(6.1, 1.0)
+    a, b, e = axes(0.34, 0.58), axes(1.4, 0.95), axes(2.68, 0.95)
+    c, cbar, dd = axes(3.95, 0.58), axes(4.58, 0.045, bottom=0.53, h=0.77), axes(5.12, 0.58)
+    f = axes(6.02, 0.95)
+    arrows = ((0.97, 1.19), (2.4, 2.62), (3.68, 3.9), (4.87, 5.07), (5.75, 5.97))  # inches
 
     # (a) received power, (c) residual on the DMRS cells and EVM on the data cells, same scale
     scale = {"cmap": "viridis", "vmin": 0, "vmax": 25, "origin": "lower", "aspect": "auto"}
@@ -933,7 +936,7 @@ def system_views():
     c.set_facecolor(EMPTY_COLOR)
     fig.colorbar(image, cax=cbar, ticks=[0, 10, 20])
     cbar.tick_params(labelsize=6.5, length=2, width=0.5, pad=1)
-    cbar.set_title("dB", fontsize=7, pad=2)
+    cbar.set_ylabel("dB", labelpad=1)
     # (d) the U-Net map
     _cell_grid(dd, np.where(flags, 2, np.where(alloc, 1, 0)), [EMPTY_COLOR, ALLOC_COLOR, DMRS_COLOR])
     for ax in (a, c, dd):
@@ -960,7 +963,6 @@ def system_views():
     b.plot(x[hit], ls[hit], ls="none", marker="s", ms=1.7, mfc=JAM_COLOR, mec="none")
     b.set(xlim=(a0 - 0.5, a0 + n - 0.5), ylim=(0, None), xticks=[a0, j0, j0 + jn - 1, a0 + n - 1])
     b.set_xlabel("PRB", labelpad=1)
-    b.set_ylabel(r"$|\tilde{h}_p|$", labelpad=1)
     b.tick_params(length=2, width=0.5, pad=1.5)
     b.grid(False)
 
@@ -969,16 +971,43 @@ def system_views():
         xy = np.array(d["x_hat"][d["receivers"][receiver]["x_hat"]], dtype=float)
         _constellation(ax, xy, jammed_point, "")
 
-    for ax, label in zip((a, b, c, dd, e, f), "abcdef", strict=True):
+    from matplotlib.patches import FancyArrowPatch
+
+    names = (
+        "Received grid",
+        "Channel estimate",
+        "Equalized symbols",
+        "Features",
+        "U-Net map",
+        "With the map",
+    )
+    order = (a, b, e, c, dd, f)
+    for i, (ax, name) in enumerate(zip(order, names, strict=True)):
         box = ax.get_position()
-        fig.text((box.x0 + box.x1) / 2, 0.02 / height, f"({label})", ha="center", va="bottom")
+        fig.text(
+            (box.x0 + box.x1) / 2, 0.02 / height, f"({'abcdef'[i]}) {name}", ha="center", va="bottom"
+        )
+    # Arrows between consecutive steps, at mid-height of the panels
+    mid = (0.44 + 0.95 / 2) / height
+    for x0, x1 in arrows:
+        fig.add_artist(
+            FancyArrowPatch(
+                (x0 / width, mid),
+                (x1 / width, mid),
+                transform=fig.transFigure,
+                arrowstyle="-|>",
+                mutation_scale=6,
+                lw=0.7,
+                color="0.2",
+            )
+        )
     crc = meta["batch_crc"]
     caption = (
         f"One slot with pilot jamming at +{meta['jsr_db']} dB JSR on PRBs {j0}-{j0 + jn - 1} "
-        f"(TDL-C, {meta['snr_db']} dB SNR, UE on PRBs {a0}-{a0 + n - 1}). (a) Received power. "
-        "(b) LS pilot estimates and their delay-subspace fit. (c) Residual on the DMRS and EVM on "
-        "the data cells. (d) U-Net map. (e) Equalized symbols without and (f) with the map, "
-        "jammed PRBs in color. Outlines mark the jammed cells. In this batch, "
+        f"(TDL-C, {meta['snr_db']} dB SNR, UE on PRBs {a0}-{a0 + n - 1}), in processing order: "
+        "(a) received power, (b) magnitude of the LS pilot estimates and their subspace fit, (c) equalized "
+        "symbols, (d) residual on the DMRS and EVM on the data cells, (e) U-Net map, and (f) the "
+        "same slot equalized again with the map. Outlines mark the jammed cells. In this batch, "
         f"{crc['standard']['failures']} of {crc['standard']['slots']} slots fail the CRC without "
         f"the map and {crc['fused_soft']['failures']} with it."
     )
