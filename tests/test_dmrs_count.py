@@ -213,3 +213,10 @@ def test_dmrs_count_small(tmp_path, monkeypatch):
     assert {float(r["jsr_db"]) for r in recovery} == {-15, -3, 3, 9}
     assert {r["receiver"] for r in recovery} == {"standard", "lmmse", "p_r_e_soft", "true_soft"}
     assert len(recovery) == len(cases) * 4 * 4 and {int(r["blocks"]) for r in recovery} == {2}
+
+    # Detection only: the tables are rewritten, the recovery results of the earlier run are kept
+    before = (out / "recovery.csv").read_bytes()
+    (out / "detection.md").unlink()
+    dmrs_count.main(["--small", "--seeds", "0", "--no-recovery"])
+    assert (out / "detection.md").is_file()
+    assert (out / "recovery.csv").read_bytes() == before

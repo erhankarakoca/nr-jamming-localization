@@ -2,8 +2,8 @@
 
 The nominal and two-DMRS detectors are evaluated on their respective test splits. Thresholds
 target 1% false alarms among scored, non-jammed cells on the matching validation split. Detection
-uses both TDL models and counts all carrier cells. The F1 and false-alarm columns use the whole
-test grid, and the Pd columns use only jammed cells at -15 dB JSR.
+uses both TDL models. The F1 and false-alarm columns count all carrier cells of the test grid; the
+Pd columns count the jammed cells inside the allocation at -15 dB JSR, as in the paper.
 
 Recovery uses TDL-C at 15 dB SNR, with 12 scheduled PRBs and a block of 4 jammed PRBs inside
 that allocation. Each receiver decodes the same batches at a point. The additional first-only
@@ -31,6 +31,7 @@ from jamloc.baselines import block_test_scores, evm_scores
 from jamloc.config import SimConfig
 from jamloc.dataset import generate, load
 from jamloc.evaluate import FA, _logits, _write_csv
+from jamloc.features import FEATURE_NAMES
 from jamloc.experiments.recovery import ALLOC, JAM_SIZE, _scenario, simulate_point
 from jamloc.jammer import ATTACKS
 from jamloc.link import JammedPUSCHLink, seed_everything
@@ -94,6 +95,7 @@ def _prepare(data: str, seeds, epochs: int, small: bool):
 
 def _detection_row(count, detector, seed, threshold, scores, test):
     labels = test["labels"].astype(bool)
+    inside = test["features"][:, FEATURE_NAMES.index("alloc_mask")] > 0
     pred = scores > threshold
     row = {
         "dmrs_count": count,
@@ -106,7 +108,8 @@ def _detection_row(count, detector, seed, threshold, scores, test):
         row[f"f1_{attack}"] = f1(pred[rows], labels[rows])
         if attack in ("pilot", "data"):
             weak = rows & (test["jsr_db"] == -15)
-            row[f"pd_{attack}_m15"] = detection_rate(scores[weak][labels[weak]], threshold)
+            cells = labels[weak] & inside[weak]  # jammed cells inside the allocation
+            row[f"pd_{attack}_m15"] = detection_rate(scores[weak][cells], threshold)
     row["f1_all"] = f1(pred, labels)
     row["fa"] = float(pred[~labels].mean())
     return row
@@ -185,7 +188,8 @@ def _write_table(rows, path, small: bool):
         "# Detection with one or two DMRS symbols",
         "",
         "Thresholds target 1% false alarms among scored, non-jammed validation cells.",
-        "Scores use the whole carrier on the matching test split. Pd uses the jammed cells.",
+        "F1 and false alarms use the whole carrier of the matching test split; Pd uses the jammed",
+        "cells inside the allocation.",
         "U-Net results are averaged over the requested training seeds.",
     ]
     if small:
@@ -207,6 +211,11 @@ def main(argv=None):
     p.add_argument("--batches", "--max-mc-iter", type=int, help="batches per point (default 100)")
     p.add_argument(
         "--small", action="store_true", help="tiny splits, one epoch and four slots per point"
+    )
+    p.add_argument(
+        "--no-recovery",
+        action="store_true",
+        help="only the detection tables (recovery.csv of an earlier run is kept)",
     )
     args = p.parse_args(argv)
     if (
@@ -241,6 +250,9 @@ def main(argv=None):
         _write_csv(detection, out / "detection.csv")
         _write_table(detection, out / "detection.md", args.small)
 
+        if args.no_recovery:
+            print(f"Wrote detection.csv and detection.md in {out}")
+            return
         recovery = [
             row
             for count, models in detectors.items()
