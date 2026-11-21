@@ -102,13 +102,13 @@ def _example_seed(channel: str) -> int:
 # --- 1. What the attacker does ---------------------------------------------------------------
 
 
-# Where the jammer's block sits: anywhere on the carrier, so inside the allocation, across its
-# edge, outside it, or (scheduling-aware) on exactly the scheduled PRBs.
+# The jammer does not know the allocation, so its block (2-12 PRBs) lands anywhere: blocks of
+# different widths inside the allocation, across its edges, or (scheduling-aware) exactly on it.
 PATTERN_EXAMPLES = (
-    ("(a) Pilot, inside", "pilot", 10, 4),
-    ("(b) Data, across the edge", "data", 15, 6),
-    ("(c) Partial-band, outside", "partial", 0, 4),
-    ("(d) Pilot, whole allocation", "pilot", ALLOC[0], ALLOC[1]),
+    ("(a) Pilot, 4 PRBs", "pilot", 10, 4),
+    ("(b) Data, 6 PRBs", "data", 15, 6),
+    ("(c) Partial-band, 8 PRBs", "partial", 2, 8),
+    ("(d) Pilot, all 12 PRBs", "pilot", ALLOC[0], ALLOC[1]),
 )
 EMPTY_COLOR = "#F2F2F2"
 
@@ -194,10 +194,11 @@ def attack_patterns():
     )
     caption = (
         "Resource grid of one slot (24 PRBs by 14 OFDM symbols) with the UE on PRBs 6-17 and "
-        "its DMRS on symbol 2. The jammer's block of 2-12 PRBs can sit anywhere on the carrier: "
-        "(a) pilot jamming inside the allocation, (b) data jamming across its edge, (c) "
-        "partial-band jamming on unscheduled PRBs, where only the power reveals it, and (d) a "
-        "scheduling-aware jammer on the DMRS of the whole allocation. Orange cells are the "
+        "its DMRS on symbol 2. The jammer does not know the allocation, so its block of 2-12 "
+        "PRBs can cover part of it or extend beyond it: (a) pilot jamming on 4 PRBs inside the "
+        "allocation, (b) data jamming on 6 PRBs across its upper edge, (c) partial-band jamming "
+        "on 8 PRBs across its lower edge, and (d) a scheduling-aware jammer on the DMRS of all "
+        "12 scheduled PRBs. Orange cells are the "
         "attacked cells, which are the labels. Hatched cells are unjammed data cells whose EVM "
         "rises under pilot jamming, because they are equalized with a corrupted channel estimate."
     )
