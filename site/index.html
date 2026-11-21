@@ -38,32 +38,37 @@
 </header>
 
 <figure class="teaser" aria-labelledby="teaser-caption">
-  <div class="teaser-body">
-    <div class="teaser-grid">
-      <p class="panel-title">Where the jammer transmitted, and what the U-Net flagged</p>
-      <div id="teaser-grid" aria-busy="true">Loading the slot…</div>
-    </div>
-    <div class="teaser-plot">
-      <p class="panel-title">Equalized data symbols of the jammed PRBs</p>
-      <div class="toggle" role="group" aria-label="Receiver">
-        <button type="button" id="show-standard" aria-pressed="true">Standard receiver</button>
-        <button type="button" id="show-map" aria-pressed="false">With the jamming map</button>
-      </div>
-      <canvas id="teaser-canvas" width="320" height="320" role="img" aria-label="Equalized symbols"></canvas>
-      <p id="teaser-crc" class="crc-line" aria-live="polite"></p>
+  <div class="teaser-head">
+    <p class="teaser-title">One jammed slot, decoded twice</p>
+    <div class="toggle" role="group" aria-label="Receiver">
+      <button type="button" id="show-standard" aria-pressed="true">Standard receiver</button>
+      <button type="button" id="show-map" aria-pressed="false">With the jamming map</button>
     </div>
   </div>
+  <div class="teaser-body">
+    <div class="teaser-panel">
+      <p class="panel-title">The user's PRBs over one slot</p>
+      <div class="viz-box" id="teaser-grid" aria-busy="true">Loading the slot…</div>
+    </div>
+    <div class="teaser-panel">
+      <p class="panel-title">Equalized data symbols of all the user's PRBs</p>
+      <div class="viz-box"><canvas id="teaser-canvas" class="viz" role="img" aria-label="Equalized symbols"></canvas></div>
+    </div>
+  </div>
+  <p id="teaser-crc" class="crc-line" aria-live="polite"></p>
+  <div id="teaser-legend"></div>
   <figcaption id="teaser-caption"></figcaption>
 </figure>
 
 <section aria-labelledby="short-heading" class="in-short">
   <h2 id="short-heading">In short</h2>
-  <p>A jammer does not have to drown a whole 5G uplink slot. If it hits only the pilots, the
-    reference symbols the receiver uses to learn the channel, the data symbols are equalized with a
-    wrong channel; in our simulations this broke the link with 4–5 dB less jammer energy than
-    jamming the data. We let the receiver find, cell by cell, where a jammer transmitted, using only
-    what it measures in the slot, and then decode the same slot again with that map. All results
-    come from simulations of a single-antenna 5G NR uplink.</p>
+  <p>A jammer does not have to drown a whole 5G uplink slot. Jamming a band of a few resource blocks
+    is enough: it spoils the pilots the receiver learns the channel from and the data symbols in that
+    band, and a standard receiver, which trusts every cell, then fails to decode. We let the receiver
+    find, cell by cell, where a jammer transmitted, using only what it measures in the slot, and
+    decode the same slot again with that map: jammed pilots are left out of the channel estimate and
+    the bits of jammed data cells count less. All results come from simulations of a single-antenna
+    5G NR uplink.</p>
 </section>
 
 <section aria-labelledby="glance-heading">
@@ -93,10 +98,18 @@
 
 <section aria-labelledby="how-heading">
   <h2 id="how-heading">How it works, step by step</h2>
-  <p>The same slot as in the teaser above, followed through the receiver. Press Play, or step
-    through with Back and Next.</p>
+  <p>The slot from the top of the page, followed through the receiver in five stages. The receiver
+    first does what any receiver does: it estimates the channel from the pilots and equalizes the
+    data. From the slot and those equalized symbols it measures three clues per cell, a small U-Net
+    turns them into a map of the jammed cells, and the receiver decodes the same buffered samples
+    again with that map. Press Play, or step through with Back and Next.</p>
   <div id="method-anim" class="anim" aria-busy="true" aria-label="Animated walk through the method">
-    <div class="anim-stage"><div class="anim-left">Loading the slot…</div><div class="anim-right"></div></div>
+    <ol class="anim-stages" aria-label="Stages"></ol>
+    <div class="anim-stage">
+      <div class="viz-box anim-left">Loading the slot…</div>
+      <div class="viz-box anim-right"></div>
+    </div>
+    <div class="anim-legend"></div>
     <div class="anim-caption" aria-live="polite"></div>
     <div class="anim-controls">
       <button type="button" class="anim-prev">Back</button>
@@ -113,7 +126,11 @@
   <p>If the jammer covers every pilot, no clean pilot is left for the map to point to. The receiver
     then decodes, uses the data cells it decoded as extra pilots, and decodes again.</p>
   <div id="aided-anim" class="anim" aria-busy="true" aria-label="Animated data-aided passes">
-    <div class="anim-stage"><div class="anim-left">Loading the slot…</div><div class="anim-right"></div></div>
+    <div class="anim-stage">
+      <div class="viz-box anim-left">Loading the slot…</div>
+      <div class="viz-box anim-right"></div>
+    </div>
+    <div class="anim-legend"></div>
     <div class="anim-caption" aria-live="polite"></div>
     <div class="anim-controls">
       <button type="button" class="anim-prev">Back</button>
@@ -157,8 +174,8 @@
       the nominal case, a noise-like jammer aligned with the slot grid.</li>
     <li>Detection lags block errors at low SNR: the smallest margin is 8.6 dB at 15 dB SNR but
       −6.1 dB at 5 dB SNR (TDL-C).</li>
-    <li>The detector can miss cells: in the slot animated above it flags 3 of the 4 jammed pilot
-      cells (the block still decodes).</li>
+    <li>The detector misses part of a weak jammer: at −15 dB JSR the U-Net finds 57% of the jammed
+      pilot cells (<a href="results.html#detection">detection results</a>).</li>
     <li>A jammer that hops between PRBs from symbol to symbol needs a detector trained on such
       jammers; the nominally trained map leaves 21% BLER on hopping data jamming at +9 dB
       (<a href="explore.html?case=hopping">see a hopping slot</a>).</li>

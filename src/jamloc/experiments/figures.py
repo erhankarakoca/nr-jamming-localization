@@ -17,7 +17,7 @@ import json
 
 import numpy as np
 import torch
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap, to_rgba
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import MultipleLocator
@@ -250,12 +250,24 @@ def residual_explained():
     jammed = (ALLOC[0] + sc // 12 >= JAM[0]) & (ALLOC[0] + sc // 12 < sum(JAM))
     fit.plot(x, smooth, color="black", lw=0.9, label="Subspace fit", zorder=3)
     fit.plot(
-        x[~jammed], estimates[~jammed], ls="none", marker="o", ms=2.4, mfc="none", mec=CLEAN_COLOR,
+        x[~jammed],
+        estimates[~jammed],
+        ls="none",
+        marker="o",
+        ms=2.4,
+        mfc="none",
+        mec=CLEAN_COLOR,
         mew=0.5,
         label="Clean PRBs",
     )
     fit.plot(
-        x[jammed], estimates[jammed], ls="none", marker="s", ms=2.4, mfc=JAM_COLOR, mec="none",
+        x[jammed],
+        estimates[jammed],
+        ls="none",
+        marker="s",
+        ms=2.4,
+        mfc=JAM_COLOR,
+        mec="none",
         label="Jammed PRBs",
     )
     fit.set_ylabel(r"$|\tilde{h}_p|$", fontsize=8)
@@ -270,7 +282,14 @@ def residual_explained():
         batch = _example_batch(attack, 0.0, 20.0, "C", seed)
         db = 10 * np.log10(residual_map(batch, CFG)[0, numbers, CFG.dmrs_symbol].cpu().numpy())
         prbs.plot(
-            numbers, db, ls="none", marker=mark, ms=3.5, mec=edge_color, mfc=face, mew=0.55,
+            numbers,
+            db,
+            ls="none",
+            marker=mark,
+            ms=3.5,
+            mec=edge_color,
+            mfc=face,
+            mew=0.55,
             label=label,
         )
         if attack == "pilot":
@@ -293,8 +312,12 @@ def residual_explained():
     prbs.set_title("(b)", loc="left", fontsize=8, pad=2)
     legend = {"frameon": False, "fontsize": 7, "handlelength": 1.3, "columnspacing": 0.9}
     fig.legend(
-        *fit.get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(0.56, 1.0),
-        ncols=3, handletextpad=0.4, **legend,
+        *fit.get_legend_handles_labels(),
+        loc="upper center",
+        bbox_to_anchor=(0.56, 1.0),
+        ncols=3,
+        handletextpad=0.4,
+        **legend,
     )
     prbs.legend(loc="upper right", ncols=1, handletextpad=0.4, borderaxespad=0.3, **legend)
     caption = (
@@ -883,9 +906,18 @@ def _outline(ax, mask, **style):
                 ax.plot([x0, x1], [y0, y1], solid_capstyle="projecting", **style)
 
 
-def _constellation(ax, points, jammed_prb, title):
-    ax.scatter(*points[~jammed_prb].T, s=0.6, color=CLEAN_COLOR, lw=0, rasterized=True)
-    ax.scatter(*points[jammed_prb].T, s=0.6, color=JAM_COLOR, lw=0, rasterized=True)
+def _constellation(ax, points, jammed_prb, title, reliability=None):
+    """Equalized symbols, jammed ones in red; with ``reliability`` (|LLR| per point), points whose
+    bits the decoder is told to trust less are drawn fainter (the site uses the same scale)."""
+    alpha = (
+        np.ones(len(points))
+        if reliability is None
+        else 0.12 + 0.83 * (1 - np.exp(-reliability / 14))
+    )
+    for sel, color in ((~jammed_prb, CLEAN_COLOR), (jammed_prb, JAM_COLOR)):
+        rgba = np.tile(to_rgba(color), (int(sel.sum()), 1))
+        rgba[:, 3] = alpha[sel]
+        ax.scatter(*points[sel].T, s=0.6, c=rgba, lw=0, rasterized=True)
     ax.set(xlim=(-1.7, 1.7), ylim=(-1.7, 1.7), xticks=[], yticks=[], aspect="equal")
     ax.axhline(0, color="0.85", lw=0.4, zorder=0)
     ax.axvline(0, color="0.85", lw=0.4, zorder=0)
@@ -895,11 +927,14 @@ def _constellation(ax, points, jammed_prb, title):
 
 @paper_style()
 def system_views():
-    """One pilot-jammed slot, from the received grid to the equalized symbols with the map."""
-    from jamloc.site.cases import Case
+    """One partial-band-jammed slot, from the received grid to the equalized symbols with the map.
 
-    # Pilot jamming at +9 dB JSR, the strongest point of the recovery table, on the site's seed
-    d = _case_payload(Case("pilot_strong", "Pilot jamming, +9 dB", "pilot", 9))
+    The slot of the site's walkthrough: partial-band jamming at +3 dB JSR on 4 of the UE's 12 PRBs,
+    so both the pilots and the data cells of those PRBs are hit; the first slot of its batch that
+    the map recovers (the caption gives the batch's counts)."""
+    from jamloc.site.cases import CASES
+
+    d = _case_payload(CASES["partial_flip"])
     meta = d["metadata"]
     a0, n = meta["alloc"]
     j0, jn = meta["jam"]
@@ -969,8 +1004,10 @@ def system_views():
 
     # (e), (f) equalized data symbols without and with the map, jammed PRBs in color
     for ax, receiver in ((e, "standard"), (f, "fused_soft")):
-        xy = np.array(d["x_hat"][d["receivers"][receiver]["x_hat"]], dtype=float)
-        _constellation(ax, xy, jammed_point, "")
+        rx = d["receivers"][receiver]
+        xy = np.array(d["x_hat"][rx["x_hat"]], dtype=float)
+        llr = np.array(d["abs_llr"][rx["abs_llr"]], dtype=float)
+        _constellation(ax, xy, jammed_point, "", reliability=llr)
 
     from matplotlib.patches import FancyArrowPatch
 
@@ -986,7 +1023,11 @@ def system_views():
     for i, (ax, name) in enumerate(zip(order, names, strict=True)):
         box = ax.get_position()
         fig.text(
-            (box.x0 + box.x1) / 2, 0.02 / height, f"({'abcdef'[i]}) {name}", ha="center", va="bottom"
+            (box.x0 + box.x1) / 2,
+            0.02 / height,
+            f"({'abcdef'[i]}) {name}",
+            ha="center",
+            va="bottom",
         )
     # Arrows between consecutive steps, at mid-height of the panels
     mid = (0.44 + 0.95 / 2) / height
@@ -1004,13 +1045,16 @@ def system_views():
         )
     crc = meta["batch_crc"]
     caption = (
-        f"One slot with pilot jamming at +{meta['jsr_db']} dB JSR on PRBs {j0}-{j0 + jn - 1} "
-        f"(TDL-C, {meta['snr_db']} dB SNR, UE on PRBs {a0}-{a0 + n - 1}), in processing order: "
-        "(a) received power, (b) magnitude of the LS pilot estimates and their subspace fit, (c) equalized "
-        "symbols, (d) residual on the DMRS and EVM on the data cells, (e) U-Net map, and (f) the "
-        "same slot equalized again with the map. Outlines mark the jammed cells. In this batch, "
-        f"{crc['standard']['failures']} of {crc['standard']['slots']} slots fail the CRC without "
-        f"the map and {crc['fused_soft']['failures']} with it."
+        f"One slot with partial-band jamming at {meta['jsr_db']:+g} dB JSR on PRBs "
+        f"{j0}-{j0 + jn - 1}, all 14 symbols ({jn} of the UE's {n} PRBs, so {jn}/{n} of its pilots "
+        f"and data cells; TDL-C, {meta['snr_db']} dB SNR, UE on PRBs {a0}-{a0 + n - 1}), in "
+        "processing order: (a) received power, (b) magnitude of the LS pilot estimates and their "
+        "subspace fit, (c) equalized symbols, (d) residual on the DMRS and EVM on the data cells, "
+        "(e) U-Net map, and (f) the same slot equalized again with the map. Outlines mark the "
+        "jammed cells; fainter points carry bits the decoder is told to trust less. It is the "
+        f"first slot of a {crc['standard']['slots']}-slot batch that the map recovers: "
+        f"{crc['standard']['failures']} of the {crc['standard']['slots']} slots fail the CRC "
+        f"without the map and {crc['fused_soft']['failures']} with it."
     )
     return fig, caption
 
