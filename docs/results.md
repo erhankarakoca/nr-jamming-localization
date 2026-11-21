@@ -1211,3 +1211,70 @@ below 0.04% in every case (`results/dmrs_count/recovery.csv`).
   clean second symbol: 7.3% unprotected, 1.2% with the LMMSE filter, no errors with the map.
 - Data and partial-band jamming are about as harmful as with one DMRS, and the soft map protects
   against them in both configurations.
+
+## 21. Data-aided passes when every pilot is jammed
+
+With the jammer on every DMRS cell of the allocation, no map can give the receiver a clean pilot,
+and even the true map left 37% BLER at +9 dB in section 17. The map-aware receiver
+(`jamloc.recovery`, `iterations`) now adds data-aided passes: after a failed decoding, the LDPC
+decoder's a posteriori LLRs give the mean and variance of every QPSK symbol, each data cell the
+map calls clean becomes a pilot whose variance includes the remaining symbol uncertainty and the
+jamming the map assigns to it, all observations of a subcarrier are combined with inverse-variance
+weights, the same LMMSE filter smooths them, and the slot is decoded again. A block keeps the first
+decoding whose CRC passes. Three passes (`DATA_AIDED`). Decoder feedback itself is not new: Li et
+al. (MILCOM 2012, section IV) remodulate confident decisions on interference-free tones, but start
+from the pilots that survive detection, and give no procedure when every pilot is corrupted.
+
+Run (TDL-C, known noise power, three detector seeds, up to 1,600 slots each, own results folder):
+
+```bash
+JAMLOC_RESULTS_DIR=results/receiver_study  # with results/receiver_study/models -> ../models
+RX="standard lmmse lmmse_da p_r_e_soft p_r_e_soft_da true_soft true_soft_da"
+python -m jamloc.experiments.recovery --channel C --snr-db 15 --jsr-db 3 9 --seeds 0 \
+    --max-mc-iter 25 --attacks pilot_whole_allocation --receivers $RX
+python -m jamloc.experiments.recovery --channel C --snr-db 8 --jsr-db 3 9 --seeds 0 \
+    --max-mc-iter 25 --attacks data partial pilot_whole_allocation --receivers $RX
+# the same for seeds 1 and 2; then --plot-only per SNR pools the seeds and writes the paired CSVs
+```
+
+BLER (%), pooled over the seeds (`results/receiver_study/recovery/recovery_C{,_snr8}.csv`):
+
+| SNR | Attack | JSR | Standard | No map | No map, DA | U-Net | U-Net, DA | True map | True map, DA |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 15 | all pilots | +3 | 39.8 | 11.1 | 2.27 | 3.62 | 1.29 | 3.65 | 1.31 |
+| 15 | all pilots | +9 | 95.6 | 72.1 | 37.9 | 39.3 | 24.4 | 38.7 | 24.1 |
+| 8 | all pilots | +3 | 42.6 | 14.3 | 3.58 | 11.1 | 4.08 | 10.9 | 4.08 |
+| 8 | all pilots | +9 | 92.2 | 63.4 | 34.2 | 50.9 | 31.1 | 50.0 | 31.2 |
+| 8 | data | +3 | 48.0 | 44.9 | 43.6 | 3.90 | 2.94 | 3.83 | 2.92 |
+| 8 | data | +9 | 88.5 | 87.0 | 87.0 | 8.24 | 6.25 | 8.24 | 6.23 |
+| 8 | partial | +3 | 60.8 | 50.9 | 48.4 | 5.52 | 3.96 | 5.40 | 3.88 |
+| 8 | partial | +9 | 90.4 | 88.0 | 87.2 | 10.3 | 7.76 | 10.1 | 7.66 |
+
+Paired differences on the slots both receivers decoded (percentage points, 95% interval;
+`*_paired.csv`):
+
+- U-Net map, without minus with passes: all pilots at 15 dB 2.33 (1.93 to 2.79) at +3 and 14.6
+  (12.3 to 16.9) at +9; at 8 dB 6.90 (5.99 to 7.89) and 20.2 (17.3 to 23.0); data at 8 dB 0.96
+  (0.69 to 1.26) and 1.94 (1.51 to 2.41); partial at 8 dB 1.56 (1.22 to 1.94) and 2.53 (1.98 to
+  3.12).
+- No map with passes minus U-Net map with passes, all pilots: at 15 dB 0.98 (0.64 to 1.36) at +3
+  and 13.1 (10.5 to 15.6) at +9; at 8 dB **-0.50 (-0.91 to -0.10)** at +3 and 3.12 (0.90 to 5.35)
+  at +9. At 8 dB and +3 dB the passes without a map end slightly lower.
+- U-Net map with passes minus true map with passes: within 0.3 points everywhere, all intervals
+  include zero.
+
+**Reading.**
+
+- With every pilot jammed, the passes cut the BLER with the map by 2 to 20 points; at +9 dB a
+  quarter (15 dB) to a third (8 dB) of the blocks still fail, because their first estimate is too
+  poor for the decoder to correct.
+- When data cells are jammed, the map is what makes the passes work: without it they feed jammed
+  data cells back as pilots and change little (at most 2.5 points on 45-88% BLER).
+- The map also improves the starting estimate when every pilot is jammed (it down-weights them
+  by their residual), which is why the map wins at +9 dB. At 8 dB and +3 dB that down-weighting
+  makes the start slightly worse than plain LMMSE, and the passes without a map end 0.5 points
+  lower.
+- A blind start from the fourth power of the data symbols (Viterbi and Viterbi 1983), with the
+  jammed pilots only resolving the 90-degree ambiguity, gave higher BLER than the pilot-based
+  start in a 256-slot trial (all pilots jammed, 15 dB SNR: 56% against 47% at +9 dB before any
+  pass) and was dropped.
