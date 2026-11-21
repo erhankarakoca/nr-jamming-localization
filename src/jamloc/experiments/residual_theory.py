@@ -33,7 +33,7 @@ from jamloc.jammer import ATTACKS
 from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
 from jamloc.metrics import wilson_interval
 from jamloc.paths import data_dir, results_dir
-from jamloc.plotting import new_figure, paper_style, save
+from jamloc.plotting import BLACK, BLUE, RED, new_figure, paper_style, save
 
 FA = 0.01
 ALLOC = (6, 12)  # UE on PRBs 6-17
@@ -135,14 +135,14 @@ def theory_curves(jnr_grid) -> dict:
 
 
 CHANNEL_STYLE = {
-    ("test", "A"): ("#0072B2", "o", "-", "TDL-A (100 ns)"),
-    ("test", "C"): ("#D55E00", "s", "--", "TDL-C (300 ns)"),
-    ("longdelay", "C"): ("#CC79A7", "D", "-.", "TDL-C (1000 ns)"),
+    ("test", "A"): (BLUE, "o", "-", "TDL-A (100 ns)"),
+    ("test", "C"): (RED, "s", "--", "TDL-C (300 ns)"),
+    ("longdelay", "C"): (BLACK, "D", "-.", "TDL-C (1000 ns)"),
 }
 GROUP_STYLE = {
-    "next to the block": ("#D55E00", "s", "-.", "next to the block\n(leakage)"),
-    "inside the block": ("#0072B2", "o", "-", "Inside the block"),
-    "block edge": ("#56B4E9", "^", "--", "Block edge"),
+    "next to the block": (BLACK, "s", "-.", "Next to the block"),
+    "inside the block": (RED, "o", "-", "Inside the block"),
+    "block edge": (BLUE, "^", "--", "Block edge"),
 }
 
 
@@ -163,6 +163,7 @@ def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None):
             yerr=[k / n - lo, hi - k / n],
             capsize=2,
             ms=3,
+            mfc="none",
             lw=0.8,
             elinewidth=0.6,
             capthick=0.6,
@@ -175,11 +176,11 @@ def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None):
     ax_fa.set(
         yscale="log",
         yticks=[0.01, 0.1, 1],
-        xlabel="SNR [dB]",
+        xlabel="SNR (dB)",
         ylabel="False-alarm rate",
     )
     ax_fa.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
-    ax_fa.set_title("(a) False alarms", loc="left")
+    ax_fa.set_title("(a)", loc="left")
     ax_fa.legend(loc="center left", bbox_to_anchor=(0, 0.46), frameon=False)
 
     for group, (color, marker, line, label) in GROUP_STYLE.items():
@@ -200,17 +201,17 @@ def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None):
                 mew=0.65,
             )
     ax_pd.set(
-        xlabel="JNR per RE [dB]",
+        xlabel="JNR (dB)",
         ylabel="Exceedance probability",
         ylim=(-0.03, 1.08),
     )
-    ax_pd.set_title("(b) Detection and leakage", loc="left")
+    ax_pd.set_title("(b)", loc="left")
     ax_pd.legend(
         loc="upper left", frameon=False, labelspacing=0.35, handlelength=1.6, handletextpad=0.5
     )
     if multislot_results is not None:
         plot_on_axis(axes[2], *multislot_results)
-        axes[2].set_title("(c) K-slot detection", loc="left")
+        axes[2].set_title("(c)", loc="left")
     for ax in axes:
         ax.tick_params(length=2.5, width=0.6, pad=2)
     return fig
