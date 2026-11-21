@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Localizing jamming in the 5G uplink · NR Jamming Localization</title>
+  <title>Localizing jamming in the 5G uplink</title>
   <link rel="stylesheet" href="assets/style.css">
   <script type="module" src="assets/js/nav.js"></script>
   <script type="module" src="assets/js/grid.js"></script>
@@ -18,51 +18,37 @@
         <a href="index.html" aria-current="page">Overview</a>
         <a href="walkthrough.html">Walkthrough</a>
         <a href="explore.html">Explore</a>
-        <a href="constellations.html">Constellations</a>
-        <a href="animations.html">Animations</a>
         <a href="results.html">Results</a>
       </nav>
     </div>
   </header>
   <main class="shell" id="main" tabindex="-1">
-<section class="hero">
-  <div>
-    <p class="eyebrow">5G NR uplink research</p>
-    <h1>Localizing jamming in the 5G uplink</h1>
-    <p class="lede">This project uses measurements from the uplink receiver to locate
-      interference in a slot. The resulting map lets the receiver account for interference
-      where it occurs and gives the decoder a better estimate of which bits to trust.</p>
-    <a class="button primary" href="walkthrough.html">Follow one slot <span aria-hidden="true">→</span></a>
-  </div>
-  <figure class="panel hero-figure">
-    <div id="overview-grid" aria-busy="true"></div>
-    <figcaption id="overview-caption">Loading the pilot-jamming slot…</figcaption>
-  </figure>
-</section>
-<section aria-labelledby="receiver-heading">
-  <h2 id="receiver-heading">From a received slot to a decoded block</h2>
-  <p>After equalizing the buffered slot, the receiver measures received power
-    (<var>P</var>), the pilot residual (<var>R</var>), and error vector magnitude
-    (<var>E</var>). A U-Net uses these features to flag physical resource blocks (PRBs)
-    by OFDM symbol. The map-aware receiver reprocesses the same slot and adjusts the
-    bit reliabilities used for decoding.</p>
-  <ol class="pipeline" aria-label="Receiver processing order">
-    <li>Buffered receiver</li><li>Power · Residual · EVM</li>
-    <li>U-Net map</li><li>Map-aware decoding</li>
-  </ol>
-</section>
+<header class="page-intro">
+  <h1>Localizing jamming in the 5G uplink</h1>
+  <p>For every uplink slot, a small U-Net marks the resource cells (PRB × OFDM symbol) a jammer
+    transmitted on, from three receiver measurements: received power <var>P</var>, pilot
+    residual <var>R</var>, and error vector magnitude <var>E</var>. The receiver then decodes
+    the same buffered slot again with the map.</p>
+</header>
 <section aria-labelledby="findings-heading">
-  <h2 id="findings-heading">Key results</h2>
-  <div id="home-results" class="findings" aria-live="polite">Loading the paper results…</div>
+  <h2 id="findings-heading">Main results</h2>
+  <div id="home-results" class="numbers" aria-live="polite">Loading the results…</div>
 </section>
-<section aria-labelledby="pages-heading">
-  <h2 id="pages-heading">Explore the experiment</h2>
-  <div class="cards">
-    <a href="walkthrough.html"><strong>One slot, step by step</strong><span>Follow the buffered receiver from the input grid to the CRC.</span></a>
-    <a href="explore.html"><strong>Explore a slot</strong><span>Inspect individual cells, detector scores, and equalized symbols.</span></a>
-    <a href="constellations.html"><strong>Constellations</strong><span>Compare standard and protected receivers on the same symbols.</span></a>
-    <a href="animations.html"><strong>Animations</strong><span>Follow jammer support across symbols and vary pilot interference power.</span></a>
-    <a href="results.html"><strong>Results</strong><span>Inspect aggregate results and download the underlying data.</span></a>
+<section class="slot-row" aria-labelledby="example-heading">
+  <div>
+    <h2 id="example-heading">One jammed slot</h2>
+    <p class="context">A jammer hits the pilot (DMRS) symbol of four PRBs. Red outlines mark the
+      jammed cells and blue the cells the U-Net flags.</p>
+    <div id="overview-grid" aria-busy="true"></div>
+    <p id="overview-caption" class="context"></p>
+  </div>
+  <div>
+    <h2>On this site</h2>
+    <ul class="page-list">
+      <li><a href="walkthrough.html">Walkthrough</a>: one slot from the received grid to the decoded block.</li>
+      <li><a href="explore.html">Explore</a>: nine recorded slots, cell by cell, with constellations.</li>
+      <li><a href="results.html">Results</a>: detection, recovery, and where the method fails.</li>
+    </ul>
   </div>
 </section>
   </main>

@@ -1,4 +1,4 @@
-import { batchText, conditions, loadCase, selectionText } from "./data.js";
+import { batchText, conditions, loadCase, selectionText, slotDetails } from "./data.js";
 import { affectedPRBs, constellations, crcList } from "./constellation.js";
 import { drawGrid } from "./grid.js";
 import { element, reportError } from "./nav.js";
@@ -7,38 +7,38 @@ const receivers = ["standard", "fused_soft"];
 
 const steps = [
   {
-    title: "Receive the slot",
-    text: "Each cell is a physical resource block (PRB) on one OFDM symbol. The orange cells show injected interference on the demodulation reference signal (DMRS), which the receiver uses as a pilot for channel estimation.",
-    view: slot => drawGrid(slot, { injected: true, label: "Resource grid with injected pilot interference" }),
+    title: "Received slot",
+    text: "Each cell is one PRB on one OFDM symbol. Grey is the user's allocation; red marks the cells the jammer transmits on, here the pilot (DMRS) symbol of four PRBs.",
+    view: slot => drawGrid(slot, { injected: true, label: "Resource grid with the jammed pilot cells" }),
   },
   {
-    title: "Measure power P",
-    text: "The receiver measures the average received energy in each cell relative to the noise power. Both the signal and the interference contribute to this measurement.",
+    title: "Power P",
+    text: "Received energy per cell over the noise power. Signal and jammer both add to it, so it says little on its own.",
     view: slot => drawGrid(slot, { feature: "power_db", label: "Received power by resource cell" }),
   },
   {
-    title: "Measure the pilot residual R",
-    text: "The receiver projects the pilot channel estimates onto the subspace of expected channel responses. The energy left over, normalized by its expected value in noise, gives the residual on the pilot symbol.",
+    title: "Pilot residual R",
+    text: "What is left of the pilot channel estimate after fitting a smooth channel. Noise leaves about 0 dB; a jammer leaves much more.",
     view: slot => drawGrid(slot, { feature: "residual_db", label: "Pilot residual by resource cell" }),
   },
   {
-    title: "Measure error vector magnitude E",
-    text: "On data symbols, the receiver measures how far equalized points lie from the nearest ideal constellation points, relative to the expected noise. A corrupted pilot estimate can increase this measure on other symbols.",
+    title: "EVM E",
+    text: "How far the equalized data points lie from QPSK, over the noise. A spoiled pilot estimate raises it on every data symbol of the PRB.",
     view: slot => drawGrid(slot, { feature: "evm_db", label: "Error vector magnitude by resource cell" }),
   },
   {
-    title: "Flag cells with the U-Net",
-    text: "The U-Net combines power, residual, and error vector magnitude across the buffered slot. Blue shows its flags and orange outlines the injected cells.",
-    view: slot => drawGrid(slot, { detector: "fused", label: "U-Net flags and injected interference" }),
+    title: "U-Net map",
+    text: "The U-Net reads P, R, and E of the whole slot and flags cells (blue). Red outlines are the jammed cells.",
+    view: slot => drawGrid(slot, { detector: "fused", label: "U-Net flags and jammed cells" }),
   },
   {
-    title: "Reprocess the affected PRBs",
-    text: "The protected receiver uses the map to reweight pilots and adjust the reliability of the data bits. These fixed-axis plots show the equalized data symbols from the same affected PRBs, with stronger bit reliabilities drawn more opaquely.",
+    title: "Decoding with the map",
+    text: "The receiver down-weights the flagged pilots and lowers the reliability of flagged data bits. Data points of the jammed PRBs:",
     view: slot => constellations(slot, receivers, affectedPRBs(slot)),
   },
   {
-    title: "Check the decoded block",
-    text: "The CRC checks the transport block after decoding. The badges give the outcomes for this slot and the failure counts cover the full case batch.",
+    title: "CRC",
+    text: "Did the decoded block pass its CRC?",
     view: slot => {
       const group = element("div");
       group.append(crcList(slot, receivers), element("p", batchText(slot, receivers), "context"));
@@ -51,57 +51,41 @@ async function walkthrough(host) {
   const slot = await loadCase("pilot");
   const back = document.querySelector("#previous");
   const next = document.querySelector("#next");
-  const play = document.querySelector("#walk-play");
-  const count = document.querySelector("#step-count");
+  const buttons = steps.map((step, i) => {
+    const button = element("button", String(i + 1));
+    button.type = "button";
+    button.title = step.title;
+    button.setAttribute("aria-label", `Step ${i + 1}: ${step.title}`);
+    button.addEventListener("click", () => show(i));
+    return button;
+  });
+  document.querySelector("#step-buttons").replaceChildren(...buttons);
   let index = 0;
-  let timer = null;
 
-  function stop() {
-    clearInterval(timer);
-    timer = null;
-    play.textContent = "Play";
-  }
-
-  function show() {
+  function show(i) {
+    index = i;
     const step = steps[index];
-    count.textContent = `Step ${index + 1} of ${steps.length} · ${step.title}`;
     back.disabled = index === 0;
     next.disabled = index === steps.length - 1;
-    if (next.disabled) stop();
-    host.replaceChildren(element("h2", step.title), element("p", step.text), step.view(slot));
+    buttons.forEach((button, k) => button.setAttribute("aria-pressed", String(k === index)));
+    const text = element("div");
+    text.append(element("h2", `${index + 1}. ${step.title}`, "step-title"), element("p", step.text, "step-text"));
+    const row = element("div", null, "slot-row");
+    row.append(step.view(slot), text);
+    host.replaceChildren(row);
   }
 
-  function move(delta) {
-    index += delta;
-    show();
-  }
-
-  back.addEventListener("click", () => move(-1));
-  next.addEventListener("click", () => move(1));
-  play.addEventListener("click", () => {
-    if (timer !== null) {
-      stop();
-      return;
-    }
-    if (index === steps.length - 1) {
-      index = 0;
-      show();
-    }
-    play.textContent = "Pause";
-    timer = setInterval(() => move(1), 2600);
-  });
-  document.querySelector("#walkthrough-selection").textContent =
-    `${conditions(slot)}. ${selectionText(slot)}`;
-  play.disabled = false;
-  show();
+  back.addEventListener("click", () => show(index - 1));
+  next.addEventListener("click", () => show(index + 1));
+  document.querySelector("#walkthrough-selection").replaceChildren(conditions(slot), slotDetails(slot));
+  show(0);
   host.setAttribute("aria-busy", "false");
 }
 
 async function recoveredSlot(host) {
   const slot = await loadCase("walkthrough_flip");
   host.replaceChildren(
-    element("p", conditions(slot), "context"),
-    element("p", selectionText(slot)),
+    element("p", `${conditions(slot)}. ${selectionText(slot)}`, "context"),
     constellations(slot, receivers, affectedPRBs(slot)),
     element("p", batchText(slot, receivers), "context"),
   );

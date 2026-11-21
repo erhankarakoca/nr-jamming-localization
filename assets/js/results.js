@@ -1,4 +1,4 @@
-import { conditions, detectors, loadCase, loadResults, percent, receiverName, signedDb } from "./data.js";
+import { detectors, loadCase, loadResults, percent, receiverName, signedDb } from "./data.js";
 import { element, options, reportError } from "./nav.js";
 
 const attacks = { all: "All attacks", pilot: "Pilot", data: "Data", partial: "Partial-band" };
@@ -48,11 +48,35 @@ function sectionContent(id, section) {
   host.querySelector(".downloads").replaceChildren(...links);
 }
 
-const palette = [
-  ["#0072b2", "0,114,178"], ["#4e5f69", "78,95,105"], ["#d55e00", "213,94,0"],
-  ["#4654a5", "70,84,165"], ["#8b5b2e", "139,91,46"], ["#397166", "57,113,102"],
-];
-const priority = ["fused", "no_residual", "block_test", "residual_threshold", "evm_threshold"];
+// The detector styles of the paper's Pd figure (evaluate.DETECTOR_STYLE): colour, hollow
+// marker and dash, so a curve looks the same on the site and in the paper.
+const STYLE = {
+  fused: ["#cc0000", "circle-open", "solid"],
+  no_residual: ["#0033cc", "square-open", "dash"],
+  power: ["#000000", "triangle-up-open", "dashdot"],
+  evm: ["#cc00cc", "triangle-down-open", "dot"],
+  evm_threshold: ["#0099cc", "triangle-right-open", "dot"],
+  residual_threshold: ["#009e73", "x-thin-open", "dash"],
+  power_threshold: ["#666666", "star-open", "dot"],
+  residual_cfar: ["#8b4513", "x-thin-open", "dashdot"],
+  block_test: ["#008000", "diamond-open", "solid"],
+  fused_nj1: ["#332288", "diamond-open", "dot"],
+  fused_pixel: ["#44aa99", "hexagon-open", "dash"],
+  fused_pixel_wide: ["#117733", "hexagon2-open", "dash"],
+  fused_comb: ["#aa4499", "pentagon-open", "solid"],
+};
+const OTHER = ["#8b4513", "cross-thin-open", "longdash"];
+const priority = ["fused", "no_residual", "block_test", "evm_threshold", "residual_threshold"];
+// The chart has the detectors of the paper's figure (evaluate.PLOT_DETECTORS); the table all.
+const PLOTTED = ["fused", "no_residual", "power", "evm", "block_test", "evm_threshold", "residual_cfar", "power_threshold"];
+const SHOWN = new Set(["fused", "no_residual", "block_test", "evm_threshold"]);
+// The receivers of the short recovery table; the full table is under "How this was measured".
+const KEY_RECEIVERS = ["standard", "lmmse", "block_soft", "p_r_e_soft", "p_r_e_atk_soft", "true_soft"];
+const SERIF = '"STIX Two Text", "Times New Roman", Times, serif';
+const axis = title => ({
+  title: { text: title, standoff: 6 }, showline: true, linecolor: "#000", linewidth: 0.8, mirror: "ticks",
+  ticks: "inside", ticklen: 4, tickcolor: "#000", gridcolor: "#e6e6e6", zeroline: false, automargin: true,
+});
 
 function renderPlot(id, traces, x, y, extras = {}) {
   const host = document.getElementById(id);
@@ -64,15 +88,18 @@ function renderPlot(id, traces, x, y, extras = {}) {
   }
   const layout = {
     autosize: true,
-    height: 410,
-    margin: { l: 56, r: 20, t: 12, b: 47, autoexpand: true },
+    height: 320,
+    margin: { l: 52, r: 12, t: 8, b: 40, autoexpand: true },
     paper_bgcolor: "#fff",
     plot_bgcolor: "#fff",
-    font: { family: "system-ui, sans-serif", size: 12, color: "#142632" },
-    xaxis: { title: x, gridcolor: "#e2eaee", automargin: true },
-    yaxis: { title: y, gridcolor: "#e2eaee", automargin: true },
+    font: { family: SERIF, size: 12, color: "#000" },
+    xaxis: axis(x),
+    yaxis: axis(y),
     // Legend above the plot: below it, many entries collide with the x-axis title on a phone
-    legend: { orientation: "h", x: 0, y: 1.02, xanchor: "left", yanchor: "bottom", groupclick: "togglegroup" },
+    legend: {
+      orientation: "h", x: 0, y: 1.01, xanchor: "left", yanchor: "bottom", groupclick: "togglegroup",
+      font: { size: 11 },
+    },
     hovermode: "closest",
     ...extras,
   };
@@ -95,29 +122,21 @@ function detection(section) {
     const key = picker.value;
     const rows = section.rows.filter(r => r.attack === key);
     const traces = [];
-    ordered.forEach((name, index) => {
+    PLOTTED.filter(name => names.includes(name)).forEach(name => {
       const series = rows.filter(r => r.detector === name).sort((a, b) => a.jsr_db - b.jsr_db);
       if (!series.length) return;
-      const [color, rgb] = palette[index % palette.length];
-      const visible = index < 4 ? true : "legendonly";
-      const x = series.map(r => r.jsr_db);
-      const band = {
-        x, mode: "lines", legendgroup: name, showlegend: false, visible,
-        hoverinfo: "skip", line: { width: 0 }, type: "scatter",
-      };
-      traces.push(
-        { ...band, y: series.map(r => Math.max(0, r.pd_mean - r.pd_std)) },
-        { ...band, y: series.map(r => Math.min(1, r.pd_mean + r.pd_std)), fill: "tonexty", fillcolor: `rgba(${rgb},0.12)` },
-        {
-          x, y: series.map(r => r.pd_mean), customdata: series.map(r => [r.pd_std, r.num_cells, r.n_seeds]),
-          type: "scatter", mode: "lines+markers", legendgroup: name, name: detectorName(name),
-          line: { color, dash: index < palette.length ? "solid" : "dash" }, visible,
-          hovertemplate: "%{x} dB JSR<br>%{y:.3f} mean Pd ± %{customdata[0]:.3f} SD<br>%{customdata[1]} jammed scheduled cells · %{customdata[2]} seeds<extra>%{fullData.name}</extra>",
-        },
-      );
+      const [color, symbol, dash] = STYLE[name] ?? OTHER;
+      traces.push({
+        x: series.map(r => r.jsr_db), y: series.map(r => r.pd_mean),
+        customdata: series.map(r => [r.pd_std, r.num_cells, r.n_seeds]),
+        type: "scatter", mode: "lines+markers", legendgroup: name, name: detectorName(name),
+        line: { color, dash, width: 1.2 }, marker: { symbol, size: 7, color, line: { width: 1.1, color } },
+        visible: SHOWN.has(name) ? true : "legendonly",
+        hovertemplate: "%{x} dB JSR<br>Pd %{y:.3f} ± %{customdata[0]:.3f} (SD over seeds)<br>%{customdata[1]} jammed cells · %{customdata[2]} seeds<extra>%{fullData.name}</extra>",
+      });
     });
-    renderPlot("pd-chart", traces, "JSR (dB)", "Detection probability", {
-      yaxis: { title: "Detection probability", range: [-0.025, 1.025], tickformat: ".0%", automargin: true },
+    renderPlot("pd-chart", traces, "JSR (dB)", "Pd", {
+      yaxis: { ...axis("Detection probability"), range: [-0.02, 1.02] },
     });
     target.replaceChildren(table(`${attacks[key] ?? key} jamming on the scheduled cells`,
       ["Detector", "JSR", "Mean Pd ± SD", "Jammed cells", "Seeds"],
@@ -149,7 +168,7 @@ function margins(section) {
   );
   for (const channel of new Set(ordered.map(r => r.channel))) {
     const data = ordered.filter(r => r.channel === channel);
-    const color = channel === "C" ? "#0072b2" : "#d55e00";
+    const color = channel === "C" ? "#cc0000" : "#0033cc";
     for (const target of new Set(data.map(r => r.slot_fa_target))) {
       const rows = data.filter(r => r.slot_fa_target === target);
       const key = `${channel}-${target}`;
@@ -161,7 +180,8 @@ function margins(section) {
         type: "scatter", mode: "lines+markers", x: rows.map(xOf), y: rows.map(r => r.margin_db),
         name: `TDL-${channel} · ${percent(target)} slot FA`, legendgroup: key, line,
         marker: {
-          size: 8, color, symbol: rows.map(r => r.point_any_attack_censored ? `${marker}-open` : marker),
+          size: 7, color, symbol: rows.map(r => r.point_any_attack_censored ? `${marker}-open` : marker),
+          line: { width: 1.1, color },
         },
         text: rows.map(r => `${r.snr_db} dB SNR<br>Margin ${marginEstimate(r)} dB<br>95% interval ${marginInterval(r)} dB`),
         hovertemplate: "%{text}<extra>%{fullData.name}</extra>",
@@ -190,14 +210,14 @@ function margins(section) {
   }
   if (ordered.some(r => r.margin_lo_db == null)) {
     annotations.push({
-      xref: "paper", yref: "paper", x: 0.02, y: 0.03, xanchor: "left", showarrow: false,
+      xref: "paper", yref: "paper", x: 0.01, y: 0.99, xanchor: "left", yanchor: "top", showarrow: false,
       text: "▼ Lower interval bound unbounded",
-      font: { size: 10, color: "#4b616d" },
+      font: { size: 10, color: "#555" },
     });
   }
   renderPlot("margin-chart", traces, "SNR (dB)", "Smallest margin (dB)", {
-    xaxis: { title: "SNR (dB)", tickvals: [...new Set(ordered.map(r => r.snr_db))].sort((a, b) => a - b), automargin: true },
-    yaxis: { title: "Smallest margin (dB)", zeroline: true, zerolinecolor: "#637682", automargin: true },
+    xaxis: { ...axis("SNR (dB)"), tickvals: [...new Set(ordered.map(r => r.snr_db))].sort((a, b) => a - b) },
+    yaxis: { ...axis("Smallest margin (dB)"), zeroline: true, zerolinecolor: "#000", zerolinewidth: 0.6 },
     annotations,
   });
   document.querySelector("#margin-table").replaceChildren(table("Fused U-Net margin in dB",
@@ -217,14 +237,16 @@ function recovery(section) {
     const rows = section.rows.filter(r => r.jammer === key);
     const groups = [...new Set(rows.map(r => r.attack))];
     const receivers = [...new Set(rows.map(r => r.receiver))];
-    const cells = receivers.map(name => [receiverName(name), ...groups.map(group => {
+    const cells = (names, counts) => names.map(name => [receiverName(name), ...groups.map(group => {
       const row = rows.find(r => r.receiver === name && r.attack === group);
-      return row ? `${percent(row.bler, 2)} · ${integer(row.block_errors)}/${integer(row.blocks)}` : "—";
+      if (!row) return "—";
+      return counts ? `${percent(row.bler, 2)} (${integer(row.block_errors)}/${integer(row.blocks)})` : percent(row.bler, 2);
     })]);
-    document.querySelector("#recovery-table").replaceChildren(table(
-      `${jammers[key] ?? key} jammer · BLER and errors / blocks`,
-      ["Receiver", ...groups.map(group => attacks[group] ?? group)], cells,
-    ));
+    const labels = ["Receiver", ...groups.map(group => attacks[group] ?? group)];
+    document.querySelector("#recovery-table").replaceChildren(table(`BLER, ${jammers[key] ?? key} jammer`,
+      labels, cells(KEY_RECEIVERS.filter(name => receivers.includes(name)), false)));
+    document.querySelector("#recovery-all").replaceChildren(table("All receivers: BLER (block errors/blocks)",
+      labels, cells(receivers, true)));
     const pairs = section.paired.filter(r => r.jammer === key);
     document.querySelector("#recovery-paired").replaceChildren(table(
       "First receiver minus second in percentage points",
@@ -267,17 +289,24 @@ function matched(section) {
   show();
 }
 
-function finding(title, value, note, link, linkLabel = "Inspect the slot") {
+function finding(title, value, note, link) {
   const article = element("article");
-  article.append(element("h3", title));
+  const heading = element("h3");
+  if (link) {
+    const anchor = element("a", title);
+    anchor.href = link;
+    heading.append(anchor);
+  } else {
+    heading.textContent = title;
+  }
+  article.append(heading);
   if (value) article.append(element("strong", value));
   article.append(element("p", note));
-  if (link) {
-    const anchor = element("a", linkLabel);
-    anchor.href = link;
-    article.append(anchor);
-  }
   return article;
+}
+
+function dmrsRow(section, count, detector) {
+  return section.rows.find(r => r.dmrs_count === count && r.detector === detector);
 }
 
 function home(host, data) {
@@ -287,14 +316,40 @@ function home(host, data) {
   const rows = data.recovery.rows.filter(r => r.jammer === "nominal" && r.attack === "partial" && r.snr_db === 15);
   const standard = rows.find(r => r.receiver === "standard");
   const protectedRow = rows.find(r => r.receiver === "p_r_e_soft");
+  const [one, two] = [1, 2].map(count => dmrsRow(data.dmrs, count, "fused"));
   const cards = [];
   if (pilot) cards.push(finding("Weak pilot jamming", percent(pilot.pd_mean),
-    `U-Net mean detection at ${signedDb(pilot.jsr_db)} JSR on ${integer(pilot.num_cells)} jammed scheduled cells in the TDL-A and TDL-C test split, over ${pilot.n_seeds} training seeds. Validation targets 1% per-cell false alarms.`));
-  if (margin) cards.push(finding("Smallest detection margin", `${decimal(margin.margin_db, 1)} dB`,
-    `Over the pilot, data, and partial-band attacks on scheduled PRBs at ${margin.snr_db} dB SNR on TDL-C. The U-Net targets ${percent(margin.slot_fa_target)} false alarms per benign slot. The 95% interval is ${marginInterval(margin)} dB.`));
-  if (standard && protectedRow) cards.push(finding("Partial-band recovery", `${percent(standard.bler)} → ${percent(protectedRow.bler, 2)}`,
-    `Pooled BLER from standard to U-Net soft at ${signedDb(standard.jsr_db)} JSR on TDL-C at ${standard.snr_db} dB SNR with known noise power. The counts are ${integer(standard.block_errors)}/${integer(standard.blocks)} and ${integer(protectedRow.block_errors)}/${integer(protectedRow.blocks)}.`));
+    `of the jammed cells detected at ${signedDb(pilot.jsr_db)} JSR, with 1% false alarms per cell.`, "results.html#detection"));
+  if (margin) cards.push(finding("Detection margin", `${decimal(margin.margin_db, 1)} dB`,
+    `between 90% slot detection and 10% block errors, worst attack, TDL-C at ${margin.snr_db} dB SNR.`, "results.html#margin"));
+  if (standard && protectedRow) cards.push(finding("Partial-band BLER", `${percent(standard.bler)} → ${percent(protectedRow.bler, 2)}`,
+    `standard receiver → decoding with the U-Net map, at ${signedDb(standard.jsr_db)} JSR.`, "results.html#recovery"));
+  if (one && two) cards.push(finding("Second DMRS symbol", `${percent(one.pd_pilot_m15)} → ${percent(two.pd_pilot_m15)}`,
+    "weak pilot jamming detected with one → two DMRS symbols.", "results.html#dmrs"));
   host.replaceChildren(...cards);
+}
+
+function dmrs(section) {
+  sectionContent("dmrs", section);
+  const bler = (count, jammer, receiver) => {
+    const row = section.recovery.find(r => r.dmrs_count === count && r.jammer_dmrs === jammer &&
+      r.attack === "pilot" && r.receiver === receiver);
+    return row ? `${percent(row.bler, 2)}` : "—";
+  };
+  const value = (count, detector, field) => {
+    const row = dmrsRow(section, count, detector);
+    return row ? percent(row[field]) : "—";
+  };
+  const rows = [[1, "all", "1"], [2, "all", "2"], [2, "first", "2, jammer on the first only"]].map(
+    ([count, jammer, label]) => [label,
+      jammer === "all" ? value(count, "fused", "f1_pilot") : "—",
+      jammer === "all" ? value(count, "fused", "pd_pilot_m15") : "—",
+      jammer === "all" ? value(count, "block_test", "f1_pilot") : "—",
+      bler(count, jammer, "standard"), bler(count, jammer, "lmmse"), bler(count, jammer, "p_r_e_soft")],
+  );
+  document.querySelector("#dmrs-table").replaceChildren(table("Pilot jamming",
+    ["DMRS symbols", "U-Net F1", "U-Net Pd, −15 dB", "Block test F1", "BLER standard, +9 dB",
+      "BLER LMMSE", "BLER with U-Net map"], rows));
 }
 
 function hitCount(slot, detector) {
@@ -304,28 +359,22 @@ function hitCount(slot, detector) {
 }
 
 async function failures(host, data) {
-  const [spoof, whole, hopping] = await Promise.all(["spoof", "pilot_whole_comb", "hopping"].map(loadCase));
+  const [spoof, whole] = await Promise.all(["spoof", "pilot_whole_comb"].map(loadCase));
   const jammed = spoof.grids.truth.flat().filter(Boolean).length;
-  const noise = whole.metadata;
-  const crc = noise.batch_crc.true_soft;
+  const crc = whole.metadata.batch_crc.true_soft;
   const hoppingRows = data.recovery.rows.filter(r => r.jammer === "hopping" && r.attack === "data");
   const block = hoppingRows.find(r => r.receiver === "p_r_e_soft");
   const mixed = hoppingRows.find(r => r.receiver === "p_r_e_atk_soft");
-  const hoppingData = block && mixed
-    ? `At ${signedDb(block.jsr_db)} JSR on TDL-C at ${block.snr_db} dB SNR, the soft receiver using the block-trained map had ${percent(block.bler)} BLER (${integer(block.block_errors)}/${integer(block.blocks)}) on hopping data jamming. The mixed-attack map had ${percent(mixed.bler)} (${integer(mixed.block_errors)}/${integer(mixed.blocks)}). Both rates pool the recovery runs over training seeds 0, 1, and 2 with known noise power. `
-    : "";
-  const hoppingBatch = hopping.metadata.batch_crc;
-  const batchBler = ({ failures, slots }) => `${percent(failures / slots)} (${integer(failures)}/${integer(slots)})`;
-  const hoppingExample = `The linked slot shows partial-band hopping. In its batch, the block-trained and mixed-attack soft receivers had ${batchBler(hoppingBatch.fused_soft)} and ${batchBler(hoppingBatch.fused_atk_soft)} BLER, respectively.`;
   host.replaceChildren(
-    finding("Pilot spoofing", null,
-      `${conditions(spoof)}. In the slot closest to the nominal U-Net’s median hit rate, its map flagged ${hitCount(spoof, "fused")} of ${jammed} injected pilot cells. The spoof-trained map flagged ${hitCount(spoof, "fused_atk2")} of ${jammed} on that slot.`,
+    finding("Pilot spoofing", `${hitCount(spoof, "fused")} of ${jammed}`,
+      `spoofed pilot cells flagged by the nominal U-Net in this slot; ${hitCount(spoof, "fused_atk2")} of ${jammed} after training with spoofing.`,
       "explore.html?case=spoof"),
-    finding("Whole-allocation pilot jamming", null,
-      `${conditions(whole)}. The receiver decoded with the true map and failed in ${crc.failures} of ${crc.slots} slots in this batch. In the first such slot, the comb gave a noise variance of ${noise.noise_variance} against a simulated variance of ${noise.true_noise_variance}.`,
+    finding("Whole-allocation pilot jamming", `${crc.failures} of ${crc.slots}`,
+      "blocks fail even with the true map: the jammer inflates the noise estimate taken from the empty pilot comb.",
       "explore.html?case=pilot_whole_comb"),
-    finding("Hopping with block-trained detection", null, hoppingData + hoppingExample,
-      "explore.html?case=hopping", "Inspect the partial-band hopping slot"),
+    ...(block && mixed ? [finding("Hopping jammer", `${percent(block.bler)} → ${percent(mixed.bler)}`,
+      `BLER on data jamming at ${signedDb(block.jsr_db)} JSR with the block-trained map → the map trained on mixed attacks.`,
+      "explore.html?case=hopping")] : []),
   );
 }
 
@@ -338,6 +387,7 @@ if (resultsHost) {
     detection(data.pd);
     margins(data.margin);
     recovery(data.recovery);
+    dmrs(data.dmrs);
     matched(data.matched);
     resultsHost.setAttribute("aria-busy", "false");
     const target = document.querySelector("#failure-results");
