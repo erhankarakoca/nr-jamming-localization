@@ -1135,7 +1135,7 @@ twice the energy at the same JSR per resource element. The residual is computed 
 symbol. The map-aware receiver estimates one slot-constant channel from the pilots of both
 symbols, so a jammed DMRS symbol is down-weighted against a clean one.
 
-Run (Colab T4, about 1.5 h; `python -m jamloc.experiments.dmrs_count --seeds 0 1 2 --batch-size
+Run (Colab T4; `python -m jamloc.experiments.dmrs_count --seeds 0 1 2 --batch-size
 64 --batches 25`, then `--no-recovery` locally for the detection tables):
 
 - new splits `train_dmrs2` / `val_dmrs2` / `test_dmrs2` (seeds 30-32 M);
