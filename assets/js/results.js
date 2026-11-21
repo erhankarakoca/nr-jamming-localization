@@ -1,4 +1,5 @@
 import { detectors, loadCase, loadResults, percent, receiverName, signedDb } from "./data.js";
+import { svgNode } from "./grid.js";
 import { element, options, reportError } from "./nav.js";
 
 const attacks = { all: "All attacks", pilot: "Pilot", data: "Data", partial: "Partial-band" };
@@ -313,20 +314,105 @@ function home(host, data) {
   const pilot = data.pd.rows.filter(r => r.detector === "fused" && r.attack === "pilot")
     .sort((a, b) => a.jsr_db - b.jsr_db)[0];
   const margin = data.margin.rows.find(r => r.channel === "C" && r.snr_db === 15 && r.slot_fa_target === 0.01);
+  const low = data.margin.rows.find(r => r.channel === "C" && r.snr_db === 5 && r.slot_fa_target === 0.01);
   const rows = data.recovery.rows.filter(r => r.jammer === "nominal" && r.attack === "partial" && r.snr_db === 15);
   const standard = rows.find(r => r.receiver === "standard");
   const protectedRow = rows.find(r => r.receiver === "p_r_e_soft");
   const [one, two] = [1, 2].map(count => dmrsRow(data.dmrs, count, "fused"));
   const cards = [];
   if (pilot) cards.push(finding("Weak pilot jamming", percent(pilot.pd_mean),
-    `of the jammed cells detected at ${signedDb(pilot.jsr_db)} JSR, with 1% false alarms per cell.`, "results.html#detection"));
+    `of jammed pilot cells detected at ${signedDb(pilot.jsr_db)} JSR, thresholds set for 1% false alarms on validation cells.`,
+    "results.html#detection"));
   if (margin) cards.push(finding("Detection margin", `${decimal(margin.margin_db, 1)} dB`,
-    `between 90% slot detection and 10% block errors, worst attack, TDL-C at ${margin.snr_db} dB SNR.`, "results.html#margin"));
+    `before block errors start, worst attack, TDL-C at ${margin.snr_db} dB SNR${low ? `; ${decimal(low.margin_db, 1).replace("-", "−")} dB at ${low.snr_db} dB SNR` : ""}.`,
+    "results.html#margin"));
   if (standard && protectedRow) cards.push(finding("Partial-band BLER", `${percent(standard.bler)} → ${percent(protectedRow.bler, 2)}`,
-    `standard receiver → decoding with the U-Net map, at ${signedDb(standard.jsr_db)} JSR.`, "results.html#recovery"));
+    `standard receiver → U-Net map, ${signedDb(standard.jsr_db)} JSR on 4 of 12 PRBs, TDL-C, ${standard.snr_db} dB SNR.`,
+    "results.html#recovery"));
+  const aided = rx => data.data_aided?.rows.find(r => r.snr_db === 15 && r.jsr_db === 9 &&
+    r.attack === "pilot_whole_allocation" && r.receiver === rx);
+  const [before, after] = ["p_r_e_soft", "p_r_e_soft_da"].map(aided);
+  if (before && after) cards.push(finding("No clean pilot", `${percent(before.bler)} → ${percent(after.bler)}`,
+    "BLER with every pilot jammed at +9 dB JSR: U-Net map → U-Net map with data-aided passes, TDL-C, 15 dB SNR.",
+    "results.html#no-clean-pilot"));
   if (one && two) cards.push(finding("Second DMRS symbol", `${percent(one.pd_pilot_m15)} → ${percent(two.pd_pilot_m15)}`,
-    "weak pilot jamming detected with one → two DMRS symbols.", "results.html#dmrs"));
+    "of jammed pilot cells detected at −15 dB JSR, models trained for one → two DMRS symbols.",
+    "results.html#dmrs"));
   host.replaceChildren(...cards);
+}
+
+// Pilot jamming of the whole allocation: no clean pilot is left. BLER of the receivers with and
+// without data-aided passes, as grouped bars per SNR and JSR.
+const AIDED = [
+  ["standard", "Standard", "#000000", false],
+  ["lmmse", "No map", "#777777", false],
+  ["lmmse_da", "No map, data-aided", "#777777", true],
+  ["p_r_e_soft", "U-Net map", "#cc0000", false],
+  ["p_r_e_soft_da", "U-Net map, data-aided", "#cc0000", true],
+  ["true_soft", "True map", "#0033cc", false],
+  ["true_soft_da", "True map, data-aided", "#0033cc", true],
+];
+
+function aidedBars(rows) {
+  const points = [...new Set(rows.map(r => `${r.snr_db}|${r.jsr_db}`))]
+    .map(key => key.split("|").map(Number)).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  const groupWidth = 165;
+  const width = 50 + groupWidth * points.length;
+  const height = 210;
+  const top = 12;
+  const bottom = 160;
+  const y = v => bottom - v * (bottom - top);
+  const svg = svgNode("svg", { class: "bars", viewBox: `0 0 ${width} ${height}`, role: "img",
+    "aria-label": "Block error rate with every pilot jammed, by receiver" });
+  for (const v of [0, 0.25, 0.5, 0.75, 1]) {
+    svg.append(svgNode("line", { x1: 44, x2: width - 4, y1: y(v), y2: y(v), stroke: "#e6e6e6", "stroke-width": 0.6 }));
+    svg.append(svgNode("text", { x: 40, y: y(v) + 3.5, "text-anchor": "end", "font-size": 10 }, `${v * 100}%`));
+  }
+  points.forEach(([snr, jsr], g) => {
+    const x0 = 50 + g * groupWidth + 8;
+    AIDED.forEach(([rx, label, color, filled], i) => {
+      const row = rows.find(r => r.snr_db === snr && r.jsr_db === jsr && r.receiver === rx);
+      if (!row) return;
+      const x = x0 + i * 20;
+      const bar = svgNode("rect", {
+        x, y: y(row.bler), width: 15, height: Math.max(0.5, bottom - y(row.bler)),
+        fill: filled ? color : "#fff", stroke: color, "stroke-width": 1.2,
+      });
+      bar.append(svgNode("title", {}, `${label}: ${percent(row.bler, 2)} (${integer(row.block_errors)}/${integer(row.blocks)})`));
+      svg.append(bar);
+    });
+    svg.append(svgNode("text", { x: x0 + 68, y: bottom + 16, "text-anchor": "middle", "font-size": 10.5 }, `${signedDb(jsr)} JSR`));
+    svg.append(svgNode("text", { x: x0 + 68, y: bottom + 30, "text-anchor": "middle", "font-size": 10.5 }, `${snr} dB SNR`));
+  });
+  svg.append(svgNode("line", { x1: 44, x2: width - 4, y1: bottom, y2: bottom, stroke: "#000", "stroke-width": 0.8 }));
+  const legend = element("ul", null, "legend");
+  for (const [, label, color, filled] of AIDED) {
+    const item = element("li");
+    const mark = element("i", null, "swatch");
+    mark.style.background = filled ? color : "#fff";
+    mark.style.borderColor = color;
+    item.append(mark, label);
+    legend.append(item);
+  }
+  const wrap = element("div");
+  wrap.append(svg, legend);
+  return wrap;
+}
+
+function dataAided(section) {
+  const host = document.querySelector("#data-aided");
+  if (!section) {
+    host.textContent = "This experiment is still running; its results will appear here.";
+    return;
+  }
+  sectionContent("no-clean-pilot", section);
+  const whole = section.rows.filter(r => r.attack === "pilot_whole_allocation");
+  host.replaceChildren(element("p", section.summary), aidedBars(whole));
+  const attackName = key => key === "pilot_whole_allocation" ? "Pilots of the whole allocation" : attacks[key] ?? key;
+  document.querySelector("#data-aided-table").replaceChildren(table("BLER with and without data-aided passes",
+    ["Receiver", "Attack", "SNR", "JSR", "BLER", "Errors / blocks"],
+    section.rows.map(r => [receiverName(r.receiver), attackName(r.attack), `${r.snr_db} dB`, signedDb(r.jsr_db),
+      percent(r.bler, 2), `${integer(r.block_errors)}/${integer(r.blocks)}`])));
 }
 
 function dmrs(section) {
@@ -370,7 +456,7 @@ async function failures(host, data) {
       `spoofed pilot cells flagged by the nominal U-Net in this slot; ${hitCount(spoof, "fused_atk2")} of ${jammed} after training with spoofing.`,
       "explore.html?case=spoof"),
     finding("Whole-allocation pilot jamming", `${crc.failures} of ${crc.slots}`,
-      "blocks fail even with the true map: the jammer inflates the noise estimate taken from the empty pilot comb.",
+      "blocks of this batch fail even with the true map (15 dB SNR, +3 dB JSR, noise power estimated from the empty pilot comb, which the jammer inflates).",
       "explore.html?case=pilot_whole_comb"),
     ...(block && mixed ? [finding("Hopping jammer", `${percent(block.bler)} → ${percent(mixed.bler)}`,
       `BLER on data jamming at ${signedDb(block.jsr_db)} JSR with the block-trained map → the map trained on mixed attacks.`,
@@ -388,6 +474,7 @@ if (resultsHost) {
     margins(data.margin);
     recovery(data.recovery);
     dmrs(data.dmrs);
+    dataAided(data.data_aided);
     matched(data.matched);
     resultsHost.setAttribute("aria-busy", "false");
     const target = document.querySelector("#failure-results");
