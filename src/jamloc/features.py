@@ -131,9 +131,13 @@ def residual_per_prb(
     kept = 1 - (u.abs() ** 2).sum(dim=1)  # [N_p]
     noise_only = no[:, None] / pilot_power * kept  # [B, N_p]
 
-    # Residual power per PRB (6 pilots) divided by what noise alone would leave there
+    # Residual power per PRB (6 pilots of the DMRS comb, or 12 known symbols of a decoded data
+    # symbol) divided by what noise alone would leave there
     b = h_ls.shape[0]
-    return (residual.abs() ** 2).reshape(b, -1, 6).sum(-1) / noise_only.reshape(b, -1, 6).sum(-1)
+    per = 12 * h_ls.shape[1] // (int(pilot_sc.max()) // 12 * 12 + 12)
+    return (residual.abs() ** 2).reshape(b, -1, per).sum(-1) / noise_only.reshape(b, -1, per).sum(
+        -1
+    )
 
 
 def dmrs_residuals(h_ls, pilot_sc, no, pilot_power, cfg, num_dmrs: int) -> torch.Tensor:

@@ -49,29 +49,33 @@ CFG = SimConfig()
 
 
 @cache
-def _projector(n_prb: int, scs: float, tau_max: float) -> np.ndarray:
-    pilot_sc = tuple(range(0, 12 * n_prb, 2))
-    u = _subspace(pilot_sc, scs, tau_max, 1 - 1e-6)
-    return np.eye(len(pilot_sc)) - u @ u.conj().T
+def _projector(n_prb: int, scs: float, tau_max: float, step: int = 2) -> np.ndarray:
+    known_sc = tuple(range(0, 12 * n_prb, step))
+    u = _subspace(known_sc, scs, tau_max, 1 - 1e-6)
+    return np.eye(len(known_sc)) - u @ u.conj().T
 
 
-def projector(n_prb: int, cfg: SimConfig = CFG) -> np.ndarray:
-    """``P = I - U U^H`` ``[6n, 6n]`` for an allocation of ``n_prb`` PRBs (pilots on one comb)."""
-    return _projector(n_prb, cfg.scs, cfg.tau_max)
+def projector(n_prb: int, cfg: SimConfig = CFG, step: int = 2) -> np.ndarray:
+    """``P = I - U U^H`` for an allocation of ``n_prb`` PRBs whose known symbols sit on every
+    ``step``-th subcarrier: ``[6n, 6n]`` for the DMRS comb (``step=2``), ``[12n, 12n]`` for a
+    decoded data symbol (``step=1``)."""
+    return _projector(n_prb, cfg.scs, cfg.tau_max, step)
 
 
-def _block(prb: int) -> slice:
-    return slice(PILOTS_PER_PRB * prb, PILOTS_PER_PRB * (prb + 1))
+def _block(prb: int, step: int = 2) -> slice:
+    per = 12 // step
+    return slice(per * prb, per * (prb + 1))
 
 
-def weights(n_prb: int, prb: int, jnr=None, cfg: SimConfig = CFG) -> np.ndarray:
+def weights(n_prb: int, prb: int, jnr=None, cfg: SimConfig = CFG, step: int = 2) -> np.ndarray:
     """Weights ``lambda_i`` of ``R_b = sum_i lambda_i E_i`` for PRB ``prb`` of the allocation.
 
-    ``jnr``: optional jammer-to-noise ratio per pilot ``[6n]`` (linear, already multiplied by the
-    jammer's channel gain ``|g_k|^2``; 0 on unjammed pilots). Without it: no jamming.
+    ``jnr``: optional jammer-to-noise ratio per known symbol ``[12n / step]`` (linear, already
+    multiplied by the jammer's channel gain ``|g_k|^2``; 0 where there is no jamming). Without it:
+    no jamming. ``step``: 2 for the DMRS comb, 1 for a decoded data symbol.
     """
-    p = projector(n_prb, cfg)
-    b = _block(prb)
+    p = projector(n_prb, cfg, step)
+    b = _block(prb, step)
     norm = np.trace(p[b, b]).real
     if jnr is None:
         cov = p[b, b]
@@ -121,7 +125,7 @@ def slot_average(lam: np.ndarray, slots: int) -> np.ndarray:
 
 
 def threshold(
-    n_prb: int, prb: int, fa: float = 0.01, cfg: SimConfig = CFG, slots: int = 1
+    n_prb: int, prb: int, fa: float = 0.01, cfg: SimConfig = CFG, slots: int = 1, step: int = 2
 ) -> float:
     """Threshold on ``R_b`` (averaged over ``slots`` slots) exceeded with probability ``fa``
     without jamming.
@@ -129,15 +133,18 @@ def threshold(
     Read from the tabulated tail probability (linear interpolation of its logarithm on a 0.05
     grid; error below 1e-4 against an exact root search).
     """
-    grid, logp = _log_ccdf_table(n_prb, prb, cfg.scs, cfg.tau_max, slots)
+    grid, logp = _log_ccdf_table(n_prb, prb, cfg.scs, cfg.tau_max, slots, step)
     return float(np.interp(np.log10(fa), logp[::-1], grid[::-1]))
 
 
 @cache
-def _log_ccdf_table(n_prb: int, prb: int, scs: float, tau_max: float, slots: int = 1):
+def _log_ccdf_table(
+    n_prb: int, prb: int, scs: float, tau_max: float, slots: int = 1, step: int = 2
+):
     # On a uniform grid, expm(S t_k) = expm(S dt)^k: one matrix exponential for the whole table
     grid = np.linspace(0.0, 40.0, 801)
-    lam = slot_average(weights(n_prb, prb, cfg=SimConfig(scs=scs, tau_max=tau_max)), slots)
+    cfg = SimConfig(scs=scs, tau_max=tau_max)
+    lam = slot_average(weights(n_prb, prb, cfg=cfg, step=step), slots)
     step = linalg.expm(_generator(lam) * (grid[1] - grid[0]))
     row = np.eye(len(step))[0]
     p = np.empty_like(grid)
@@ -147,18 +154,18 @@ def _log_ccdf_table(n_prb: int, prb: int, scs: float, tau_max: float, slots: int
     return grid, np.log10(np.clip(p, 1e-300, 1.0))
 
 
-def log10_pvalue(r, n_prb: int, prb: int, cfg: SimConfig = CFG) -> np.ndarray:
+def log10_pvalue(r, n_prb: int, prb: int, cfg: SimConfig = CFG, step: int = 2) -> np.ndarray:
     """``log10 P(R_b > r | no jamming)`` for observed residuals ``r`` of PRB ``prb``.
 
     Values beyond the table (r > 40, p far below 1e-12) are extrapolated with the exponential tail
-    of the largest weight.
+    of the largest weight. ``step``: 2 for the DMRS comb, 1 for a decoded data symbol.
     """
-    grid, logp = _log_ccdf_table(n_prb, prb, cfg.scs, cfg.tau_max)
+    grid, logp = _log_ccdf_table(n_prb, prb, cfg.scs, cfg.tau_max, 1, step)
     r = np.asarray(r, float)
     out = np.interp(r, grid, logp)
     beyond = r > grid[-1]
     if beyond.any():
-        slope = -1 / (weights(n_prb, prb, cfg=cfg).max() * np.log(10))
+        slope = -1 / (weights(n_prb, prb, cfg=cfg, step=step).max() * np.log(10))
         out = np.where(beyond, logp[-1] + slope * (r - grid[-1]), out)
     return out
 

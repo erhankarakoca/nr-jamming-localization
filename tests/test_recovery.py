@@ -267,3 +267,34 @@ def test_data_aided_passes_need_decoding():
     plain = rx(out.y_alloc, out.no, _cells(out), mode="soft", decode=False)
     passes = rx(out.y_alloc, out.no, _cells(out), mode="soft", decode=False, iterations=3)
     assert torch.equal(plain["llr"], passes["llr"]) and "b_hat" not in passes
+
+
+def test_decoded_symbols_reproduce_the_transmitted_grid():
+    out = link(_scenario(NONE, 0.0, 30.0, n=8), decode=False)
+    rx = MapAwareReceiver(out.tx)
+    x = rx.decoded_symbols(out.b)
+    sym, sc = data_positions(out.tx)
+    ratio = out.y_alloc[:, 0, 0, sym, sc] / x  # the channel, up to noise
+    spread = (ratio - ratio.mean(dim=1, keepdim=True)).abs().mean()
+    assert x.shape[1] == sym.numel()
+    assert (ratio[:, 1:] - ratio[:, :-1]).abs().mean() < 0.2 * spread  # smooth across the grid
+
+
+def test_leave_one_out_residual_has_unit_mean_without_jamming():
+    out = link(_scenario(NONE, 0.0, 15.0, n=64), decode=False)
+    rx = MapAwareReceiver(out.tx)
+    r = rx.leave_one_out_residuals(out.y_alloc, out.no, rx.decoded_symbols(out.b))
+    data = ~torch.isnan(r)
+    assert abs(r[data].mean().item() - 1) < 0.05
+    assert torch.isnan(r[:, :, list(cfg.dmrs_symbols)]).all()
+
+
+def test_decoded_cell_test_finds_the_jammed_cells_of_any_support():
+    out = link(_scenario(DATA, 9.0, 15.0, n=32), decode=False)
+    rx = MapAwareReceiver(out.tx)
+    flags, _ = rx.decoded_cell_test(out.y_alloc, out.no, rx.decoded_symbols(out.b))
+    jammed = _cells(out).bool()
+    data = torch.ones_like(jammed)
+    data[:, :, list(cfg.dmrs_symbols)] = False
+    assert (flags & jammed & data).sum() > 0.95 * (jammed & data).sum()
+    assert (flags & ~jammed & data).float().sum() < 0.03 * (~jammed & data).sum()
