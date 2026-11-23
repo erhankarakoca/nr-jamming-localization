@@ -1451,3 +1451,106 @@ Partial-band jamming, BLER (%) by jammed PRBs of 12 (share of the allocation):
   and the clean cells are already used.
 - The 4-PRB points agree with the recovery table of section 17 (partial-band at +3 dB: 0.06%
   against 0.08% there).
+
+## 23. Known-symbol residuals after decoding and a receiver that refines its map
+
+Round of 23-24 Nov 2026 (branch `decoder-aided-passes`). Three questions: can the residual theory
+be stated for any known symbols, so that it also covers decoded data; can decoding fix what the
+detector misses; and does the receiver need a map at all.
+
+**One law for every known symbol** (`jamloc.recovery.MapAwareReceiver.slot_residuals`,
+`decoded_cell_test`). Once a block passes its CRC, every data symbol is known, so every data
+resource element gives an LS value of the channel. For each resource element, a straight line in
+time is fitted by weighted least squares to the LS values of the same subcarrier on the other data
+symbols, and the residual is the difference. The prediction leaves the tested value out, so the
+twelve residuals of a cell are independent with equal variance (QPSK) and the cell's normalized
+energy is Gamma(12, 1/12) without jamming. DMRS pilots are tested against the same prediction
+(Gamma(6, 1/6)). Strong outliers are peeled off one per PRB row and round before testing, so that
+jammed cells do not leak into the predictions of clean ones. This is the general proposition (any
+annihilating predictor, any group of known symbols) applied in time instead of in frequency.
+
+Calibration (`python -m jamloc.experiments.residual_theory --only-decoded`, results in
+`results/theory/residual_calibration.csv`; measured fraction below the analytic level):
+
+| Residual | Channel | 0.1% | 1% | 10% | Cells |
+| --- | --- | --- | --- | --- | --- |
+| DMRS, benign test slots | TDL-A | 0.08% | 1.05% | 10.1% | 29,664 |
+| DMRS, benign test slots | TDL-C | 0.10% | 0.95% | 9.9% | 30,144 |
+| DMRS, `longdelay` | TDL-C 1000 ns | 54.5% | 62.9% | 76.3% | 15,520 |
+| Decoded data, CRC-pass benign | TDL-A | 0.10% | 1.01% | 10.0% | 430,768 |
+| Decoded data, CRC-pass benign | TDL-C | 0.09% | 0.96% | 9.9% | 424,723 |
+| Decoded data | TDL-C 1000 ns | 0.09% | 0.93% | | 197,600 |
+| Decoded data | TDL-C 30 m/s | 0.17% | 1.19% | | 195,572 |
+
+The decoded-data residual has no frequency model, so the long delays that break the DMRS residual
+do not affect it. The straight line matters: with a constant fit, the benign false-alarm rate at
+25 dB was 3.1% at 3 m/s, and at 30 m/s 20% (15 dB) and 52% (25 dB), against 1.0-1.1% and 2.8% with
+the line (transmitted symbols, 192 slots per point).
+
+**Localization after decoding** (`python -m jamloc.experiments.decoded_map --split S --seed s
+--per-point 8 --refine`; the slots of each test grid are replayed exactly with the seeds of
+`dataset.generate`, first 8 batches of 16 slots per grid point). Maps compared on the same cells:
+`unet` (before decoding), `post` (exact tests after decoding: decoded-data residual on the data and
+DMRS cells of slots whose CRC passed, Gamma(12) power test on unscheduled cells, all at 1%; the
+allocation of a slot that failed keeps the U-Net map), `fused` (U-Net as prior: level 10% on cells
+the U-Net flags, 1% elsewhere), `genie` (as `post` with the transmitted symbols on every slot).
+Decoding by the soft receiver with per-cell estimates and refining passes.
+
+F1 over all cells, seed 0 (`results/da_study/loc2`), seeds 1 and 2 pending:
+
+| Grid | U-Net | Exact tests | Fused | Genie | Benign FA, exact tests |
+| --- | --- | --- | --- | --- | --- |
+| test (nominal) | 0.953 | 0.887 | 0.913 | 0.886 | 1.01% |
+| sched | 0.924 | 0.892 | 0.914 | 0.897 | - |
+| combjam | 0.955 | 0.886 | 0.913 | 0.885 | 0.98% |
+| qpskjam | 0.959 | 0.890 | 0.917 | 0.889 | 1.03% |
+| neighbor | 0.961 | 0.907 | 0.933 | 0.906 | 0.99% |
+| hopjam | 0.581 | 0.876 | 0.862 | 0.884 | 1.00% |
+| pulsejam | 0.637 | 0.878 | 0.860 | 0.879 | 0.96% |
+| tonejam | 0.769 | 0.585 | 0.657 | 0.583 | 0.96% |
+| spoofjam | 0.032 | 0.252 | 0.227 | 0.773 | 1.00% |
+| spoofpart | 0.140 | 0.497 | 0.425 | 0.683 | 1.02% |
+
+- The exact tests stay at their 1% design rate on every grid's benign slots (0.96-1.03% over all
+  cells); the U-Net varies between 0.35% and 1.33%, the fusion 1.05-1.21%.
+- The network wins on the attacks it was trained on (it pools weak evidence across a PRB row);
+  the exact tests win on every support it never saw, without training.
+- Spoofing: the scheduled-cell F1 of the exact tests is 0.46-0.79 between -15 and -6 dB JSR
+  (U-Net 0.02-0.03). From 0 dB on most spoofed slots no longer decode (182/256 at 0 dB, 61/256 at
+  +9 dB), and the network's map is kept there.
+- Multi-tone: the sum over a cell dilutes a single tone. With `--peaks` (sum and largest error
+  each at half the level, both laws exact) F1 rose from 0.594 to 0.640 on 2 batches per point and
+  fell by 0.004 on the nominal grid; the sum stays the default.
+- Figure `after_decoding` (`python -m jamloc.experiments.figures --only after_decoding`): one
+  hopping slot, 89 false alarms and 20 misses before decoding, 3 and 0 after.
+
+**Receiver.** New options of `MapAwareReceiver` (receivers in `experiments.recovery`):
+`cellwise` (jamming power per flagged cell from its own 12 resource elements instead of the
+average over the flagged data cells of its PRB), `refine` (after a failed decoding, a data cell
+whose remodulated error energy exceeds the Gamma(12) 1% quantile joins the map), `renoise` (after
+the data-aided channel update, the noise power is the value for which the median of
+`|y - h x_bar|^2 / (|h|^2 v + N0)` over confident symbols of clean cells is ln 2; then pilots,
+residuals, channel and LLRs are recomputed). `p_r_e_full` / `true_full` use all three with three
+passes; `cell_soft` / `cell_full` use no map (DMRS CFAR pilot weights, per-cell estimate on every
+data cell).
+
+Bug found and fixed during the round: the first `renoise` used the filter's error variance under
+the wrong noise power and came out several dB low (commit 8aa773e). Numbers from before the fix are
+not used.
+
+Hopping and pulsed jammers at +9 dB JSR, TDL-C, 15 dB SNR, 4 of 12 PRBs, three seeds of 1,600 slots
+(`results/da_study/table`, `table_full`), BLER per seed:
+
+| Jammer | U-Net soft | U-Net per cell | U-Net full | True map soft | No map, per cell | No map, full |
+| --- | --- | --- | --- | --- | --- | --- |
+| hopping data | 25.9 / 17.7 / 21.1% | 1.3 / 2.5 / 0.9% | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| hopping partial | 32.2 / 29.4 / 31.2% | | 0.3 / 0.3 / 0.2% | | | 0.2 / 0.2 / 0.1% |
+| pulsed partial | 0.2 / 0.4 / 0.6% | | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+
+16-QAM (MCS 13, 18 dB SNR, seed 0, true map against no map; Colab, `--mcs 13`): pilot +3/+9 dB
+0.4/0.9% against 1.6/4.9%; data 4.2/7.8% against 20.2/19.1%; partial-band 5.6/7.9% against
+21.4/31.2%. The per-cell estimate with the true map gives 7.6/9.1% (data) and 7.8/8.8% (partial),
+so with 16-QAM pooling over the flagged cells of a PRB is more precise when the map is right.
+
+Pending in this section: nominal grid and every-pilot-jammed case (three seeds), estimated noise
+power, 8 dB SNR, localization seeds 1 and 2.
