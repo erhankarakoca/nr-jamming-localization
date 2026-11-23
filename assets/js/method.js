@@ -7,8 +7,8 @@ import { crcBadge } from "./constellation.js";
 import { featureScale, heatColor, svgNode } from "./grid.js";
 import { element, reportError } from "./nav.js";
 import {
-  BLUE, BOX, RED, allocationGrid, cellTrust, constellationView, drawFrame, fadeTo, mean, median,
-  shareText, symbols, tween,
+  BLUE, BOX, RED, allocationGrid, bitErrors, cellTrust, constellationView, decodedSymbols, drawFrame,
+  fadeTo, mean, median, shareText, symbols, tween,
 } from "./points.js";
 
 const GREY = "#9a9a9a";
@@ -232,6 +232,9 @@ async function methodAnimation(host) {
   const before = symbols(slot, "standard");
   const after = symbols(slot, "fused_soft");
   const trust = { standard: cellTrust(before), map: cellTrust(after) };
+  // After decoding: the map-aware receiver's points on the symbols its decoded block gives
+  const decoded = decodedSymbols(slot, "fused_soft");
+  const errors = { standard: bitErrors(slot, "standard", before), map: bitErrors(slot, "fused_soft", after) };
   const llr = (points, jammed) => mean(points.filter(p => p.jammed === jammed).map(p => p.llr));
   const featureNumbers = {};
   for (const key of ["power_db", "residual_db", "evm_db"]) {
@@ -281,7 +284,7 @@ async function methodAnimation(host) {
     { stage: 3, jam: 1, flags: 1, view: "clues", map: 1 },
     { stage: 4, jam: 1, flags: 1, view: "channel", trueLine: 1, pilots: "flagged faded", estimate: "map", ghost: 1 },
     { stage: 4, jam: 1, flags: 1, trust: "map", view: "points", points: "map" },
-    { stage: 4, jam: 1, flags: 1, trust: "map", view: "points", points: "map", crc: ["standard", "fused_soft"] },
+    { stage: 4, jam: 1, flags: 1, trust: "map", view: "points", points: decoded ? "decoded" : "map", crc: ["standard", "fused_soft"] },
   ];
 
   async function apply(i, animate, from) {
@@ -327,13 +330,15 @@ async function methodAnimation(host) {
       jobs.push(fade(clues.groups.map, s.map ? 1 : 0, 700));
     }
     if (s.view === "points") {
-      const to = s.points === "map" ? after : before;
+      const to = { map: after, decoded, standard: before }[s.points] ?? before;
       if (animate && was.view === "points" && shownPoints && shownPoints !== to) {
         const a = shownPoints;
         jobs.push(tween(1700, t => drawFrame(view, a, to, t), alive));
       } else drawFrame(view, to, to, 0);
       shownPoints = to;
-      canvas.setAttribute("aria-label", `Equalized data symbols of the user's ${count} PRBs, ${s.points === "map" ? "decoded with the jamming map" : "standard receiver"}`);
+      canvas.setAttribute("aria-label", s.points === "decoded"
+        ? `The user's ${count} PRBs after decoding with the jamming map: every data symbol on the symbol that was sent`
+        : `Equalized data symbols of the user's ${count} PRBs, ${s.points === "map" ? "decoded with the jamming map" : "standard receiver"}`);
     }
     // Legend and CRC line under the panels
     const items = [["alloc", "data cell"], ["pilot", "pilot cell (symbol 2)"], ["truth", "jammed"]];
@@ -345,7 +350,9 @@ async function methodAnimation(host) {
       if (s.estimate === "standard") items.push(["dash", "standard estimate"]);
       if (s.estimate === "map") items.push(["dash faint", "standard estimate"], ["line red-line", "estimate with the map"]);
     }
-    if (s.view === "points") items.push(["dot blue-dot", "clean cell"], ["dot", "jammed cell (fainter: less trusted)"]);
+    if (s.points === "decoded") {
+      items.push(["dot blue-dot", "clean cell"], ["dot", "jammed cell"], ["dot black-dot", "decoded wrongly"]);
+    } else if (s.view === "points") items.push(["dot blue-dot", "clean cell"], ["dot", "jammed cell (fainter: less trusted)"]);
     const crcLine = element("p", null, "crc-line");
     if (s.crc) {
       s.crc.forEach((name, k) => {
@@ -387,8 +394,10 @@ async function methodAnimation(host) {
       text: `For each flagged data cell the receiver adds the jammer power it measured there to the noise variance. Those bits reach the decoder with almost no confidence (mean |LLR| ${llr(after, true).toFixed(1)}, against ${llr(after, false).toFixed(0)} for clean bits; the jammed cells turn light on the left), so the decoder fills them in from the clean ${cleanShare} of the block.`,
     },
     {
-      title: "The block decodes",
-      text: `Same received samples, one small network and one more decoding: the CRC passes. Over all ${batch.standard.slots} slots simulated under these conditions, the standard receiver failed ${batch.standard.failures} and the receiver with the map ${batch.fused_soft.failures}.`,
+      title: decoded ? "The decoder rebuilds the jammed bits" : "The block decodes",
+      text: decoded
+        ? `The map did not repair the jammed symbols: ${errors.map.jammedBefore} of their bits still pointed the wrong way, but with almost no weight. The decoder rebuilt them from the clean ${cleanShare} of the block, so after decoding every point lands on the symbol that was sent (no black points) and the CRC passes. The standard receiver passed ${errors.standard.before} wrong bits at full weight; its decoded block still differed from the one sent in ${errors.standard.after} bits and its CRC failed. Over all ${batch.standard.slots} slots simulated under these conditions, the standard receiver failed ${batch.standard.failures} and the receiver with the map ${batch.fused_soft.failures}.`
+        : `Same received samples, one small network and one more decoding: the CRC passes. Over all ${batch.standard.slots} slots simulated under these conditions, the standard receiver failed ${batch.standard.failures} and the receiver with the map ${batch.fused_soft.failures}.`,
     },
   ].map((step, i) => ({ ...step, stage: states[i].stage, render: (animate, from) => apply(i, animate, from) }));
 
