@@ -120,6 +120,7 @@ RECEIVERS = {
     "p_r_e_renoise": ("fused", "soft"),
     "true_renoise": ("true", "soft"),
     "cell_da": (None, "cell"),
+    "true_cell": ("true", "soft"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
 DATA_AIDED = {
@@ -134,10 +135,10 @@ DATA_AIDED = {
 # Options of the map-aware receiver (jamloc.recovery.MapAwareReceiver.call)
 OPTIONS = {
     "p_r_e_cell": {"cellwise": True},
+    "true_cell": {"cellwise": True},
     "p_r_e_refine": {"cellwise": True, "refine": True},
     "p_r_e_renoise": {"renoise": True},
     "true_renoise": {"renoise": True},
-    "cell_da": {"renoise": False},
 }
 DETECTORS = ("power_threshold", "block_test", "no_residual", "fused", "fused_atk")
 # Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
@@ -241,6 +242,12 @@ STYLE = {
         "color": "#6A3D9A",
         "marker": "*",
         "linestyle": "-.",
+    },
+    "true_cell": {
+        "label": "True map, soft, per cell",
+        "color": "#00A087",
+        "marker": "^",
+        "linestyle": "--",
     },
     "cell_da": {
         "label": "Per-cell estimate, no map, data-aided",
@@ -422,6 +429,7 @@ def simulate(
     replay=None,
     attacks=None,
     jam_size=JAM_SIZE,
+    mcs_index=None,
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
     ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
@@ -429,6 +437,8 @@ def simulate(
     (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``).
     ``jam_size``: PRBs of the pilot, data and partial-band attacks (inside the allocation)."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
+    if mcs_index is not None:  # another MCS: the detectors were trained on the default one
+        cfg = dataclasses.replace(cfg, mcs_index=mcs_index)
     link = JammedPUSCHLink(cfg)
     nest = noise_estimate != "true"
     detectors = {}
@@ -809,6 +819,9 @@ def main(argv=None):
         choices=list(RECEIVERS),
         help="simulate only these receivers and replace their rows in the saved CSV",
     )
+    p.add_argument(
+        "--mcs", type=int, default=None, help="MCS index (table 1) instead of the default"
+    )
     args = p.parse_args(argv)
 
     out = results_dir() / "recovery"
@@ -822,6 +835,8 @@ def main(argv=None):
         stem = stem.with_name(f"{stem.name}_nest")
     if args.jam_prb is not None:
         stem = stem.with_name(f"{stem.name}_jam{args.jam_prb}")
+    if args.mcs is not None:
+        stem = stem.with_name(f"{stem.name}_mcs{args.mcs}")
     original = stem  # the name of the run a replay repeats
     if args.replay:
         stem = stem.with_name(f"{stem.name}_replay")
@@ -861,6 +876,7 @@ def main(argv=None):
                 replay,
                 args.attacks,
                 JAM_SIZE if args.jam_prb is None else args.jam_prb,
+                args.mcs,
             )
             if args.replay:
                 bad = check_replay(rows, before)
@@ -883,8 +899,10 @@ def main(argv=None):
     slot_files = sorted(stem.parent.glob(f"{stem.name}_seed*_slots.npz"))
     if slot_files:
         _write_rows(paired_rows(slot_files), stem.with_name(f"{stem.name}_paired.csv"))
-    if args.jam_prb is not None or not any(
-        r["attack"] in ("pilot", "data", "partial") for r in pooled
+    if (
+        args.jam_prb is not None
+        or args.mcs is not None
+        or not any(r["attack"] in ("pilot", "data", "partial") for r in pooled)
     ):
         # e.g. --attacks pilot_whole_allocation: the figures plot the nominal attacks only; a
         # jammer width other than the nominal one is plotted against width by width_sweep

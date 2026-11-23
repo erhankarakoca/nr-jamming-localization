@@ -409,79 +409,108 @@ class MapAwareReceiver(Block):
             out[:, :, sym] = residual_per_prb(h_ls, sc, no, power, self.cfg)
         return out
 
-    def leave_one_out_residuals(self, y, no, x_data, exclude=None) -> torch.Tensor:
-        """Residual ``[B, n, num_symbols]`` of every data cell of a decoded slot, from the other
-        data symbols of the same subcarriers (NaN on symbols without data, or where no other
-        symbol is left).
+    def slot_residuals(self, y, no, x_data, exclude=None, order=1):
+        """Residual ``[B, n, num_symbols]`` of every data and DMRS cell of a decoded slot, and
+        the number of known symbols in each cell (NaN and 0 where a cell has none).
 
-        With the data symbols ``x`` known and the channel constant over the slot, every data
-        resource element gives an LS value ``y / x = h + w / x``. For resource element ``(k, l)``
-        the channel is predicted by the mean of the LS values of subcarrier ``k`` on the other
-        data symbols that are not in ``exclude`` ``[B, n, num_symbols]``, which leaves out
-        cells already known to be jammed so that their energy does not leak into the prediction.
-        The prediction is independent of ``(k, l)``, so without jamming ``y / x`` minus it is
-        circular Gaussian with variance ``N0 / |x|^2`` plus the variance of the mean. The residual
-        of a cell is the energy of its twelve values divided by the sum of these variances. For
-        constant-modulus symbols it is then Gamma(12, 1/12) (``cell_threshold``)."""
-        num_prb = y.shape[-1] // 12
-        symbols = sorted(set(self.data_sym.tolist()))
-        rows, width = len(symbols), y.shape[-1]
-        if rows * width != self.data_sym.numel():
-            raise ValueError("every data symbol must carry data on all subcarriers")
-        dev = y.device
-        y_d = y[:, 0, 0, self.data_sym, self.data_sc].reshape(-1, rows, width)
-        x = x_data.to(dev).reshape(-1, rows, width)
-        h_ls = y_d / x
-        inv = 1 / x.abs() ** 2  # noise variance of each LS value, in units of N0
-        use = torch.ones_like(h_ls.real, dtype=torch.bool)
+        With the data symbols ``x_data`` ``[B, num_data]`` known, every data and pilot resource
+        element gives an LS value ``y / x = h + w / x``. The channel of a subcarrier changes
+        little within a slot, so it is predicted for resource element ``(k, l)`` by a weighted
+        least-squares fit of a constant (``order=0``) or a straight line in time (``order=1``)
+        to the LS values of subcarrier ``k`` on the other data symbols, leaving out the cells in
+        ``exclude`` ``[B, n, num_symbols]`` (cells known to be jammed, so that their energy does
+        not leak into the prediction). The pilots are tested against the data but never used to
+        predict. The prediction of ``(k, l)`` does not contain ``y_{k,l}``, so without jamming the
+        difference is circular Gaussian with variance ``N0 / |x|^2`` plus the variance of the
+        fit. The residual of a cell is the energy of its differences divided by the sum of these
+        variances, Gamma(m, 1/m) for m known symbols of equal energy (``cell_threshold``)."""
+        num_prb, width = y.shape[-1] // 12, y.shape[-1]
+        num_sym = self.cfg.num_symbols
+        dev, rows = y.device, y.shape[0]
+        h = y.new_zeros(rows, num_sym, width)
+        energy = y.real.new_zeros(rows, num_sym, width)  # |x|^2 of the known symbols
+        sym, sc = self.data_sym.to(dev), self.data_sc.to(dev)
+        x = x_data.to(dev)
+        h[:, sym, sc] = y[:, 0, 0, sym, sc] / x
+        energy[:, sym, sc] = x.abs() ** 2
+        pp = self.tx.resource_grid.pilot_pattern
+        psym, psc = torch.nonzero(pp.mask[0, 0], as_tuple=True)
+        pilots = pp.pilots[0, 0]
+        used = pilots.abs() > 0
+        psym, psc, pilots = psym[used].to(dev), psc[used].to(dev), pilots[used].to(dev)
+        h[:, psym, psc] = y[:, 0, 0, psym, psc] / pilots
+        energy[:, psym, psc] = (pilots.abs() ** 2).to(energy.dtype)
+        known = energy > 0
+        predict = torch.zeros_like(known)
+        predict[:, sym, sc] = True
         if exclude is not None:
-            cells = exclude.to(dev)[:, :, symbols].transpose(1, 2)  # [B, rows, n]
-            use = ~cells.repeat_interleave(12, dim=2)
-        w = use.to(h_ls.real.dtype)
-        total, count = (w * h_ls).sum(1, keepdim=True), w.sum(1, keepdim=True)
-        var_sum = (w * inv).sum(1, keepdim=True)
-        others = count - w
-        pred = (total - w * h_ls) / others.clamp_min(1)
-        var = inv + (var_sum - w * inv) / others.clamp_min(1) ** 2
-        energy = (h_ls - pred).abs() ** 2
-        per_cell = energy.reshape(-1, rows, num_prb, 12).sum(-1)
-        expected = no[:, None, None] * var.reshape(-1, rows, num_prb, 12).sum(-1)
-        r = per_cell / expected
-        r = torch.where(others.reshape(-1, rows, num_prb, 12)[..., 0] >= 1, r, torch.nan)
-        out = y.real.new_full((y.shape[0], num_prb, self.cfg.num_symbols), float("nan"))
-        out[:, :, symbols] = r.transpose(1, 2)
-        return out
+            predict &= ~exclude.to(dev).transpose(1, 2).repeat_interleave(12, dim=2)
+        w = energy * predict
+        t = torch.arange(num_sym, device=dev, dtype=energy.dtype)[None, :, None]
 
-    def decoded_cell_test(self, y, no, x_data, alpha=0.01, peel=1e-6, exclude=None):
-        """Jammed data cells ``[B, n, num_symbols]`` of a decoded slot and their residuals.
+        def others(v):  # sum over the other symbols of the same subcarrier
+            return v.sum(1, keepdim=True) - v
 
-        Leave-one-out residuals (``leave_one_out_residuals``) with outliers peeled off one at a
-        time. A strongly jammed cell would leak into the prediction of every other cell of its
-        subcarrier. So in each round, the cell with the largest residual in each PRB row is left
-        out of the predictions if its residual exceeds the ``peel`` quantile of the null law,
-        until no such cell is left. The cells are then tested at the ``alpha`` quantile. A cell
-        with no other cell left to predict it keeps the result of the last round in which it had
-        one. ``exclude``: cells left out of the predictions from the start (e.g. a detector's
-        map)."""
-        thr, high = cell_threshold(12, alpha), cell_threshold(12, peel)
-        excl = torch.zeros_like(y.real[:, 0, 0, 0, :1], dtype=torch.bool)
+        s0, sy = others(w), others(w * h)
+        if order == 0:
+            ok = s0 > 0.5
+            pred = sy / s0.clamp_min(1e-12)
+            pvar = 1 / s0.clamp_min(1e-12)
+        else:
+            s1, s2, sty = others(w * t), others(w * t * t), others(w * t * h)
+            det = s0 * s2 - s1**2
+            ok = det > 1e-6
+            det = det.clamp_min(1e-12)
+            pred = ((s2 * sy - s1 * sty) + t * (s0 * sty - s1 * sy)) / det
+            pvar = (s2 - 2 * t * s1 + t * t * s0) / det
+        var = torch.where(known, 1 / energy.clamp_min(1e-12) + pvar, 0.0)
+        err = torch.where(known, (h - pred).abs() ** 2, 0.0)
+        cells = (rows, num_sym, num_prb, 12)
+        count = known.reshape(cells).sum(-1)
+        fine = (ok | ~known).reshape(cells).all(-1) & (count > 0)
+        r = err.reshape(cells).sum(-1) / (no[:, None, None] * var.reshape(cells).sum(-1))
+        r = torch.where(fine, r, torch.nan)
+        return r.transpose(1, 2), count.transpose(1, 2)
+
+    def decoded_cell_test(self, y, no, x_data, alpha=0.01, peel=1e-6, exclude=None, order=1):
+        """Jammed cells ``[B, n, num_symbols]`` of a decoded slot (data and DMRS cells), their
+        residuals and their numbers of known symbols (``slot_residuals``).
+
+        A strongly jammed data cell would leak into the prediction of every other cell of its
+        subcarriers. So outliers are peeled off one at a time. In each round, the data cell with
+        the largest residual in each PRB row is left out of the predictions if its residual
+        exceeds the ``peel`` quantile of its null law, until no such cell is left. All cells are
+        then tested at the ``alpha`` quantile. A cell with nothing left to predict it keeps the
+        residual of the last round in which it had a prediction. ``exclude``: data cells left out
+        of the predictions from the start (e.g. a detector's map)."""
         num_prb = y.shape[-1] // 12
-        excl = excl.new_zeros((y.shape[0], num_prb, self.cfg.num_symbols))
+        data = torch.zeros(num_prb, self.cfg.num_symbols, dtype=torch.bool, device=y.device)
+        data[:, sorted(set(self.data_sym.tolist()))] = True
+        excl = data.new_zeros((y.shape[0], num_prb, self.cfg.num_symbols))
         if exclude is not None:
-            excl = excl | exclude.to(excl.device)
-        last = None
-        for _ in range(self.cfg.num_symbols):
-            r = self.leave_one_out_residuals(y, no, x_data, exclude=excl)
+            excl = excl | (exclude.to(excl.device) & data)
+        last, count = None, None
+        for _ in range(self.cfg.num_symbols + 1):
+            r, count = self.slot_residuals(y, no, x_data, excl, order)
             last = r if last is None else torch.where(torch.isnan(r), last, r)
-            score = torch.nan_to_num(r, nan=-1.0).masked_fill(excl, -1.0)
-            top = score.max(dim=2, keepdim=True)
-            new = (score == top.values) & (top.values > high)
+            high = self._null_quantile(count, peel)
+            score = torch.nan_to_num(r / high, nan=-1.0).masked_fill(excl | ~data, -1.0)
+            top = score.max(dim=2, keepdim=True).values
+            new = (score == top) & (top > 1)
             if not new.any():
                 break
             excl = excl | new
-        r = self.leave_one_out_residuals(y, no, x_data, exclude=excl)
-        last = torch.where(torch.isnan(r), last, r)
-        return torch.nan_to_num(last, nan=0.0) > thr, last
+        return torch.nan_to_num(last, nan=0.0) > self._null_quantile(count, alpha), last, count
+
+    @staticmethod
+    def _null_quantile(count: torch.Tensor, alpha: float) -> torch.Tensor:
+        """Threshold of Gamma(m, 1/m) exceeded with probability ``alpha``, for each cell's number
+        of known symbols ``m`` (infinite where a cell has none)."""
+        out = torch.full(count.shape, math.inf, device=count.device)
+        for m in count.unique().tolist():
+            if m > 0:
+                out[count == m] = cell_threshold(int(m), alpha)
+        return out
 
     def _pilots(self, h_ls, pilot_sc, pilot_power, no, cells, mode):
         """Which pilots the filter uses (``clean``), their LS noise variances, and the residuals

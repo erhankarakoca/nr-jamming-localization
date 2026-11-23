@@ -280,19 +280,21 @@ def test_decoded_symbols_reproduce_the_transmitted_grid():
     assert (ratio[:, 1:] - ratio[:, :-1]).abs().mean() < 0.2 * spread  # smooth across the grid
 
 
-def test_leave_one_out_residual_has_unit_mean_without_jamming():
+def test_slot_residual_has_unit_mean_without_jamming():
     out = link(_scenario(NONE, 0.0, 15.0, n=64), decode=False)
     rx = MapAwareReceiver(out.tx)
-    r = rx.leave_one_out_residuals(out.y_alloc, out.no, rx.decoded_symbols(out.b))
-    data = ~torch.isnan(r)
-    assert abs(r[data].mean().item() - 1) < 0.05
-    assert torch.isnan(r[:, :, list(cfg.dmrs_symbols)]).all()
+    r, count = rx.slot_residuals(out.y_alloc, out.no, rx.decoded_symbols(out.b))
+    assert abs(r.mean().item() - 1) < 0.05
+    dmrs = list(cfg.dmrs_symbols)
+    assert (count[:, :, dmrs] == 6).all()  # the pilots of the DMRS comb
+    data = [sym for sym in range(cfg.num_symbols) if sym not in dmrs]
+    assert (count[:, :, data] == 12).all()  # every subcarrier of a data cell
 
 
 def test_decoded_cell_test_finds_the_jammed_cells_of_any_support():
-    out = link(_scenario(DATA, 9.0, 15.0, n=32), decode=False)
+    out = link(_scenario(DATA, 9.0, 15.0, n=32), decode=False)  # all data symbols of 4 PRBs
     rx = MapAwareReceiver(out.tx)
-    flags, _ = rx.decoded_cell_test(out.y_alloc, out.no, rx.decoded_symbols(out.b))
+    flags, _, _ = rx.decoded_cell_test(out.y_alloc, out.no, rx.decoded_symbols(out.b))
     jammed = _cells(out).bool()
     data = torch.ones_like(jammed)
     data[:, :, list(cfg.dmrs_symbols)] = False

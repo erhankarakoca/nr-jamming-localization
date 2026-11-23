@@ -11,14 +11,16 @@ This script replays the slots of a test grid exactly (same seeds and jobs as ``d
 keeping the first ``--per-point`` batches of every grid point), runs the fused U-Net, decodes every
 slot with the soft map-aware receiver and its data-aided passes, and compares maps cell by cell:
 
-* ``unet``    - the U-Net map at its validation threshold (1% of clean validation cells)
-* ``decoded`` - on the scheduled data cells of slots whose CRC passed, the leave-one-out test of
-                the decoded symbols (``MapAwareReceiver.decoded_cell_test``) at its analytic
-                ``--alpha`` threshold replaces the U-Net decision; every other cell keeps the
-                U-Net decision
-* ``union``   - the U-Net map plus the cells the known-symbol test flags
-* ``genie``   - as ``decoded``, but with the transmitted symbols on every slot (what perfect
-                decoding would allow), to separate the test from decoding failures
+* ``unet``  - the U-Net map at its validation threshold (1% of clean validation cells)
+* ``post``  - analytic tests at level ``--alpha``. The unscheduled cells are tested on their
+              received power, whose law without jamming is exact, in every slot. The data and DMRS
+              cells of slots whose CRC passed are tested on their slot residual
+              (``MapAwareReceiver.decoded_cell_test``). The allocation of a slot that failed keeps
+              the U-Net decisions.
+* ``fused`` - as ``post``, but with the U-Net map as a prior. A cell the U-Net flags is tested at
+              the looser level ``--alpha-prior``, any other cell at ``--alpha``.
+* ``genie`` - as ``post``, with the transmitted symbols on every slot (what perfect decoding would
+              allow), to separate the tests from decoding failures
 
 The counts (true and false positives, misses) per attack, JSR and map, over all cells and over the
 scheduled cells, go to ``results/decoded_map/<split>_seed<s>.csv``.
@@ -45,7 +47,7 @@ from jamloc.paths import results_dir
 from jamloc.recovery import MapAwareReceiver
 from jamloc.train import load_model
 
-MAPS = ("unet", "decoded", "union", "genie")
+MAPS = ("unet", "post", "fused", "genie")
 
 
 def _jobs(split: str, per_point: int):
@@ -61,7 +63,31 @@ def _jobs(split: str, per_point: int):
             yield i, job
 
 
-def run(split: str, seed: int, per_point: int, alpha: float, passes: int, refine: bool):
+def _slot_pvalues(rx, out, x_data) -> torch.Tensor:
+    """P-values ``[B, n, num_symbols]`` of the data and DMRS cells of the allocation under the
+    Gamma(m, 1/m) law of their slot residual (1 where a cell has no known symbol)."""
+    _, r, count = rx.decoded_cell_test(out.y_alloc, out.no, x_data)
+    m = count.to(r.dtype)
+    pv = torch.special.gammaincc(m.clamp_min(1), m * torch.nan_to_num(r, nan=0.0))
+    return torch.where(count > 0, pv, torch.ones_like(pv))
+
+
+def _power_pvalues(y, no) -> torch.Tensor:
+    """P-values ``[B, B_c, num_symbols]`` of the received power of every carrier cell without the
+    UE's signal: its mean energy over the 12 subcarriers divided by N0 is Gamma(12, 1/12)."""
+    energy = (y.abs() ** 2).reshape(y.shape[0], y.shape[1], -1, 12).sum(-1) / no[:, None, None]
+    return torch.special.gammaincc(torch.tensor(12.0), energy).transpose(1, 2)
+
+
+def run(
+    split: str,
+    seed: int,
+    per_point: int,
+    alpha: float,
+    passes: int,
+    refine: bool,
+    alpha_prior: float = 0.1,
+):
     spec = SPLITS[split]
     conditions = spec.get("mix", (spec.get("cfg", {}),))
     if len(conditions) > 1:
@@ -108,26 +134,22 @@ def run(split: str, seed: int, per_point: int, alpha: float, passes: int, refine
                 refine=refine,
             )
         crc = res["tb_crc"].reshape(-1).bool()
-        test = rx.decoded_cell_test(out.y_alloc, out.no, rx.decoded_symbols(res["b_hat"]), alpha)[0]
-        genie = rx.decoded_cell_test(out.y_alloc, out.no, rx.decoded_symbols(out.b), alpha)[0]
-        data = torch.zeros_like(unet)
-        data[:, alloc] = True
-        data[:, :, list(cfg.dmrs_symbols)] = False  # scheduled data cells
-        maps = {"unet": unet}
-        for name, cells, ok in (("decoded", test, crc), ("genie", genie, torch.ones_like(crc))):
-            carrier = unet.clone()
-            region = data & ok[:, None, None]
-            full = torch.zeros_like(unet)
-            full[:, alloc] = cells
-            carrier[region] = full[region]
-            maps[name] = carrier
-        union = unet.clone()
-        full = torch.zeros_like(unet)
-        full[:, alloc] = test & crc[:, None, None]
-        maps["union"] = union | full
-
         sched = torch.zeros_like(unet)
         sched[:, alloc] = True
+        power = _power_pvalues(out.y, out.no)
+        maps = {"unet": unet}
+        for name, bits, ok in (
+            ("post", res["b_hat"], crc),
+            ("genie", out.b, torch.ones_like(crc)),
+        ):
+            pv = torch.where(sched, torch.ones_like(power), power)
+            pv[:, alloc] = _slot_pvalues(rx, out, rx.decoded_symbols(bits))
+            known = ~sched | ok[:, None, None]  # where the tests apply
+            maps[name] = torch.where(known, pv < alpha, unet)
+            if name == "post":
+                level = torch.where(unet, torch.full_like(pv, alpha_prior), alpha)
+                maps["fused"] = torch.where(known, pv < level, unet)
+
         attack = ATTACK_NAMES[int(sc.attack[0])]
         key = (job["channel"], attack, float(job["jsr_db"]) if attack != "none" else float("nan"))
         for name, m in maps.items():
@@ -193,10 +215,21 @@ def main(argv=None):
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--per-point", type=int, default=4, help="batches per grid point")
     p.add_argument("--alpha", type=float, default=0.01)
+    p.add_argument(
+        "--alpha-prior", type=float, default=0.1, help="test level on cells the U-Net flags"
+    )
     p.add_argument("--passes", type=int, default=3)
     p.add_argument("--refine", action="store_true", help="passes refine the map")
     args = p.parse_args(argv)
-    run(args.split, args.seed, args.per_point, args.alpha, args.passes, args.refine)
+    run(
+        args.split,
+        args.seed,
+        args.per_point,
+        args.alpha,
+        args.passes,
+        args.refine,
+        args.alpha_prior,
+    )
 
 
 if __name__ == "__main__":
