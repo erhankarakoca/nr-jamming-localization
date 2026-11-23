@@ -1160,6 +1160,7 @@ def after_decoding(jsr_db: float = 3.0, seed: int = 11):
     from jamloc.experiments.recovery import detector_cells, val_threshold
     from jamloc.recovery import MapAwareReceiver
 
+    _require_models(["fused"])
     cfg = dataclasses.replace(CFG, jammer_hopping=True)
     link = JammedPUSCHLink(cfg)
     a0, n = ALLOC
