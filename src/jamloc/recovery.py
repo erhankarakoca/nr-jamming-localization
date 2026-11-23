@@ -139,7 +139,16 @@ def lmmse_interpolation(
     return h_hat, err_var.clamp(0, 1).to(device=device, dtype=torch.float32)
 
 
-MODES = ("hard", "soft", "dmrs", "lmmse", "slot")
+MODES = ("hard", "soft", "dmrs", "lmmse", "slot", "cell")
+
+
+def cell_threshold(num_re: int, alpha: float) -> float:
+    """Threshold on the normalized energy of a cell of ``num_re`` resource elements whose
+    remodulated residuals are independent circular Gaussians of known variance: their mean energy
+    divided by its expectation is Gamma(num_re, 1 / num_re), exceeded with probability ``alpha``."""
+    from scipy.stats import gamma
+
+    return float(gamma.ppf(1 - alpha, a=num_re, scale=1 / num_re))
 
 
 class SoftTBDecoder(Block):
@@ -221,6 +230,7 @@ class MapAwareReceiver(Block):
         self.decoder = TBDecoder(tx._tb_encoder)
         self.soft_decoder = SoftTBDecoder(self.decoder)
         self.data_sym, self.data_sc = data_positions(tx)
+        self._cellwise = False  # set per call (see ``call``)
 
     def call(
         self,
@@ -231,13 +241,30 @@ class MapAwareReceiver(Block):
         mode: str = "hard",
         iterations: int = 0,
         history: bool = False,
+        cellwise: bool = False,
+        refine: bool = False,
+        renoise: bool = False,
+        alpha: float = 0.01,
     ):
         """``mode``: ``"hard"``, ``"soft"`` (both use ``cells``), or ``"dmrs"``, ``"lmmse"``,
-        ``"slot"`` (no map, ``cells`` is ignored). ``iterations``: data-aided passes after the
-        first decoding (they need ``decode``). With ``history=True``, return a list of
+        ``"slot"``, ``"cell"`` (no map, ``cells`` is ignored). ``iterations``: data-aided passes
+        after the first decoding (they need ``decode``). With ``history=True``, return a list of
         pass records starting with that first attempt. Each contains ``h_sc`` and
         ``err_var`` on the first DMRS symbol, ``x_hat``, ``llr``, and the
-        individual pass's ``tb_crc`` (None with ``decode=False``)."""
+        individual pass's ``tb_crc`` (None with ``decode=False``).
+
+        Options of the soft mode and its passes:
+
+        * ``cellwise``: estimate the jamming power of a flagged data cell from its own resource
+          elements instead of averaging it over the flagged data cells of its PRB.
+        * ``refine``: after each failed decoding, test every data cell on its remodulated residual
+          ``y - h_hat x_bar`` (``_refine``) and add the cells that fail it to the map, which then
+          also has per-cell jamming estimates. The detector's map is the starting point; decoding
+          adds what it missed.
+        * ``renoise``: after each failed decoding, estimate the noise power again from the
+          remodulated residual of the confidently decoded data cells the map calls clean, and
+          recompute everything that depends on it (pilot variances, residuals, LLRs).
+        """
         cfg = self.cfg
         num_sc = y.shape[-1]
         num_prb = num_sc // 12
@@ -250,40 +277,19 @@ class MapAwareReceiver(Block):
                     f"cells must cover the allocation, [B, {num_prb}, {cfg.num_symbols}]; got "
                     f"{tuple(cells.shape)} (cut a carrier map to the scheduled PRBs first)"
                 )
+        if mode == "cell":  # no map: every data cell gets its own jamming estimate
+            cellwise = True
+        if refine and mode != "soft":
+            raise ValueError("refine needs the soft mode")
+        if renoise and mode not in ("soft", "cell"):
+            raise ValueError("renoise needs the soft or the cell mode")
+        self._cellwise = cellwise
 
         # 1. Stack the LS observations in symbol order. The frequency indices repeat, so
         # indexing the prior by them gives the same frequency correlation within and between
         # DMRS symbols. Each observation still has its own diagonal noise variance.
         h_ls, pilot_sc, pilot_power = dmrs_ls(y, self.tx)
-        num_dmrs = len(self.dmrs_symbols)
-        pilot_prb = pilot_sc // 12
-        s2 = no / pilot_power  # LS noise variance per pilot without jamming
-        clean = torch.ones_like(h_ls, dtype=torch.bool)
-        pilot_var = s2
-        r, interfered = None, None
-        pilot_dmrs = torch.arange(num_dmrs, device=y.device).repeat_interleave(
-            pilot_sc.numel() // num_dmrs
-        )
-        if mode in ("hard", "soft"):
-            flagged = cells[:, :, self.dmrs_symbols].transpose(1, 2)  # [B, num_dmrs, n]
-        if mode == "hard":
-            clean = ~flagged[:, pilot_dmrs, pilot_prb]
-        elif mode != "lmmse":
-            r = dmrs_residuals(h_ls, pilot_sc, no, pilot_power, cfg, num_dmrs).clamp_min(1)
-            if mode == "slot":  # one allocation-wide level per DMRS symbol
-                r = r.mean(dim=-1, keepdim=True).expand_as(r)
-                interfered = torch.ones_like(r, dtype=torch.bool)
-            elif mode == "dmrs":  # interfered cells: residual above the analytic 1% threshold
-                thr = torch.tensor(
-                    [theory.threshold(num_prb, b, 0.01, cfg) for b in range(num_prb)],
-                    device=r.device,
-                    dtype=r.dtype,
-                )
-                interfered = r > thr
-            else:
-                interfered = flagged
-            inflate = torch.where(interfered, r, torch.ones_like(r))
-            pilot_var = s2[:, None] * inflate[:, pilot_dmrs, pilot_prb]
+        clean, pilot_var, r, interfered = self._pilots(h_ls, pilot_sc, pilot_power, no, cells, mode)
 
         # 2. Repair: LMMSE interpolation, the same on all 14 symbols
         h_sc, err_sc = lmmse_interpolation(
@@ -325,6 +331,17 @@ class MapAwareReceiver(Block):
                 break
             post = self.soft_decoder(self.layer_demapper(llr))
             mean, var = soft_qpsk(post.reshape(y.shape[0], -1, self.tx._num_bits_per_symbol))
+            if refine:
+                cells = self._refine(y, no, h_hat, err_var, mean, var, cells, alpha)
+            if renoise:
+                no = self._renoise(y, no, h_hat, err_var, mean, var, cells, mode)
+                clean, pilot_var, r, interfered = self._pilots(
+                    h_ls, pilot_sc, pilot_power, no, cells, mode
+                )
+            if refine or renoise:  # the jamming the map now implies, with the old channel
+                extra = self._detect(
+                    y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
+                )[3]
             h_sc, err_sc = self._data_aided(
                 y, no, h_ls, pilot_sc, clean, pilot_var, h_hat, mean, var, extra
             )
@@ -363,6 +380,96 @@ class MapAwareReceiver(Block):
         if history:
             out["history"] = passes
         return out
+
+    def _pilots(self, h_ls, pilot_sc, pilot_power, no, cells, mode):
+        """Which pilots the filter uses (``clean``), their LS noise variances, and the residuals
+        and interference decisions of the DMRS cells (None where the mode has none)."""
+        cfg = self.cfg
+        num_dmrs = len(self.dmrs_symbols)
+        num_prb = int(self.data_sc.max()) // 12 + 1
+        pilot_prb = pilot_sc // 12
+        pilot_dmrs = torch.arange(num_dmrs, device=h_ls.device).repeat_interleave(
+            pilot_sc.numel() // num_dmrs
+        )
+        s2 = no / pilot_power  # LS noise variance per pilot without jamming
+        clean = torch.ones_like(h_ls, dtype=torch.bool)
+        pilot_var, r, interfered = s2, None, None
+        if mode in ("hard", "soft"):
+            flagged = cells[:, :, self.dmrs_symbols].transpose(1, 2)  # [B, num_dmrs, n]
+        if mode == "hard":
+            clean = ~flagged[:, pilot_dmrs, pilot_prb]
+        elif mode != "lmmse":
+            r = dmrs_residuals(h_ls, pilot_sc, no, pilot_power, cfg, num_dmrs).clamp_min(1)
+            if mode == "slot":  # one allocation-wide level per DMRS symbol
+                r = r.mean(dim=-1, keepdim=True).expand_as(r)
+                interfered = torch.ones_like(r, dtype=torch.bool)
+            elif mode in ("dmrs", "cell"):  # interfered: residual above the analytic 1% threshold
+                thr = torch.tensor(
+                    [theory.threshold(num_prb, b, 0.01, cfg) for b in range(num_prb)],
+                    device=r.device,
+                    dtype=r.dtype,
+                )
+                interfered = r > thr
+            else:
+                interfered = flagged
+            inflate = torch.where(interfered, r, torch.ones_like(r))
+            pilot_var = s2[:, None] * inflate[:, pilot_dmrs, pilot_prb]
+        return clean, pilot_var, r, interfered
+
+    def _cell_sum(self, values: torch.Tensor) -> torch.Tensor:
+        """Sum of ``values`` ``[B, num_data]`` over the data resource elements of each cell
+        (PRB and OFDM symbol), returned on every resource element of that cell."""
+        cell = ((self.data_sc // 12) * self.cfg.num_symbols + self.data_sym).to(values.device)
+        total = values.new_zeros(values.shape[0], int(cell.max()) + 1).index_add_(1, cell, values)
+        return total[:, cell]
+
+    def _cell_mean(self, values: torch.Tensor) -> torch.Tensor:
+        return self._cell_sum(values) / self._cell_sum(torch.ones_like(values[:1]))
+
+    def _remodulated(self, y, no, h_hat, err_var, mean, var):
+        """Energy of ``y - h_hat x_bar`` on every data resource element, and its expected value
+        without jamming. With ``x = x_bar + d``, ``E|d|^2 = var`` and ``|x_bar|^2 + var = 1``,
+        ``y - h_hat x_bar = (h - h_hat) x_bar + h d + w`` has the expected energy
+        ``err_var + |h_hat|^2 var + no``."""
+        y_d = y[:, 0, 0, self.data_sym, self.data_sc]
+        h_d = h_hat[:, 0, 0, 0, 0, self.data_sym, self.data_sc]
+        e_d = err_var[:, 0, 0, 0, 0, self.data_sym, self.data_sc]
+        energy = (y_d - h_d * mean).abs() ** 2
+        return energy, e_d + h_d.abs() ** 2 * var, no[:, None]
+
+    def _refine(self, y, no, h_hat, err_var, mean, var, cells, alpha):
+        """The map after one decoding attempt: the detector's cells plus every data cell whose
+        remodulated residual energy, normalized by its expected value without jamming, exceeds
+        the ``alpha`` quantile of Gamma(m, 1/m) (``cell_threshold``, m resource elements)."""
+        energy, model, noise = self._remodulated(y, no, h_hat, err_var, mean, var)
+        stat = self._cell_sum(energy) / self._cell_sum(model + noise)
+        num_re = int(self._cell_sum(torch.ones_like(energy[:1])).max())
+        new = stat > cell_threshold(num_re, alpha)
+        cells = cells.clone()
+        prb = (self.data_sc // 12).to(cells.device)
+        sym = self.data_sym.to(cells.device)
+        cells[:, prb, sym] = cells[:, prb, sym] | new
+        return cells
+
+    def _renoise(self, y, no, h_hat, err_var, mean, var, cells, mode):
+        """Noise power ``[B]`` from the remodulated residual of the data symbols that the decoder
+        is sure of (``|x_bar|^2 > 0.5``) in cells the map calls clean: the value of ``N0`` for
+        which the median of ``energy / (model + N0)`` equals ln 2, the median of a unit
+        exponential. Bisection on a log scale; slots without such symbols keep ``no``."""
+        energy, model, _ = self._remodulated(y, no, h_hat, err_var, mean, var)
+        use = mean.abs() ** 2 > 0.5
+        if mode == "soft":
+            prb = (self.data_sc // 12).to(cells.device)
+            use = use & ~cells[:, prb, self.data_sym.to(cells.device)]
+        lo, hi = (no * 1e-3).log(), (no * 1e2).log()
+        for _ in range(40):
+            mid = (lo + hi) / 2
+            ratio = energy / (model + mid.exp()[:, None])
+            med = torch.nanmedian(torch.where(use, ratio, torch.nan), dim=1).values
+            above = med > math.log(2)  # N0 too small
+            lo, hi = torch.where(above, mid, lo), torch.where(above, hi, mid)
+        found = use.sum(dim=1) >= 24
+        return torch.where(found, ((lo + hi) / 2).exp(), no)
 
     def _on_grid(self, h_sc, err_sc, y):
         """One estimate per subcarrier, the same on all symbols, in Sionna's ``h_hat`` layout."""
@@ -453,7 +560,11 @@ class MapAwareReceiver(Block):
             return per_prb[:, data_prb]
 
         excess = self._excess_energy(y, no, h_sc, err_sc)
+        if mode == "cell":  # no map: every data cell's own excess energy
+            return self._cell_mean(excess).clamp_min(0)
         flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]
+        if self._cellwise:  # each flagged cell from its own resource elements
+            return torch.where(flagged, self._cell_mean(excess).clamp_min(0), 0.0)
         # Average over the flagged data REs of each PRB.
         num_prb = y.shape[-1] // 12
         total = excess.new_zeros(excess.shape[0], num_prb).index_add_(

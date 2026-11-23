@@ -114,9 +114,31 @@ RECEIVERS = {
     "lmmse_da": (None, "lmmse"),
     "p_r_e_soft_da": ("fused", "soft"),
     "true_soft_da": ("true", "soft"),
+    "cell_soft": (None, "cell"),
+    "p_r_e_cell": ("fused", "soft"),
+    "p_r_e_refine": ("fused", "soft"),
+    "p_r_e_renoise": ("fused", "soft"),
+    "true_renoise": ("true", "soft"),
+    "cell_da": (None, "cell"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
-DATA_AIDED = {"lmmse_da": 3, "p_r_e_soft_da": 3, "true_soft_da": 3}
+DATA_AIDED = {
+    "lmmse_da": 3,
+    "p_r_e_soft_da": 3,
+    "true_soft_da": 3,
+    "p_r_e_refine": 3,
+    "p_r_e_renoise": 3,
+    "true_renoise": 3,
+    "cell_da": 3,
+}
+# Options of the map-aware receiver (jamloc.recovery.MapAwareReceiver.call)
+OPTIONS = {
+    "p_r_e_cell": {"cellwise": True},
+    "p_r_e_refine": {"cellwise": True, "refine": True},
+    "p_r_e_renoise": {"renoise": True},
+    "true_renoise": {"renoise": True},
+    "cell_da": {"renoise": False},
+}
 DETECTORS = ("power_threshold", "block_test", "no_residual", "fused", "fused_atk")
 # Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
 TRAINED_ON = {"fused_atk": ({"data": "atk"}, "val_atk")}
@@ -189,6 +211,42 @@ STYLE = {
         "color": "#117733",
         "marker": "v",
         "linestyle": "--",
+    },
+    "cell_soft": {
+        "label": "Per-cell estimate, no map",
+        "color": "#44AA99",
+        "marker": "h",
+        "linestyle": "--",
+    },
+    "p_r_e_cell": {
+        "label": "Map P+R+E, soft, per cell",
+        "color": "#1F78B4",
+        "marker": "o",
+        "linestyle": "--",
+    },
+    "p_r_e_refine": {
+        "label": "P+R+E map, passes refine map",
+        "color": "#E31A1C",
+        "marker": "*",
+        "linestyle": "-",
+    },
+    "p_r_e_renoise": {
+        "label": "P+R+E map, passes re-estimate N0",
+        "color": "#FF7F00",
+        "marker": "*",
+        "linestyle": "-",
+    },
+    "true_renoise": {
+        "label": "True map, passes re-estimate N0",
+        "color": "#6A3D9A",
+        "marker": "*",
+        "linestyle": "-.",
+    },
+    "cell_da": {
+        "label": "Per-cell estimate, no map, data-aided",
+        "color": "#44AA99",
+        "marker": "h",
+        "linestyle": "-",
     },
     "p_r_e_atk_soft": {
         "label": "Map P+R+E (mixed attacks), soft",
@@ -333,7 +391,9 @@ def simulate_point(
             else:
                 cells = maps[source] if source else None
                 passes = DATA_AIDED.get(rx, 0)
-                b_hat = map_aware(out.y_alloc, out.no, cells, mode=mode, iterations=passes)["b_hat"]
+                b_hat = map_aware(
+                    out.y_alloc, out.no, cells, mode=mode, iterations=passes, **OPTIONS.get(rx, {})
+                )["b_hat"]
             errors = out.b != b_hat
             block_errors = errors.any(-1).reshape(-1)
             counts[rx] += [
@@ -400,7 +460,8 @@ def simulate(
         cases = [("none", False, tuple(RECEIVERS))]
         cases += [(attack, False, tuple(RECEIVERS)) for attack in ("pilot", "data", "partial")]
         # limit case: no clean pilot left
-        whole = ("standard", "lmmse", "p_r_e_soft", "true_hard", "true_soft", *DATA_AIDED)
+        whole = ("standard", "lmmse", "p_r_e_soft", "true_hard", "true_soft", "cell_soft")
+        whole += ("p_r_e_cell", *DATA_AIDED)
         cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]
