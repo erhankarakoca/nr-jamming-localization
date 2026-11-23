@@ -76,6 +76,12 @@ const receiverNames = {
   lmmse_da: "LMMSE, data-aided",
   p_r_e_soft_da: "U-Net, soft, data-aided",
   true_soft_da: "True map, soft, data-aided",
+  p_r_e_cell: "U-Net, soft per cell",
+  p_r_e_full: "U-Net, per cell, refining passes",
+  true_cell: "True map, soft per cell",
+  true_full: "True map, per cell, refining passes",
+  cell_soft: "No map, per cell",
+  cell_full: "No map, per cell, refining passes",
 };
 
 export function receiverName(name) {

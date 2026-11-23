@@ -34,6 +34,11 @@ WIDTH_BLER_CSV = "width_sweep/width_bler_C.csv"
 WIDTH_DETECTION_CSV = "width_sweep/width_detection.csv"
 WIDTH_RECEIVERS = ("standard", "lmmse", "p_r_e_soft", "p_r_e_soft_da", "true_soft", "true_soft_da")
 WIDTH_ALLOC_PRB = 12
+# The receivers of the decoder-aided round (docs/results.md section 23), all on the same slots;
+# the older recovery folder is used when this one does not exist
+RECOVERY_DIRS = ("receiver_v7/recovery", "recovery")
+# Localization after decoding (experiments.decoded_map --table), optional
+AFTER_DECODING_CSV = "decoded_map/table.csv"
 RECOVERY_RUNS = {
     "nominal": "recovery_C",
     "pulsed": "recovery_C_pulsed",
@@ -64,6 +69,18 @@ POPULATIONS = {
         "allocation spans 12 PRBs and the jammer occupies 4 PRBs when active. Receivers share the same draws "
         "but can stop at different block counts. The paired 95% intervals use only slots "
         "decoded by both receivers, so their BLER differences can differ from the pooled table."
+    ),
+    "after_decoding": (
+        "The slots of each test grid are replayed exactly (the first 8 batches of 16 slots per grid "
+        "point, the seeds of the data set) and decoded by the soft receiver with per-cell jamming "
+        "estimates and refining passes. The U-Net map is the one before decoding (1% of clean "
+        "validation cells). The exact tests are taken after decoding: the decoded-data residual on "
+        "the data and DMRS cells of slots whose CRC passed and the received power on unscheduled "
+        "cells, each at its analytic 1% level; a slot that failed keeps the U-Net map on its "
+        "allocation. The fusion tests a cell the U-Net flags at 10% and any other at 1%. Perfect "
+        "decoding uses the transmitted symbols on every slot. F1 counts all 336 cells of every "
+        "slot; the seeds are the U-Net's training seeds. False alarms: share of all cells of the "
+        "grid's benign slots that the exact tests flag."
     ),
     "recovery_curves": (
         "Block error rate (BLER) pools block errors and decoded blocks over detector training "
@@ -405,7 +422,9 @@ def write_results(source: Path, build: Path) -> None:
     matched = copy("matched", source / MATCHED_CSV)
     matched_paired = copy("matched", source / MATCHED_PAIRED_CSV)
     recovery, paired = [], []
-    recovery_dir = source / "recovery"
+    recovery_dir = next(
+        (source / d for d in RECOVERY_DIRS if (source / d).is_dir()), source / RECOVERY_DIRS[-1]
+    )
     for jammer, stem in RECOVERY_RUNS.items():
         points, intervals = _recovery_files(recovery_dir, stem)
         recovery.extend(_recovery(copy("recovery", points)))
@@ -444,6 +463,16 @@ def write_results(source: Path, build: Path) -> None:
             "recovery": _dmrs_recovery(_read(dmrs_recovery)),
         },
     }
+    if (source / AFTER_DECODING_CSV).is_file():  # optional: the replays may not have been run
+        after = copy("after_decoding", source / AFTER_DECODING_CSV, "after_decoding_")
+        payload["after_decoding"] = {
+            "rows": [
+                _fields(
+                    r, labels="split map", numbers="f1_mean f1_min f1_max benign_fa", counts="seeds"
+                )
+                for r in _read(after)
+            ]
+        }
     if width_bler:
         payload["width_sweep"] = {
             "rows": _width_bler(_read(width_bler)),
