@@ -121,6 +121,22 @@
   </div>
 </section>
 
+<section aria-labelledby="checks-heading">
+  <h2 id="checks-heading">How the decoder fills in the jammed bits</h2>
+  <p>The map does not repair jammed symbols; the code's check bits let the decoder rebuild their bits,
+    as long as it knows which ones to doubt. A toy version with six bits:</p>
+  <div id="checks-anim" class="anim" aria-busy="true" aria-label="Animated toy example of decoding with check bits">
+    <div class="anim-stage single"><div class="checks-box"></div></div>
+    <div class="anim-caption" aria-live="polite"></div>
+    <div class="anim-controls">
+      <button type="button" class="anim-prev">Back</button>
+      <button type="button" class="anim-play">Play</button>
+      <button type="button" class="anim-next">Next</button>
+      <span class="anim-dots" role="group" aria-label="Steps"></span>
+    </div>
+  </div>
+</section>
+
 <section aria-labelledby="aided-heading">
   <h2 id="aided-heading">When every pilot is jammed</h2>
   <p>If the jammer covers every pilot, no clean pilot is left for the map to point to. The receiver

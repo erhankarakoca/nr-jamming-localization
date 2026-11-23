@@ -244,6 +244,28 @@ main > figure + section { margin-top: 2rem; }
 .anim-dots { display: inline-flex; gap: 0.25rem; flex-wrap: wrap; margin-left: 0.5rem; }
 .anim-dots button { min-width: 2rem; padding-inline: 0.35rem; }
 .anim-note { margin-top: 0.5rem; }
+.anim-stage.single { grid-template-columns: minmax(0, 1fr); }
+.checks-box { background: #fff; border: 1px solid var(--line); }
+.checks-viz { display: block; width: 100%; height: auto; }
+.checks-viz text { font-family: var(--serif); }
+.checks-viz text:not([fill]) { fill: var(--ink); }
+.checks-viz .bit-box { fill: #fff; stroke: #9a9a9a; stroke-width: 1.2; transition: fill 0.4s, stroke 0.4s; }
+.checks-viz .bit-box.jammed { stroke: var(--red); stroke-width: 2.4; }
+.checks-viz .bit-box.reading { fill: #fff3c4; }
+.checks-viz .bit-value { font-weight: 700; transition: fill 0.4s; }
+.checks-viz .bit-value.noise { fill: #9a9a9a; }
+.checks-viz .bit-value.unknown { fill: #9a9a9a; }
+.checks-viz .bit-value.solved { fill: #006600; }
+.checks-viz .bit-value.wrong { fill: var(--red); }
+.checks-viz .check-pill { fill: #f2f2f2; stroke: #c8c8c8; transition: fill 0.4s, stroke 0.4s; }
+.checks-viz .check-pill.reading { fill: #fff3c4; stroke: #d8b54a; }
+.checks-viz .check-pill.ok { stroke: #006600; }
+.checks-viz .check-pill.bad { stroke: var(--red); }
+.checks-viz .checks-outcome { transition: opacity 0.5s; }
+#checks-anim .anim-caption { min-height: 5.5em; }
+@media (prefers-reduced-motion: reduce) {
+  .checks-viz .bit-box, .checks-viz .bit-value, .checks-viz .check-pill, .checks-viz .checks-outcome { transition: none; }
+}
 .swatch.pilot { background: #ecdca4; border-color: #d8c27a; }
 .swatch.trust { width: 2.2rem; background: linear-gradient(to right, #f7f7f7, #808080); }
 .swatch.line.grey-line { border-top: 3px solid #9a9a9a; }
