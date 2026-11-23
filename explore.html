@@ -60,12 +60,8 @@
         <div id="cell-details"></div></details>
     </section>
     <section class="stage-panel" aria-labelledby="points-heading">
-      <h2 id="points-heading">What the receivers decode</h2>
+      <h2 id="points-heading">What the receivers see</h2>
       <div class="controls">
-        <div class="segmented" role="group" aria-label="Decoding stage">
-          <button id="show-before" type="button" aria-pressed="true">Before decoding</button>
-          <button id="show-after" type="button" aria-pressed="false">After decoding</button>
-        </div>
         <label>Points from <select id="point-source">
           <option value="all">All of the user's PRBs</option><option value="prb">The selected cell's PRB</option>
         </select></label>
@@ -73,6 +69,22 @@
       </div>
       <div id="explore-points"></div>
       <p id="points-note" class="points-note"></p>
+      <div class="decoding-block">
+        <h3 id="decoding-heading">What decoding does with the bits</h3>
+        <div class="segmented" role="group" aria-labelledby="decoding-heading">
+          <button id="show-before" type="button" aria-pressed="true">Before decoding</button>
+          <button id="show-after" type="button" aria-pressed="false">After decoding</button>
+        </div>
+        <div id="decoding-panel"></div>
+        <ul class="legend">
+          <li><i class="swatch errors" aria-hidden="true"></i>darker: more of the cell's bits wrong</li>
+          <li><i class="swatch truth" aria-hidden="true"></i>jammed</li>
+          <li><i class="swatch flag-dot" aria-hidden="true"></i>flagged by the U-Net: bits doubted</li>
+          <li><i class="swatch pilot" aria-hidden="true"></i>pilots (no data bits)</li>
+          <li><i class="swatch lost" aria-hidden="true"></i>block lost</li>
+        </ul>
+        <p id="decoding-note" class="points-note"></p>
+      </div>
     </section>
   </div>
   <section class="explore-batch" aria-labelledby="batch-heading">

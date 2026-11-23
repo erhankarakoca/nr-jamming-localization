@@ -1,7 +1,8 @@
 import {
   calibrationText, detectors, loadCase, loadManifest, receiverName, selectionText, signedDb,
 } from "./data.js";
-import { comparisonReceivers, constellations, crcList } from "./constellation.js";
+import { comparisonReceivers, constellations, crcList, plotReceiverName } from "./constellation.js";
+import { decodingPanel } from "./points.js";
 import { element, options, reportError } from "./nav.js";
 
 export const FEATURES = {
@@ -446,6 +447,9 @@ async function explorer(root) {
   const pointSource = $("#point-source");
   const stageButtons = { before: $("#show-before"), after: $("#show-after") };
   const pointsNote = $("#points-note");
+  const decodingHost = $("#decoding-panel");
+  const decodingNote = $("#decoding-note");
+  let decoding = null;
   const lesson = $("#explore-lesson");
   const context = $("#explore-context");
   const grid = $("#explore-grid");
@@ -520,7 +524,7 @@ async function explorer(root) {
     const names = receivers();
     const [start, count] = slot.metadata.alloc;
     const mine = ++motion;
-    const options = { stage, from: reduceMotion ? null : from, alive: () => mine === motion };
+    const options = { from: reduceMotion ? null : from, alive: () => mine === motion };
     if (pointSource.value === "all" || (prb >= start && prb < start + count)) {
       const prbs = pointSource.value === "all" ? null : [prb];
       pointHost.replaceChildren(constellations(slot, names, prbs, options));
@@ -528,18 +532,36 @@ async function explorer(root) {
       pointHost.replaceChildren(element("p", `PRB ${prb} is outside the allocation. Pick a scheduled PRB to see its data symbols.`));
     }
     const where = pointSource.value === "all" ? `the user's ${count} PRBs` : `PRB ${prb}`;
-    pointsNote.textContent = stage === "after"
-      ? `After decoding, each point sits on the symbol that the decoded block says was sent. Black: a symbol the decoder got wrong. The lighter red and blue points were decoded correctly; red ones are jammed symbols the decoder rebuilt. Points: the data symbols of ${where}.`
-      : `Each point is one received data symbol of ${where}: red from a jammed cell, blue from a clean one. The paler a point, the less the decoder trusts its bits. Switch to "After decoding" to see what the decoder makes of them.`;
+    pointsNote.textContent = `Each point is one received data symbol of ${where}, where the receiver placed it: red from a jammed cell, blue from a clean one. The paler a point, the less the decoder will trust its bits. No receiver can move the jammed points back; what the map changes is how much the decoder believes them (below).`;
   }
 
-  function setStage(next) {
-    if (next === stage || !slot) return;
-    const from = { slot, stage };
+  // Before / after decoding, one small grid per receiver
+  function showDecoding(animate = false) {
+    const names = ["standard", "fused_soft", ...Object.keys(slot.receivers).filter(n => n.startsWith("fused_atk"))];
+    // The map each receiver decodes with: none for the standard one, else its detector's flags
+    const flags = names.map(n => (n === "standard" ? null : slot.detectors[n.replace(/_soft$/, "")]?.decisions ?? null));
+    decoding = decodingPanel(slot, names, names.map(plotReceiverName), { width: 460, height: 236, flags });
+    decodingHost.replaceChildren(decoding.svg);
+    setStage(stage, animate);
+  }
+
+  function setStage(next, animate = true) {
     stage = next;
     for (const [name, button] of Object.entries(stageButtons)) button.setAttribute("aria-pressed", String(name === stage));
-    showPoints(from);
-    remember();
+    decoding?.set(stage, animate && !reduceMotion);
+    const outcomes = decoding?.panels ?? [];
+    if (stage === "before") {
+      decodingNote.textContent = "Each cell carries 24 coded bits (12 subcarriers, 2 bits each). Darker: more of them are wrong in what the receiver hands to the decoder. Both receivers start with wrong bits where the jammer hit; the difference is that the map-aware one tells the decoder to doubt the flagged cells (blue dots). Press After decoding to see what the decoder makes of them.";
+    } else {
+      const lost = outcomes.filter(p => !p.passed).map(p => plotReceiverName(p.name));
+      const right = outcomes.filter(p => p.passed).map(p => plotReceiverName(p.name));
+      decodingNote.textContent = [
+        "The code adds redundancy, so the decoder can rebuild bits it is told to doubt from the bits it can trust.",
+        right.length ? `${right.join(" and ")}: every bit recovered, the CRC check passes.` : "",
+        lost.length ? `${lost.join(" and ")}: the decoder was misled by confident wrong bits, the CRC check fails and the whole block is lost; the user has to send it again.` : "",
+      ].filter(Boolean).join(" ");
+    }
+    if (slot) remember();
   }
 
   function redraw() {
@@ -566,7 +588,7 @@ async function explorer(root) {
   }
 
   function showLevel(index, { animate = true } = {}) {
-    const from = slot ? { slot, stage } : null;
+    const from = slot;
     level = index;
     slot = atLevel(doc, index);
     levelInput.value = String(index);
@@ -577,6 +599,7 @@ async function explorer(root) {
     redraw();
     inspect(...selected);
     showPoints(animate ? from : null);
+    showDecoding(false);
     chart.replaceChildren(failureChart(doc, chartReceivers(), index, pick));
     remember();
   }
@@ -616,7 +639,7 @@ async function explorer(root) {
     for (const control of [feature, detector, truth, levelInput, play]) control.disabled = true;
     context.textContent = "Loading the slot at every jammer power…";
     lesson.textContent = lessons[name] ?? "";
-    for (const host of [grid, details, readout, pointHost, summary, chart, outcome]) host.replaceChildren();
+    for (const host of [grid, details, readout, pointHost, summary, chart, outcome, decodingHost]) host.replaceChildren();
     try {
       const loaded = await loadCase(name);
       if (current !== request) return;
@@ -662,7 +685,7 @@ async function explorer(root) {
   if (!caseSelect.value) caseSelect.selectedIndex = 0;
   for (const [name, button] of Object.entries(stageButtons)) {
     button.setAttribute("aria-pressed", String(name === stage));
-    button.addEventListener("click", () => setStage(name));
+    button.addEventListener("click", () => { if (name !== stage) setStage(name); });
   }
   caseSelect.addEventListener("change", () => changeCase());
   levelInput.addEventListener("input", () => pick(Number(levelInput.value)));
