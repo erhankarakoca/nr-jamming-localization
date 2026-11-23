@@ -65,8 +65,10 @@
   </section>
   <section class="panel" id="after">
     <h2>Localization after decoding</h2>
-    <p id="after-lede">Once a slot decodes, every data symbol is known, and each cell gets a test whose
-      false-alarm rate is set by an exact law, whatever the shape of the attack.</p>
+    <p id="after-lede">Once a slot decodes, every data symbol is known, and each scheduled cell gets a
+      test whose threshold comes from the law of the residual, whatever the shape of the attack. On
+      benign slots these tests flag about 1% of the cells. They beat the U-Net on jammers it never
+      saw and lose to it on the block jammers it was trained on.</p>
     <div id="after-chart" class="plot" role="group" aria-label="F1 before and after decoding by test grid"></div>
     <details class="more"><summary>How this was measured</summary><p class="population"></p>
       <div id="after-table"></div><div class="downloads" aria-label="After-decoding CSV downloads"></div></details>

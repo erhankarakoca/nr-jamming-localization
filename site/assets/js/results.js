@@ -376,16 +376,6 @@ function home(host, data) {
   if (before && after) cards.push(finding("No clean pilot", `${percent(before.bler)} → ${percent(after.bler)}`,
     "BLER with every pilot jammed at +9 dB JSR: U-Net map → U-Net map with data-aided passes, TDL-C, 15 dB SNR.",
     "results.html#no-clean-pilot"));
-  const hop = rx => data.recovery.rows.find(r => r.jammer === "hopping" && r.attack === "data" && r.receiver === rx);
-  const [perPrb, refined] = ["p_r_e_soft", "p_r_e_full"].map(hop);
-  if (perPrb && refined) cards.push(finding("Unseen hopping jammer", `${percent(perPrb.bler)} → ${percent(refined.bler, 2)}`,
-    `BLER under hopping data jamming at ${signedDb(perPrb.jsr_db)} JSR with the block-trained U-Net map: per-PRB estimate → per-cell estimate with refining passes.`,
-    "results.html#recovery"));
-  const after = map => data.after_decoding?.rows.find(r => r.split === "hopjam" && r.map === map);
-  const [beforeMap, afterMap] = ["unet", "post"].map(after);
-  if (beforeMap && afterMap) cards.push(finding("Localization after decoding", `${decimal(beforeMap.f1_mean, 2)} → ${decimal(afterMap.f1_mean, 2)}`,
-    "cell-level F1 on the hopping jammer: U-Net map before decoding → exact tests once the slot has decoded, no training on hopping.",
-    "results.html#after"));
   if (one && two) cards.push(finding("Second DMRS symbol", `${percent(one.pd_pilot_m15)} → ${percent(two.pd_pilot_m15)}`,
     "of jammed pilot cells detected at −15 dB JSR, models trained for one → two DMRS symbols.",
     "results.html#dmrs"));

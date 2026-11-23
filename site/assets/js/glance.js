@@ -400,6 +400,53 @@ function noCleanPilot(section) {
     ["No-clean-pilot results", "results.html#no-clean-pilot"]);
 }
 
+// Q5: a jammer the detector never saw: BLER under hopping jamming with the per-PRB estimate, the
+// refining passes and the true map, and the F1 of the map before and after decoding.
+function unseenJammer(recovery, after) {
+  const rows = recovery.rows.filter(r => r.jammer === "hopping" && r.jsr_db === 9);
+  const bars = [["p_r_e_soft", "U-Net map, per PRB", RED, false], ["p_r_e_full", "U-Net map, refining passes", RED, true], ["true_soft", "True map", INK, false]];
+  const attacks = [["data", "Data"], ["partial", "Partial-band"]];
+  const f = frame({ width: 320, height: 200 });
+  const y = v => f.bottom - Math.min(v / 0.4, 1) * (f.bottom - f.top);
+  for (const t of [0, 0.1, 0.2, 0.3, 0.4]) {
+    f.svg.append(svgNode("line", { x1: f.left, x2: f.right, y1: y(t), y2: y(t), stroke: t ? "#e6e6e6" : "#000", "stroke-width": t ? 0.6 : 0.9 }));
+    f.svg.append(svgNode("text", { x: f.left - 5, y: y(t) + 3.5, "text-anchor": "end", "font-size": 10 }, `${Math.round(t * 100)}%`));
+  }
+  const group = (f.right - f.left) / attacks.length;
+  attacks.forEach(([attack, name], g) => {
+    const x0 = f.left + g * group + group / 2 - 45;
+    bars.forEach(([rx, label, color, filled], i) => {
+      const row = rows.find(r => r.attack === attack && r.receiver === rx);
+      if (!row) return;
+      const rect = bar(f, { x: x0 + i * 32, y: y(row.bler), width: 26, height: Math.max(0.6, f.bottom - y(row.bler)), fill: filled ? color : "#fff", stroke: color, "stroke-width": 1.4 }, f.bottom);
+      rect.append(svgNode("title", {}, `${label}: ${percent(row.bler, 2)}`));
+      f.svg.append(svgNode("text", { x: x0 + i * 32 + 13, y: y(row.bler) - 3, "text-anchor": "middle", "font-size": 9 }, percent(row.bler, row.bler < 0.01 ? 1 : 0)));
+    });
+    f.svg.append(svgNode("text", { x: x0 + 45, y: f.bottom + 14, "text-anchor": "middle", "font-size": 10 }, name));
+  });
+  const mid = (f.top + f.bottom) / 2;
+  f.svg.append(svgNode("text", { x: 11, y: mid, "text-anchor": "middle", "font-size": 10.5, transform: `rotate(-90 11 ${mid})` }, "Blocks lost"));
+  const wrap = element("div");
+  const items = element("ul", null, "legend");
+  for (const [, label, color, filled] of bars) {
+    const li = element("li");
+    const mark = element("i", null, "swatch");
+    mark.style.background = filled ? color : "#fff";
+    mark.style.borderColor = color;
+    li.append(mark, label);
+    items.append(li);
+  }
+  wrap.append(f.svg, items);
+  const at = (attack, rx) => rows.find(r => r.attack === attack && r.receiver === rx);
+  const f1 = (grid, map) => after?.rows.find(r => r.split === grid && r.map === map)?.f1_mean;
+  const located = f1("hopjam", "unet") != null && f1("hopjam", "post") != null
+    ? ` Once the slot decodes, tests on the decoded data raise the map's F1 score from ${f1("hopjam", "unet").toFixed(2)} to ${f1("hopjam", "post").toFixed(2)}.` : "";
+  return card("And a jammer the detector never saw?",
+    at("data", "p_r_e_soft") && at("data", "p_r_e_full") ? `A jammer that hops between PRBs from symbol to symbol. Estimating its power cell by cell and letting the decoder refine the map cuts the loss from ${percent(at("data", "p_r_e_soft").bler, 0)} to ${percent(at("data", "p_r_e_full").bler, 0)}, as with the true map.${located}` : "",
+    wrap, "+9 dB jammer power, 4 PRBs that hop over the carrier, TDL-C, 15 dB SNR, three detector seeds pooled. The U-Net was trained only on jammers that fill PRB rows.",
+    ["Recovery results", "results.html#recovery"]);
+}
+
 async function glance(host) {
   const data = await loadResults();
   const cards = [];
@@ -408,6 +455,7 @@ async function glance(host) {
   if (data.width_sweep) cards.push(howWide(data.width_sweep));
   cards.push(warnsEarly(data.margin));
   if (data.data_aided) cards.push(noCleanPilot(data.data_aided));
+  if (data.recovery.rows.some(r => r.receiver === "p_r_e_full")) cards.push(unseenJammer(data.recovery, data.after_decoding));
   host.replaceChildren(...cards);
   host.setAttribute("aria-busy", "false");
   if (reduceMotion) return;
