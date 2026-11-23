@@ -222,9 +222,52 @@ def summary(rows):
         print(f"{name:8s} F1 {2 * tp / max(2 * tp + fp + fn, 1):.4f}  fp {int(fp)}  fn {int(fn)}")
 
 
+def table(paths) -> list[dict]:
+    """F1 of every map per grid, over all cells of the replayed slots, for each seed's CSV, and
+    the false-alarm rate of every map over the cells of the grid's benign slots."""
+    import re
+
+    out = []
+    per = defaultdict(lambda: defaultdict(lambda: np.zeros(4)))  # (split, map) -> seed -> counts
+    for path in paths:
+        with open(path, encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+        for r in rows:
+            seed = int(re.search(r"_seed(\d+)", str(path)).group(1))
+            c = per[(r["split"], r["map"])][seed]
+            c[:3] += [int(r["tp"]), int(r["fp"]), int(r["fn"])]
+            if r["attack"] == "none":
+                c[3] += int(r["fp"])
+    benign_cells = defaultdict(int)
+    for path in paths:
+        with open(path, encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                if r["attack"] == "none" and r["map"] == "unet":
+                    benign_cells[(r["split"], path)] += int(r["slots"]) * 336
+    for (split, name), seeds in sorted(per.items()):
+        f1 = {s: 2 * c[0] / max(2 * c[0] + c[1] + c[2], 1) for s, c in seeds.items()}
+        cells = sum(v for (sp, _), v in benign_cells.items() if sp == split)
+        fa = sum(c[3] for c in seeds.values()) / cells if cells else float("nan")
+        out.append(
+            {
+                "split": split,
+                "map": name,
+                "seeds": len(f1),
+                "f1_mean": float(np.mean(list(f1.values()))),
+                "f1_min": min(f1.values()),
+                "f1_max": max(f1.values()),
+                "benign_fa": fa,
+            }
+        )
+    return out
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--split", default="test")
+    p.add_argument(
+        "--table", nargs="+", metavar="CSV", help="pool these per-seed CSVs into a table and stop"
+    )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--per-point", type=int, default=4, help="batches per grid point")
     p.add_argument("--alpha", type=float, default=0.01)
@@ -235,6 +278,22 @@ def main(argv=None):
     p.add_argument("--refine", action="store_true", help="passes refine the map")
     p.add_argument("--peaks", action="store_true", help="also test the largest error of each cell")
     args = p.parse_args(argv)
+    if args.table:
+        rows = table(args.table)
+        for r in rows:
+            print(
+                f"{r['split']:10s} {r['map']:6s} F1 {r['f1_mean']:.3f} "
+                f"({r['f1_min']:.3f}-{r['f1_max']:.3f}, {r['seeds']} seeds)  "
+                f"benign FA {100 * r['benign_fa']:.2f}%"
+            )
+        out = results_dir() / "decoded_map" / "table.csv"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        print(out)
+        return
     global PEAKS
     PEAKS = args.peaks
     run(
