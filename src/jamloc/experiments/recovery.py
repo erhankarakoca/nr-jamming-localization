@@ -124,6 +124,8 @@ RECEIVERS = {
     "p_r_e_full": ("fused", "soft"),
     "true_full": ("true", "soft"),
     "cell_full": (None, "cell"),
+    "p_r_e_cell_da": ("fused", "soft"),
+    "p_r_e_refine_prb": ("fused", "soft"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
 DATA_AIDED = {
@@ -137,6 +139,8 @@ DATA_AIDED = {
     "p_r_e_full": 3,
     "true_full": 3,
     "cell_full": 3,
+    "p_r_e_cell_da": 3,
+    "p_r_e_refine_prb": 3,
 }
 # Options of the map-aware receiver (jamloc.recovery.MapAwareReceiver.call)
 OPTIONS = {
@@ -145,6 +149,8 @@ OPTIONS = {
     "p_r_e_full": {"cellwise": True, "refine": True, "renoise": True},
     "true_full": {"cellwise": True, "refine": True, "renoise": True},
     "cell_full": {"renoise": True},
+    "p_r_e_cell_da": {"cellwise": True},
+    "p_r_e_refine_prb": {"refine": True},
     "p_r_e_refine": {"cellwise": True, "refine": True},
     "p_r_e_renoise": {"renoise": True},
     "true_renoise": {"renoise": True},
@@ -274,6 +280,18 @@ STYLE = {
         "label": "Per-cell estimate, no map, passes",
         "color": "#35978F",
         "marker": "h",
+        "linestyle": "-.",
+    },
+    "p_r_e_cell_da": {
+        "label": "P+R+E map, per cell, channel passes",
+        "color": "#4393C3",
+        "marker": "o",
+        "linestyle": "-.",
+    },
+    "p_r_e_refine_prb": {
+        "label": "P+R+E map, per PRB, map-refining passes",
+        "color": "#D6604D",
+        "marker": "s",
         "linestyle": "-.",
     },
     "cell_da": {
