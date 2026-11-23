@@ -1,5 +1,5 @@
 import {
-  batchText, calibrationText, detectors, loadCase, loadManifest, receiverName, selectionText, signedDb,
+  calibrationText, detectors, loadCase, loadManifest, receiverName, selectionText, signedDb,
 } from "./data.js";
 import { comparisonReceivers, constellations, crcList } from "./constellation.js";
 import { element, options, reportError } from "./nav.js";
@@ -254,7 +254,7 @@ function atLevel(doc, index) {
   return {
     ...doc,
     grids: level.grids, detectors: level.detectors, receivers: level.receivers,
-    x_hat: level.x_hat, abs_llr: level.abs_llr,
+    x_hat: level.x_hat, abs_llr: level.abs_llr, sent: level.sent, bits: level.bits,
     metadata: { ...doc.metadata, jsr_db: level.jsr_db, batch_crc: level.batch_crc },
   };
 }
@@ -424,34 +424,39 @@ function levelSummary(slot, detectorKey, names) {
     : `${detector} flags ${other} ${other === 1 ? "cell" : "cells"} (false alarms).`);
   const host = element("div");
   for (const text of lines) host.append(element("p", text));
-  host.append(crcList(slot, names));
+  if (names.length) host.append(crcList(slot, names));
   return host;
 }
 
 async function explorer(root) {
   const entries = (await loadManifest()).cases.filter(item => !explorerExclusions.has(item.name));
-  const caseSelect = document.querySelector("#case-select");
-  const levelInput = document.querySelector("#level");
-  const levelValue = document.querySelector("#level-value");
-  const ticks = document.querySelector("#level-ticks");
-  const play = document.querySelector("#level-play");
-  const summary = document.querySelector("#level-summary");
-  const chart = document.querySelector("#level-chart");
-  const feature = document.querySelector("#feature-select");
-  const detector = document.querySelector("#detector-select");
-  const truth = document.querySelector("#truth-toggle");
-  const everyReceiver = document.querySelector("#all-receivers");
-  const pointSource = document.querySelector("#point-source");
-  const lesson = document.querySelector("#explore-lesson");
-  const context = document.querySelector("#explore-context");
-  const grid = document.querySelector("#explore-grid");
-  const pointsHeading = document.querySelector("#points-heading");
-  const pointHost = document.querySelector("#explore-points");
-  const details = document.querySelector("#cell-details");
-  const batch = document.querySelector("#explore-batch");
+  const $ = selector => document.querySelector(selector);
+  const caseSelect = $("#case-select");
+  const levelInput = $("#level");
+  const levelValue = $("#level-value");
+  const ticks = $("#level-ticks");
+  const play = $("#level-play");
+  const outcome = $("#bar-outcome");
+  const summary = $("#level-summary");
+  const chart = $("#level-chart");
+  const feature = $("#feature-select");
+  const detector = $("#detector-select");
+  const truth = $("#truth-toggle");
+  const everyReceiver = $("#all-receivers");
+  const pointSource = $("#point-source");
+  const stageButtons = { before: $("#show-before"), after: $("#show-after") };
+  const pointsNote = $("#points-note");
+  const lesson = $("#explore-lesson");
+  const context = $("#explore-context");
+  const grid = $("#explore-grid");
+  const pointHost = $("#explore-points");
+  const readout = $("#cell-readout");
+  const details = $("#cell-details");
+  const params = new URLSearchParams(location.search);
   let doc;
   let slot;
   let level = 0;
+  let stage = params.get("view") === "after" ? "after" : "before";
   let selected;
   let request = 0;
   let motion = 0;
@@ -479,17 +484,11 @@ async function explorer(root) {
     selected = [prb, symbol];
     const onAllocation = Boolean(slot.grids.allocation[prb][symbol]);
     const pilot = symbol === slot.metadata.config.dmrs_symbol;
-    const entries = [
-      ["Location", `PRB ${prb}, OFDM symbol ${symbol}`],
-      ["Allocation", onAllocation ? "Scheduled" : "Outside the allocation"],
-      ["Jammed", slot.grids.truth[prb][symbol] ? "Yes" : "No"],
-      ...Object.entries(FEATURES).map(([key, label]) => {
-        const value = slot.grids[key][prb][symbol];
-        const readout = Number.isFinite(value) ? `${value} dB` :
-          `Unavailable · ${missingFeature(key, onAllocation, pilot)}`;
-        return [label, readout];
-      }),
-    ];
+    const jammed = Boolean(slot.grids.truth[prb][symbol]);
+    const featureRows = Object.entries(FEATURES).map(([key, label]) => {
+      const value = slot.grids[key][prb][symbol];
+      return [label, Number.isFinite(value) ? `${value} dB` : `Unavailable · ${missingFeature(key, onAllocation, pilot)}`];
+    });
     const decisions = Object.entries(slot.detectors).map(([key, map]) => {
       const label = detectors[key] ?? key;
       const score = map.scores[prb][symbol];
@@ -501,7 +500,17 @@ async function explorer(root) {
       const limit = Number.isFinite(cutoff) ? `flags above ${cutoff}` : "cutoff missing from this export";
       return [label, `${decision} · score ${score} · ${limit}`];
     });
-    details.replaceChildren(definitionList(entries), element("h3", "Detector decisions"), definitionList(decisions));
+    // One line under the grid; the full list folds away below it
+    const key = detector.value || "fused";
+    const map = slot.detectors[key];
+    const flagged = Boolean(map?.decisions[prb][symbol]);
+    const kind = !onAllocation ? "outside the user's PRBs" : pilot ? "pilot cell" : "data cell";
+    readout.replaceChildren(
+      element("strong", `PRB ${prb}, symbol ${symbol}`), ` · ${kind} · `,
+      element("span", jammed ? "jammed" : "not jammed", jammed ? "tag jammed" : "tag"), " · ",
+      element("span", `${detectors[key] ?? key}: ${flagged ? "flagged" : "not flagged"}`, flagged ? "tag flagged" : "tag"),
+    );
+    details.replaceChildren(definitionList(featureRows), element("h3", "Detector decisions"), definitionList(decisions));
     if (changedPRB && pointSource.value === "prb") showPoints();
   }
 
@@ -511,19 +520,26 @@ async function explorer(root) {
     const names = receivers();
     const [start, count] = slot.metadata.alloc;
     const mine = ++motion;
-    const animate = { from: reduceMotion ? null : from, alive: () => mine === motion };
-    if (pointSource.value === "all") {
-      pointsHeading.textContent = `Data symbols of the user's ${count} PRBs (${start}–${start + count - 1})`;
-      pointHost.replaceChildren(constellations(slot, names, null, animate));
-    } else if (prb >= start && prb < start + count) {
-      pointsHeading.textContent = `Data symbols of PRB ${prb}`;
-      pointHost.replaceChildren(constellations(slot, names, [prb], animate));
+    const options = { stage, from: reduceMotion ? null : from, alive: () => mine === motion };
+    if (pointSource.value === "all" || (prb >= start && prb < start + count)) {
+      const prbs = pointSource.value === "all" ? null : [prb];
+      pointHost.replaceChildren(constellations(slot, names, prbs, options));
     } else {
-      pointsHeading.textContent = `Data symbols of PRB ${prb}`;
-      pointHost.replaceChildren(element("p", `PRB ${prb} is outside the allocation. Pick a scheduled PRB to see its data symbols.`),
-        crcList(slot, names));
+      pointHost.replaceChildren(element("p", `PRB ${prb} is outside the allocation. Pick a scheduled PRB to see its data symbols.`));
     }
-    batch.textContent = batchText(slot, names);
+    const where = pointSource.value === "all" ? `the user's ${count} PRBs` : `PRB ${prb}`;
+    pointsNote.textContent = stage === "after"
+      ? `After decoding, each point sits on the symbol that the decoded block says was sent. Black: a symbol the decoder got wrong. The lighter red and blue points were decoded correctly; red ones are jammed symbols the decoder rebuilt. Points: the data symbols of ${where}.`
+      : `Each point is one received data symbol of ${where}: red from a jammed cell, blue from a clean one. The paler a point, the less the decoder trusts its bits. Switch to "After decoding" to see what the decoder makes of them.`;
+  }
+
+  function setStage(next) {
+    if (next === stage || !slot) return;
+    const from = { slot, stage };
+    stage = next;
+    for (const [name, button] of Object.entries(stageButtons)) button.setAttribute("aria-pressed", String(name === stage));
+    showPoints(from);
+    remember();
   }
 
   function redraw() {
@@ -536,28 +552,31 @@ async function explorer(root) {
     });
     grid.replaceChildren(drawn);
     drawn.querySelector(".explore-grid-scroll").scrollLeft = scroll;
-    summary.replaceChildren(levelSummary(slot, detector.value || "fused", comparisonReceivers(slot)));
+    summary.replaceChildren(levelSummary(slot, detector.value || "fused", []));
   }
 
   function remember() {
-    const params = new URLSearchParams(location.search);
-    params.set("case", caseSelect.value);
+    const query = new URLSearchParams(location.search);
+    query.set("case", caseSelect.value);
     const jsr = slot.metadata.jsr_db;
-    params.set("jsr", jsr == null ? "off" : String(jsr));
-    history.replaceState(null, "", `?${params}`);
+    query.set("jsr", jsr == null ? "off" : String(jsr));
+    if (stage === "after") query.set("view", "after");
+    else query.delete("view");
+    history.replaceState(null, "", `?${query}`);
   }
 
   function showLevel(index, { animate = true } = {}) {
-    const previous = slot;
+    const from = slot ? { slot, stage } : null;
     level = index;
     slot = atLevel(doc, index);
     levelInput.value = String(index);
     levelValue.textContent = powerText(slot.metadata.jsr_db);
     levelInput.setAttribute("aria-valuetext", levelValue.textContent);
     for (const [i, tick] of [...ticks.children].entries()) tick.classList.toggle("current", i === index);
+    outcome.replaceChildren(crcList(slot, comparisonReceivers(slot)));
     redraw();
     inspect(...selected);
-    showPoints(animate ? previous : null);
+    showPoints(animate ? from : null);
     chart.replaceChildren(failureChart(doc, chartReceivers(), index, pick));
     remember();
   }
@@ -596,9 +615,8 @@ async function explorer(root) {
     selected = null;
     for (const control of [feature, detector, truth, levelInput, play]) control.disabled = true;
     context.textContent = "Loading the slot at every jammer power…";
-    pointsHeading.textContent = "Equalized symbols";
     lesson.textContent = lessons[name] ?? "";
-    for (const host of [grid, details, pointHost, batch, summary, chart]) host.replaceChildren();
+    for (const host of [grid, details, readout, pointHost, summary, chart, outcome]) host.replaceChildren();
     try {
       const loaded = await loadCase(name);
       if (current !== request) return;
@@ -607,15 +625,13 @@ async function explorer(root) {
       const own = levels.findIndex(entry => entry.jsr_db === doc.metadata.jsr_db);
       const wanted = jsr === undefined ? -1 :
         levels.findIndex(entry => (entry.jsr_db == null ? "off" : String(entry.jsr_db)) === jsr);
-      level = wanted >= 0 ? wanted : own;
-      slot = atLevel(doc, level);
       levelInput.max = String(levels.length - 1);
       ticks.replaceChildren(...levels.map((entry, i) => {
         const tick = element("span", tickText(entry.jsr_db));
         tick.style.setProperty("--at", String(levels.length > 1 ? i / (levels.length - 1) : 0.5));
         return tick;
       }));
-      const maps = Object.keys(slot.detectors);
+      const maps = Object.keys(doc.detectors);
       options(detector, [["", "None"], ...maps.map(key => [key, detectors[key] ?? key])]);
       detector.value = previousDetector === "" || maps.includes(previousDetector) ? previousDetector : "fused";
       feature.disabled = truth.disabled = false;
@@ -625,7 +641,7 @@ async function explorer(root) {
       settings.append(element("summary", "Simulation and detector settings"),
         element("p", `Slot ${selection.slot + 1} of ${batch_size} simulated slots, chosen at ${signedDb(doc.metadata.jsr_db)}. ${selectionText(doc)}`),
         element("p", calibrationText(doc)),
-        element("p", "Every power replays the same random draws (channel, noise, data and the jammer's waveform) and scales only the jammer's power, so the same slot is shown throughout. The chart counts the CRC failures of all the slots simulated at each power."));
+        element("p", "Every power replays the same random draws (channel, noise, data and the jammer's waveform) and scales only the jammer's power."));
       if (doc.metadata.noise_estimate === "comb") {
         settings.append(element("p", "The receiver estimated the noise power from the empty pilot comb."));
       }
@@ -633,7 +649,7 @@ async function explorer(root) {
       const noise = m.noise_estimate === "comb" ? " · estimated noise power" : "";
       context.replaceChildren(element("p", `TDL-${m.channel} · ${m.snr_db} dB SNR · the user on PRBs ${m.alloc[0]}–${m.alloc[0] + m.alloc[1] - 1}${noise}`), settings);
       selected = initialCell(doc);
-      showLevel(level, { animate: false });
+      showLevel(wanted >= 0 ? wanted : own, { animate: false });
     } catch (error) {
       if (current === request) reportError(grid, error);
     } finally {
@@ -642,13 +658,16 @@ async function explorer(root) {
   }
 
   options(caseSelect, entries.map(({ name, title }) => [name, title]));
-  const params = new URLSearchParams(location.search);
   caseSelect.value = params.get("case") ?? "partial";
   if (!caseSelect.value) caseSelect.selectedIndex = 0;
+  for (const [name, button] of Object.entries(stageButtons)) {
+    button.setAttribute("aria-pressed", String(name === stage));
+    button.addEventListener("click", () => setStage(name));
+  }
   caseSelect.addEventListener("change", () => changeCase());
   levelInput.addEventListener("input", () => pick(Number(levelInput.value)));
   play.addEventListener("click", togglePlay);
-  for (const control of [feature, detector, truth]) control.addEventListener("change", redraw);
+  for (const control of [feature, detector, truth]) control.addEventListener("change", () => { redraw(); inspect(...selected); });
   everyReceiver.addEventListener("change", () => showPoints());
   pointSource.addEventListener("change", () => showPoints());
   await changeCase({ jsr: params.get("jsr") ?? undefined });

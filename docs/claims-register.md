@@ -19,8 +19,8 @@ commit that adds this file.
 | `docs/results.md` | 3 | 11 | 5 | 1 | 20 |
 | Partial-band walkthrough and jammer width (added) | 10 | 2 | 0 | 0 | 12 |
 | `README.md` rewrite (added) | 5 | 0 | 0 | 0 | 5 |
-| Explore power slider (added) | 3 | 0 | 0 | 0 | 3 |
-| **Total** | **100** | **104** | **19** | **11** | **234** |
+| Explore power slider (added) | 5 | 0 | 0 | 0 | 5 |
+| **Total** | **102** | **104** | **19** | **11** | **236** |
 
 Counts are register rows. A row can cover repeated wording or several numbers from the same table and population.
 
@@ -333,3 +333,5 @@ in the browser from the exported case files; the rows below cover its fixed sent
 | X01 | `site/explore.html` intro, settings note | Every position replays the same slot with the same channel, noise, data and jammer waveform; only the jammer's power changes. | `J/site/export.py` `_batch` resets the seed before building the link, and levels keep the selected slot index; `tests/test_site.py::test_levels_replay_the_slot_at_each_power` (unjammed cells identical at every level, jammed cells weaker at −9 dB) and `test_sweep_repeats_channel_and_noise` (jammer excess scales as the square root of power). | CORRECT | — |
 | X02 | Explore lesson, `pilot_whole_comb` | At +3 dB even the true map does not save this slot. | Selection rule `first_true_soft_failure` at the case's +3 dB: `S/pilot_whole_comb.json` `receivers.true_soft.crc` is false. | CORRECT | — |
 | X03 | Explore lesson, `pilot` | As the power rises, the data points of the jammed PRBs spread because their channel estimate is wrong. | The jammer hits only DMRS cells (truth grid); data-cell spread comes through the channel estimate (`main.tex` attack description, N04 for the walkthrough slot). | CORRECT | — |
+| X04 | Explore "After decoding", walkthrough step 8 | After decoding, each point sits on the symbol the decoded block maps to; black marks a symbol that differs from the one sent. With the map the walkthrough slot's block decodes with 0 wrong bits; the standard receiver's decoded block differs in 564 coded bits. | `J/site/export.py` `_bit_refs` (decoded block re-encoded with the transmitter's TB encoder); `tests/test_site.py` (decoded equals sent for every CRC-passing receiver; raw digits agree with the plotted quadrant). `S/partial_flip.json` bits: standard 362 → 564, fused_soft 352 → 0, all raw errors in jammed cells. | CORRECT | — |
+| X05 | `docs/results.md` §19, the reply on uncorrected symbols | The map does not repair the jammed symbols (26% of their bits still wrong before decoding, the same with the true map) but makes their wrong bits nearly weightless (mean \|LLR\| 0.2 against 17.7 per jammed bit). | `results/site/decoding_bits.csv` from `python -m jamloc.experiments.decoding_bits` (`partial`, +3 dB, 64 slots, seed 7): fused_soft and true_soft jammed wrong_before 0.262, llr_wrong 0.20; standard 0.290 and 17.67. | CORRECT | — |

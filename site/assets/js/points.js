@@ -46,6 +46,67 @@ export function symbols(slot, receiver, prbs = null) {
   return out;
 }
 
+const popcount = digit => (digit & 1) + ((digit >> 1) & 1);
+
+// A repeatable pseudo-random number in [0, 1) for point `i` (so a point keeps its place in a cloud)
+function scatter(i, salt) {
+  let h = Math.imul((i + 1) ^ salt, 2654435761) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 3266489917) >>> 0;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// A receiver's symbols after decoding: each point moved onto the QPSK symbol its decoded block maps
+// to. The points of one symbol are packed evenly into a disc (a sunflower spiral, in a repeatable
+// shuffled order) so every point stays visible; `wrong` marks a symbol that differs from the one
+// sent. Without exported bits, null.
+export function decodedSymbols(slot, receiver, prbs = null) {
+  const decoded = slot.bits?.[slot.receivers[receiver]?.decoded];
+  if (!decoded || !slot.sent || !slot.metadata.qpsk) return null;
+  const points = symbols(slot, receiver, prbs);
+  const groups = new Map();
+  for (const p of points) {
+    const digit = Number(decoded[p.index]);
+    if (!groups.has(digit)) groups.set(digit, []);
+    groups.get(digit).push(p);
+  }
+  const placed = new Map();
+  for (const [digit, group] of groups) {
+    const [qx, qy] = slot.metadata.qpsk[digit];
+    const radius = Math.min(0.62, 0.03 * Math.sqrt(group.length));
+    group.sort((a, b) => scatter(a.index, 0x9e37) - scatter(b.index, 0x9e37));
+    group.forEach((p, k) => {
+      const r = radius * Math.sqrt((k + 0.5) / group.length);
+      const angle = k * 2.39996;
+      placed.set(p.index, {
+        ...p, x: qx + r * Math.cos(angle), y: qy + r * Math.sin(angle), alpha: 0.5,
+        wrong: digit !== Number(slot.sent[p.index]),
+      });
+    });
+  }
+  return points.map(p => placed.get(p.index));
+}
+
+// Wrong coded bits among `points` (from symbols or decodedSymbols): before decoding (the signs of
+// the receiver's LLRs), the part of those in jammed cells, and after decoding. Null without bits.
+export function bitErrors(slot, receiver, points) {
+  const rx = slot.receivers[receiver];
+  const raw = slot.bits?.[rx?.raw];
+  const decoded = slot.bits?.[rx?.decoded];
+  if (!raw || !decoded || !slot.sent) return null;
+  let before = 0;
+  let jammedBefore = 0;
+  let after = 0;
+  for (const p of points) {
+    const sent = Number(slot.sent[p.index]);
+    const wrong = popcount(Number(raw[p.index]) ^ sent);
+    before += wrong;
+    if (p.jammed) jammedBefore += wrong;
+    after += popcount(Number(decoded[p.index]) ^ sent);
+  }
+  return { before, jammedBefore, after, total: 2 * points.length };
+}
+
 // Mean bit reliability per cell ("prb,symbol" -> mean |LLR|) of a receiver's symbols
 export function cellTrust(points) {
   const sums = new Map();
@@ -235,11 +296,18 @@ export function drawFrame(view, from, to, t) {
       const x = a.x + (b.x - a.x) * ease;
       const y = a.y + (b.y - a.y) * ease;
       if (Math.abs(x) > limit || Math.abs(y) > limit) outside++;
-      ctx.globalAlpha = a.alpha + (b.alpha - a.alpha) * ease;
+      const alpha = a.alpha + (b.alpha - a.alpha) * ease;
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = a.jammed ? RED : BLUE;
       ctx.beginPath();
       ctx.arc(px(x), py(y), 1.6, 0, 2 * Math.PI);
       ctx.fill();
+      // A symbol the decoder got wrong (decoded views only) turns black once the points have landed
+      if (b.wrong && ease > 0.6) {
+        ctx.globalAlpha = (ease - 0.6) / 0.4;
+        ctx.fillStyle = "#000";
+        ctx.fill();
+      }
     }
   }
   ctx.restore();

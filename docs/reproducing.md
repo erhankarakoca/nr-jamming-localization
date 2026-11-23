@@ -60,6 +60,13 @@ uv run python -m jamloc.experiments.recovery --channel C --snr-db 8 --seeds 0 1 
 uv run python -m jamloc.experiments.recovery --channel A
 ```
 
+**What decoding does to the jammed bits (§19).** Wrong bits before decoding and the weight the
+decoder gets on them, per receiver, for the showcase batches:
+
+```bash
+uv run python -m jamloc.experiments.decoding_bits               # results/site/decoding_bits.csv
+```
+
 **Jammer width (§22).** The runs above jam 4 of the 12 scheduled PRBs. `--jam-prb N` jams N PRBs
 and writes `recovery_C_jam<N>` files. `experiments.width_sweep` then plots BLER against the width,
 and the detector's Pd against the width of the test split's jammer blocks

@@ -1148,6 +1148,17 @@ Design `docs/superpowers/specs/2026-11-20-showcase-site-design.md`, plan
   grid is empty. Each level also records the CRC failures of the full 64-slot batch, which the
   page plots against the power. The nominal level of every case is unchanged from the earlier
   export. The files grow to 1.3–1.8 MB each (0.38–0.55 MB gzipped), loaded only by Explore.
+- **Bits before and after decoding (23 Nov).** Every case also records the transmitted QPSK
+  symbols and, per receiver, the symbols its bits give before decoding (LLR signs) and after
+  decoding (its decoded block encoded again). Explore's "After decoding" view and the walkthrough's
+  last step draw them. In the walkthrough slot (partial-band, +3 dB) all wrong bits before decoding
+  lie in the jammed cells: 362 for the standard receiver and 352 with the U-Net map. After decoding
+  the map-aware block equals the one sent (0 wrong bits), while the standard receiver's decoded
+  block differs from it in 564 coded bits. Over the 64-slot batch (`partial` at +3 dB), 26% of the
+  jammed cells' bits are still wrong before decoding with either the U-Net map or the true map
+  (29% for the standard receiver), but they reach the decoder with a mean |LLR| of 0.2 on the wrong
+  bits per jammed bit, against 17.7 for the standard receiver
+  (`python -m jamloc.experiments.decoding_bits`, `results/site/decoding_bits.csv`).
 
 **Site** (`python -m jamloc.site build | serve | deploy`, static build on the `gh-pages` branch):
 

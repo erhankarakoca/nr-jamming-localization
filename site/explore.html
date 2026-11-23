@@ -20,20 +20,17 @@
       </nav>
     </div>
   </header>
-  <main class="shell" id="main" tabindex="-1">
+  <main class="shell wide" id="main" tabindex="-1">
 <header class="page-intro">
   <h1>Explore</h1>
-  <p>Pick an attack and move the jammer's power. Every position replays the same simulated slot, with
-    the same channel, noise, data and jammer waveform; only the jammer's power changes. Watch where
-    the jammer hits, what the detector flags and whether each receiver decodes the block.</p>
+  <p>Pick an attack and move the jammer's power. It is always the same simulated slot (same
+    channel, noise, data and jammer waveform); only the jammer's power changes.</p>
 </header>
 <div id="explorer" aria-busy="true">
-  <section class="power-panel" aria-label="Attack and jammer power">
-    <div class="controls">
-      <label>Attack <select id="case-select" disabled></select></label>
-    </div>
-    <div class="power-control">
-      <label for="level">Jammer-to-signal ratio (JSR) per jammed cell <output id="level-value" for="level"></output></label>
+  <div class="explore-bar" role="region" aria-label="Attack and jammer power">
+    <label class="bar-attack">Attack <select id="case-select" disabled></select></label>
+    <div class="bar-power">
+      <label for="level">Jammer power (JSR) <output id="level-value" for="level"></output></label>
       <div class="power-row">
         <div class="power-track">
           <input id="level" type="range" min="0" max="0" value="0" step="1" disabled>
@@ -42,49 +39,50 @@
         <button id="level-play" type="button" aria-pressed="false" disabled>Play</button>
       </div>
     </div>
-    <p id="explore-lesson"></p>
-    <div class="power-body">
-      <div>
-        <div id="level-summary" class="power-summary" aria-live="polite"></div>
-        <div id="explore-context" class="context">Loading the slots…</div>
+    <div id="bar-outcome" class="bar-outcome" aria-live="polite"></div>
+  </div>
+  <p id="explore-lesson" class="lesson"></p>
+  <div class="explore-stage">
+    <section class="stage-panel" aria-labelledby="grid-heading">
+      <h2 id="grid-heading">Where the jammer hit</h2>
+      <div id="level-summary" class="power-summary"></div>
+      <div class="controls" role="group" aria-label="Grid layers">
+        <label>Colour cells by <select id="feature-select" disabled>
+          <option value="">Nothing</option><option value="power_db">Power P</option>
+          <option value="residual_db">Pilot residual R</option><option value="evm_db">EVM E</option>
+        </select></label>
+        <label>Flags from <select id="detector-select" disabled></select></label>
+        <label class="check"><input id="truth-toggle" type="checkbox" checked disabled> Outline jammed cells</label>
       </div>
-      <div id="level-chart" class="power-chart"></div>
-    </div>
-  </section>
-  <section class="panel" aria-labelledby="grid-heading">
-    <h2 id="grid-heading">The resource grid</h2>
-    <div class="controls" role="group" aria-label="Grid layers">
-      <label>Colour cells by <select id="feature-select" disabled>
-        <option value="">None</option><option value="power_db">Power P</option>
-        <option value="residual_db">Pilot residual R</option><option value="evm_db">EVM E</option>
-      </select></label>
-      <label>Flags from <select id="detector-select" disabled></select></label>
-      <label class="check"><input id="truth-toggle" type="checkbox" checked disabled> Outline the jammed cells</label>
-    </div>
-    <div class="slot-row">
       <div id="explore-grid"></div>
-      <div>
-        <p>Rows are physical resource blocks (PRBs), columns are OFDM symbols, and symbol 2 carries
-          the pilots (DMRS). The colour scale stays fixed while the power changes.</p>
-        <p>Choose a cell to inspect it; the arrow keys move between cells when the grid has focus.</p>
-        <h3 id="cell-heading">Selected cell</h3>
-        <div id="cell-details" aria-live="polite"></div>
+      <div id="cell-readout" class="cell-readout" aria-live="polite"></div>
+      <details class="more"><summary>Every feature and detector score of the selected cell</summary>
+        <div id="cell-details"></div></details>
+    </section>
+    <section class="stage-panel" aria-labelledby="points-heading">
+      <h2 id="points-heading">What the receivers decode</h2>
+      <div class="controls">
+        <div class="segmented" role="group" aria-label="Decoding stage">
+          <button id="show-before" type="button" aria-pressed="true">Before decoding</button>
+          <button id="show-after" type="button" aria-pressed="false">After decoding</button>
+        </div>
+        <label>Points from <select id="point-source">
+          <option value="all">All of the user's PRBs</option><option value="prb">The selected cell's PRB</option>
+        </select></label>
+        <label class="check"><input id="all-receivers" type="checkbox"> All receivers</label>
       </div>
+      <div id="explore-points"></div>
+      <p id="points-note" class="points-note"></p>
+    </section>
+  </div>
+  <section class="explore-batch" aria-labelledby="batch-heading">
+    <div>
+      <h2 id="batch-heading">The whole batch at every power</h2>
+      <p>The slider shows one slot. The chart counts how many of all the slots simulated with this
+        attack failed their CRC check at each power; click a column to jump there.</p>
+      <div id="explore-context" class="context">Loading the slots…</div>
     </div>
-  </section>
-  <section class="panel" aria-labelledby="points-heading">
-    <h2 id="points-heading">Equalized symbols</h2>
-    <p>Red points come from jammed cells and blue points from clean cells; the paler a point, the
-      less the decoder trusts its bits. The map-aware receiver uses the U-Net's map, and the CRC
-      checks the whole decoded block.</p>
-    <div class="controls">
-      <label>Points from <select id="point-source">
-        <option value="all">All of the user's PRBs</option><option value="prb">The selected cell's PRB</option>
-      </select></label>
-      <label class="check"><input id="all-receivers" type="checkbox"> Show all saved receivers</label>
-    </div>
-    <div id="explore-points"></div>
-    <p id="explore-batch" class="context"></p>
+    <div id="level-chart" class="power-chart"></div>
   </section>
 </div>
   </main>
