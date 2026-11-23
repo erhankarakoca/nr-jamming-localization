@@ -1419,7 +1419,7 @@ Partial-band jamming, BLER (%) by jammed PRBs of 12 (share of the allocation):
   point is an independent replicate of section 21's whole-allocation run (39.3% and 24.4%) and
   agrees with it within the sampling error.
 - Data and partial-band jamming fall off a cliff between 6 and 8 jammed PRBs. A block has 3,744
-  coded bits and about 1,385 information bits (code rate about 0.37). With 6 of 12 PRBs jammed the
+  coded bits and 1,416 information bits, plus a 16-bit CRC (code rate about 0.37). With 6 of 12 PRBs jammed the
   clean half still holds 1,872 coded bits; with 8 jammed the clean third holds 1,248, fewer than the
   information bits, so the block must draw on the jammed cells. Partial-band at +3 dB: 0.06% at 4
   PRBs, 2.12% at 6, 38.3% at 8 (the true map the same); at -3 dB, where jammed cells still carry
