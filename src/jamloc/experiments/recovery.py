@@ -126,6 +126,11 @@ RECEIVERS = {
     "cell_full": (None, "cell"),
     "p_r_e_cell_da": ("fused", "soft"),
     "p_r_e_refine_prb": ("fused", "soft"),
+    "p_r_e_adapt_da": ("fused", "soft"),
+    "p_r_e_adapt_full": ("fused", "soft"),
+    "true_adapt": ("true", "soft"),
+    "true_adapt_full": ("true", "soft"),
+    "cell_adapt_full": (None, "cell"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
 DATA_AIDED = {
@@ -141,6 +146,10 @@ DATA_AIDED = {
     "cell_full": 3,
     "p_r_e_cell_da": 3,
     "p_r_e_refine_prb": 3,
+    "p_r_e_adapt_da": 3,
+    "p_r_e_adapt_full": 3,
+    "true_adapt_full": 3,
+    "cell_adapt_full": 3,
 }
 # Options of the map-aware receiver (jamloc.recovery.MapAwareReceiver.call)
 OPTIONS = {
@@ -151,6 +160,11 @@ OPTIONS = {
     "cell_full": {"renoise": True},
     "p_r_e_cell_da": {"cellwise": True},
     "p_r_e_refine_prb": {"refine": True},
+    "p_r_e_adapt_da": {"cellwise": "adaptive"},
+    "p_r_e_adapt_full": {"cellwise": "adaptive", "refine": True, "renoise": "auto"},
+    "true_adapt_full": {"cellwise": "adaptive", "refine": True, "renoise": "auto"},
+    "cell_adapt_full": {"renoise": "auto"},
+    "true_adapt": {"cellwise": "adaptive"},
     "p_r_e_refine": {"cellwise": True, "refine": True},
     "p_r_e_renoise": {"renoise": True},
     "true_renoise": {"renoise": True},
@@ -293,6 +307,36 @@ STYLE = {
         "color": "#D6604D",
         "marker": "s",
         "linestyle": "-.",
+    },
+    "p_r_e_adapt_da": {
+        "label": "P+R+E map, adaptive pooling, channel passes",
+        "color": "#762A83",
+        "marker": "D",
+        "linestyle": "-.",
+    },
+    "p_r_e_adapt_full": {
+        "label": "P+R+E map, adaptive pooling, refining passes",
+        "color": "#40004B",
+        "marker": "D",
+        "linestyle": "-",
+    },
+    "true_adapt_full": {
+        "label": "True map, adaptive pooling, refining passes",
+        "color": "#00441B",
+        "marker": "^",
+        "linestyle": "-",
+    },
+    "cell_adapt_full": {
+        "label": "Per-cell estimate, no map, gated noise passes",
+        "color": "#01665E",
+        "marker": "h",
+        "linestyle": ":",
+    },
+    "true_adapt": {
+        "label": "True map, adaptive pooling",
+        "color": "#1B7837",
+        "marker": "^",
+        "linestyle": ":",
     },
     "cell_da": {
         "label": "Per-cell estimate, no map, data-aided",

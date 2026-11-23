@@ -140,6 +140,9 @@ def lmmse_interpolation(
 
 
 MODES = ("hard", "soft", "dmrs", "lmmse", "slot", "cell")
+# A flagged cell joins the pooled jamming estimate of its PRB row when its own estimate lies within
+# this many standard errors of it (``cellwise="adaptive"``)
+POOL_Z = 2.5
 
 
 def cell_threshold(num_re: int, alpha: float) -> float:
@@ -256,14 +259,18 @@ class MapAwareReceiver(Block):
         Options of the soft mode and its passes:
 
         * ``cellwise``: estimate the jamming power of a flagged data cell from its own resource
-          elements instead of averaging it over the flagged data cells of its PRB.
+          elements instead of averaging it over the flagged data cells of its PRB. With
+          ``"adaptive"``, a cell keeps the PRB average when its own estimate agrees with it
+          within ``POOL_Z`` standard errors, and its own estimate otherwise.
         * ``refine``: after each failed decoding, test every data cell on its remodulated residual
           ``y - h_hat x_bar`` (``_refine``) and add the cells that fail it to the map, which then
           also has per-cell jamming estimates. The detector's map is the starting point; decoding
           adds what it missed.
         * ``renoise``: after each failed decoding, estimate the noise power again from the
           remodulated residual of the confidently decoded data cells the map calls clean, and
-          recompute everything that depends on it (pilot variances, residuals, LLRs).
+          recompute everything that depends on it (pilot variances, residuals, LLRs). With
+          ``"auto"``, only in slots whose noise power came from the empty DMRS comb while the map
+          flags a DMRS cell (``_comb_suspect``).
         """
         cfg = self.cfg
         num_sc = y.shape[-1]
@@ -344,7 +351,12 @@ class MapAwareReceiver(Block):
                 # The data-aided estimate rests on many symbols per subcarrier, so its error is
                 # small; the noise power is estimated around it, and everything that depends on
                 # the noise power is computed again
-                no = self._renoise(y, no, *self._on_grid(h_new, err_new, y), mean, var, cells, mode)
+                fresh = self._renoise(
+                    y, no, *self._on_grid(h_new, err_new, y), mean, var, cells, mode
+                )
+                if renoise == "auto":  # only where the estimate came from a flagged empty comb
+                    fresh = torch.where(self._comb_suspect(cells, interfered, mode), fresh, no)
+                no = fresh
                 clean, pilot_var, r, interfered = self._pilots(
                     h_ls, pilot_sc, pilot_power, no, cells, mode
                 )
@@ -567,6 +579,19 @@ class MapAwareReceiver(Block):
             pilot_var = s2[:, None] * inflate[:, pilot_dmrs, pilot_prb]
         return clean, pilot_var, r, interfered
 
+    def _comb_suspect(self, cells, interfered, mode) -> torch.Tensor:
+        """``[B]``: slots whose noise power came from the empty DMRS comb (``noise_estimate``
+        ``"comb"``) while the map flags a DMRS cell of the allocation, so that the jammer may have
+        raised the estimate. With the noise power known, no slot is suspect."""
+        rows = cells.shape[0] if cells is not None else interfered.shape[0]
+        if self.cfg.noise_estimate != "comb":
+            return torch.zeros(
+                rows, dtype=torch.bool, device=(cells if cells is not None else interfered).device
+            )
+        if mode == "soft":
+            return cells[:, :, list(self.dmrs_symbols)].flatten(1).any(dim=1)
+        return interfered.flatten(1).any(dim=1)
+
     def _cell_sum(self, values: torch.Tensor) -> torch.Tensor:
         """Sum of ``values`` ``[B, num_data]`` over the data resource elements of each cell
         (PRB and OFDM symbol), returned on every resource element of that cell."""
@@ -719,7 +744,7 @@ class MapAwareReceiver(Block):
         if mode == "cell":  # no map: every data cell's own excess energy
             return self._cell_mean(excess).clamp_min(0)
         flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]
-        if self._cellwise:  # each flagged cell from its own resource elements
+        if self._cellwise is True:  # each flagged cell from its own resource elements
             return torch.where(flagged, self._cell_mean(excess).clamp_min(0), 0.0)
         # Average over the flagged data REs of each PRB.
         num_prb = y.shape[-1] // 12
@@ -729,8 +754,17 @@ class MapAwareReceiver(Block):
         count = excess.new_zeros(excess.shape[0], num_prb).index_add_(
             1, data_prb, flagged.to(excess.dtype)
         )
-        per_prb = (total / count.clamp_min(1)).clamp_min(0)
-        return torch.where(flagged, per_prb[:, data_prb], torch.zeros_like(excess))
+        pooled = (total / count.clamp_min(1))[:, data_prb]
+        if self._cellwise == "adaptive":
+            # A flagged cell takes the pooled estimate of its PRB row when its own estimate agrees
+            # with it within its sampling noise, and keeps its own otherwise: rows a jammer fills
+            # pool for precision, cells of a jammer that moves keep their own power
+            own = self._cell_mean(excess)
+            spread = (self._cell_mean(excess**2) - own**2).clamp_min(0)
+            noise = (spread / self._cell_sum(torch.ones_like(excess[:1]))).sqrt()
+            agree = (own - pooled).abs() <= POOL_Z * noise
+            pooled = torch.where(agree, pooled, own)
+        return torch.where(flagged, pooled.clamp_min(0), torch.zeros_like(excess))
 
     def _excess_energy(self, y, no, h_sc, err_sc):
         """``[B, num_data]``: received energy of each data symbol minus what the UE's signal (unit
