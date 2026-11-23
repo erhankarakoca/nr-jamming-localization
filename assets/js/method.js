@@ -494,6 +494,119 @@ async function aidedAnimation(host) {
   host.setAttribute("aria-busy", "false");
 }
 
+// A toy code (3 data bits, 3 check bits) showing how the decoder fills in jammed bits when the map
+// marks them unknown, and why trusting them wrongly makes every check disagree. Plain illustration,
+// not simulation data.
+function checksAnimation(host) {
+  const GREEN = "#006600";
+  const sent = [1, 0, 1, 1, 1, 0];                  // d1 d2 d3, c1 = d1^d2, c2 = d2^d3, c3 = d1^d3
+  const names = [["d", 1], ["d", 2], ["d", 3], ["c", 1], ["c", 2], ["c", 3]];
+  const jammed = [1, 5];                            // d2 and c3
+  const checks = [[0, 1, 3], [1, 2, 4], [0, 2, 5]];  // the bits of c1, c2, c3
+  const checkText = ["c1 = d1 ⊕ d2", "c2 = d2 ⊕ d3", "c3 = d1 ⊕ d3"];
+  const width = 780;
+  const height = 330;
+  const boxX = i => 200 + i * 52 + (i >= 3 ? 16 : 0);
+  const box = 46;
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, class: "checks-viz", role: "img" });
+  const sub = (g, x, y, [letter, n], size, attrs = {}) => {
+    const t = svgNode("text", { x, y, "text-anchor": "middle", "font-size": size, "font-style": "italic", ...attrs }, letter);
+    t.append(svgNode("tspan", { "baseline-shift": "sub", "font-size": size * 0.7, "font-style": "normal" }, n));
+    g.append(t);
+  };
+  const rows = ["map", "standard"].map((kind, r) => {
+    const top = 52 + r * 150;
+    const g = svgNode("g");
+    g.append(svgNode("text", { x: 16, y: top + 20, "font-size": 15, "font-weight": 700 }, kind === "map" ? "With the jamming map" : "Standard receiver"));
+    g.append(svgNode("text", { x: 16, y: top + 38, "font-size": 12, fill: "#555" }, kind === "map" ? "jammed bits marked unknown" : "jammed bits trusted"));
+    g.append(svgNode("text", { x: boxX(1) + box / 2, y: top - 26, "text-anchor": "middle", "font-size": 11, fill: "#555" }, "data bits"));
+    g.append(svgNode("text", { x: boxX(4) + box / 2, y: top - 26, "text-anchor": "middle", "font-size": 11, fill: "#555" }, "check bits"));
+    const bits = sent.map((_, i) => {
+      const x = boxX(i);
+      sub(g, x + box / 2, top - 7, names[i], 13);
+      const rect = svgNode("rect", { x, y: top, width: box, height: box, rx: 5, class: "bit-box" });
+      const value = svgNode("text", { x: x + box / 2, y: top + box / 2 + 8, "text-anchor": "middle", "font-size": 24, class: "bit-value" });
+      g.append(rect, value);
+      return { rect, value };
+    });
+    const pills = checkText.map((text, k) => {
+      const x = 200 + k * 112;
+      const y = top + 64;
+      const rect = svgNode("rect", { x, y, width: 104, height: 26, rx: 13, class: "check-pill" });
+      const label = svgNode("text", { x: x + 46, y: y + 17.5, "text-anchor": "middle", "font-size": 12.5 }, text);
+      const mark = svgNode("text", { x: x + 93, y: y + 18, "text-anchor": "middle", "font-size": 15, "font-weight": 700 });
+      g.append(rect, label, mark);
+      return { rect, mark };
+    });
+    const outcome = svgNode("g", { class: "checks-outcome" });
+    const badge = svgNode("rect", { x: 572, y: top + 6, width: 196, height: 34, rx: 4, fill: "#fff", "stroke-width": 1.5 });
+    const line1 = svgNode("text", { x: 670, y: top + 28, "text-anchor": "middle", "font-size": 14, "font-weight": 700 });
+    const line2 = svgNode("text", { x: 670, y: top + 60, "text-anchor": "middle", "font-size": 12, fill: "#555" });
+    outcome.append(badge, line1, line2);
+    g.append(outcome);
+    svg.append(g);
+    return { kind, bits, pills, outcome, badge, line1, line2 };
+  });
+
+  // Complete state of step i: what each bit shows, which check is being read, the checks' verdicts
+  function render(i) {
+    const active = [null, null, null, 0, 2, 1][i];
+    for (const row of rows) {
+      const map = row.kind === "map";
+      row.bits.forEach(({ rect, value }, b) => {
+        const hit = i >= 1 && jammed.includes(b);
+        let text = String(sent[b]);
+        let state = "";
+        if (hit && i === 1) { text = "≈"; state = "noise"; }
+        if (hit && i >= 2) {
+          if (map) {
+            const solved = (b === 1 && i >= 3) || (b === 5 && i >= 4);
+            text = solved ? String(sent[b]) : "?";
+            state = solved ? "solved" : "unknown";
+          } else { text = "1"; state = "wrong"; }      // read wrongly, and trusted
+        }
+        if (!map && i === 5 && b === 2) { text = "0"; state = "wrong"; }   // the misled decoder flips d3
+        value.textContent = text;
+        rect.setAttribute("class", `bit-box ${hit ? "jammed" : ""} ${active != null && checks[active].includes(b) ? "reading" : ""}`);
+        value.setAttribute("class", `bit-value ${state}`);
+      });
+      const order = [0, 2, 1];                        // c1, then c3, then c2 are read
+      row.pills.forEach(({ rect, mark }, k) => {
+        const read = i >= 3 && order.indexOf(k) <= i - 3;
+        const verdict = read ? (map ? "ok" : "bad") : "";
+        rect.setAttribute("class", `check-pill ${verdict} ${active === k ? "reading" : ""}`);
+        mark.textContent = read ? (map ? "✓" : "✗") : "";
+        mark.setAttribute("fill", map ? GREEN : RED);
+      });
+      const done = i === 5;
+      row.outcome.setAttribute("opacity", done ? 1 : 0);
+      row.badge.setAttribute("stroke", map ? GREEN : RED);
+      row.line1.setAttribute("fill", map ? GREEN : RED);
+      row.line1.textContent = map ? "All bits right · CRC pass" : "Wrong data · CRC fail";
+      row.line2.textContent = map ? "data 1 0 1, as sent" : "data 1 1 0 instead of 1 0 1";
+    }
+    svg.setAttribute("aria-label", `Toy code, step ${i + 1} of 6`);
+    return Promise.resolve();
+  }
+
+  host.querySelector(".checks-box").replaceChildren(svg);
+  const steps = [
+    { title: "Six bits", text: "A toy code: the phone sends 3 data bits (d) and 3 check bits (c). Each check bit is the XOR of two data bits, as written under the boxes." },
+    { title: "The jammer hits two bits", text: "d2 and c3 arrive buried in noise (red outline)." },
+    { title: "Unknown, or wrongly trusted", text: "With the map the receiver marks them unknown (?). The standard receiver reads them anyway: both come out wrong (red), and it trusts them." },
+    { title: "Reading check c1 = d1 ⊕ d2", text: "With the map: 1 = 1 ⊕ ?, so d2 must be 0. Standard receiver: 1 ⊕ 1 = 0, but c1 is 1, a conflict." },
+    { title: "Reading check c3 = d1 ⊕ d3", text: "With the map: 1 ⊕ 1 = 0, so the missing c3 is 0. Standard receiver: 0, but it read 1, another conflict." },
+    { title: "The result", text: "With the map, check c2 agrees too: every bit is back and the CRC passes. For the standard receiver every check conflicts; it cannot tell which bits to blame, settles on wrong data, and the CRC fails. The real code works the same way with thousands of bits and checks." },
+  ].map((step, i) => ({ ...step, render: () => render(i) }));
+  stepper(host, steps, { param: "bits", dwell: 3600 });
+  host.setAttribute("aria-busy", "false");
+}
+
+const checksHost = document.querySelector("#checks-anim");
+if (checksHost) {
+  try { checksAnimation(checksHost); } catch (error) { reportError(checksHost, error); }
+}
+
 for (const [run, id] of [[methodAnimation, "#method-anim"], [aidedAnimation, "#aided-anim"]]) {
   const host = document.querySelector(id);
   if (host) run(host).catch(error => reportError(host.querySelector(".anim-left") ?? host, error));
