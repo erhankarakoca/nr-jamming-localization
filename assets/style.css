@@ -281,10 +281,34 @@ main > figure + section { margin-top: 2rem; }
   background: linear-gradient(135deg, transparent 46%, #999 46% 54%, transparent 54%) center / 60% 60% no-repeat;
 }
 #cell-heading, #cell-details h3 { margin-top: 1rem; }
+#explore-points .constellation-set { grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 13rem)); }
 #explore-points .constellation-set figcaption { font-family: var(--serif); font-size: 1rem; }
 #explore-batch:not(:empty) { margin-top: 0.75rem; }
 #explorer > .panel { margin-top: 1.5rem; }
 @media (max-width: 500px) {
   #explore-points .constellation-set { grid-template-columns: repeat(2, minmax(0, 10rem)); }
+}
+.power-control { margin-top: 0.75rem; }
+.power-control label { font-size: 1rem; }
+.power-control output { font-weight: 700; margin-left: 0.4rem; font-variant-numeric: tabular-nums; }
+.power-row { display: flex; align-items: start; gap: 0.75rem; margin-top: 0.3rem; max-width: 36rem; }
+.power-track { flex: 1 1 auto; min-width: 0; }
+.power-track input { display: block; width: 100%; margin: 0.35rem 0 0; }
+/* Tick labels under the slider's thumb positions (the thumb is about 16px wide) */
+.power-ticks { position: relative; height: 1.2rem; margin: 0 8px; font-size: 0.75rem; color: var(--muted); }
+.power-ticks span { position: absolute; left: calc(var(--at) * 100%); transform: translateX(-50%); white-space: nowrap; }
+.power-ticks span.current { color: var(--ink); font-weight: 700; }
+#level-play { flex: none; min-width: 4.5rem; }
+.power-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 25rem); gap: 1.5rem; align-items: start; margin-top: 0.5rem; }
+.power-summary p { margin: 0 0 0.4rem; }
+.power-summary + #explore-context { margin-top: 1rem; }
+.power-chart figure { margin: 0; }
+.power-chart figcaption { font-size: 0.8rem; color: var(--muted); }
+.failure-chart { display: block; width: 100%; height: auto; }
+.failure-chart .pick { cursor: pointer; }
+.power-chart .legend svg { flex: none; }
+#explorer section.panel h2 { margin-top: 0; }
+@media (max-width: 760px) {
+  .power-body { grid-template-columns: minmax(0, 1fr); }
 }
 /* end Explore page */
