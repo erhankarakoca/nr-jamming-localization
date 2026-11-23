@@ -24,6 +24,7 @@
 
 import argparse
 import csv
+import dataclasses
 import itertools
 
 import numpy as np
@@ -79,6 +80,12 @@ def false_alarm_vs_snr(split: str) -> list[dict]:
 
 
 LEVELS = np.logspace(-3, 0, 25)
+# Channel variants of the decoded-data check: long delays (beyond tau_max) and high speed
+VARIANTS = {
+    "": {},
+    "_longdelay": {"delay_spread": {"A": 100e-9, "C": 1000e-9}},
+    "_fast": {"max_speed": 30.0},
+}
 
 
 def _calibration(kind: str, channel: str, log10_p: np.ndarray) -> list[dict]:
@@ -112,15 +119,17 @@ def dmrs_calibration(split: str) -> list[dict]:
     return rows
 
 
-def decoded_null(slots: int, batch_size: int) -> tuple[list[dict], list[dict]]:
+def decoded_null(
+    slots: int, batch_size: int, variant: str = "", channels=CHANNELS
+) -> tuple[list[dict], list[dict]]:
     """Calibration and false alarms against SNR of the decoded-data residual on benign slots
     (TDL-A and TDL-C, SNR uniform in 5-25 dB), decoded by the standard receiver; only slots that
     pass their CRC are kept, as a receiver would."""
-    cfg = SimConfig()
+    cfg = dataclasses.replace(SimConfig(), **VARIANTS[variant])
     link = JammedPUSCHLink(cfg)
     cal, fa = [], []
     data_syms = [s for s in range(cfg.num_symbols) if s not in cfg.dmrs_symbols]
-    for channel in CHANNELS:
+    for channel in channels:
         logp = {"decoded_data": [], "decoded_dmrs": []}
         flags, snrs = [], []
         for b in range(int(np.ceil(slots / batch_size))):
@@ -155,13 +164,13 @@ def decoded_null(slots: int, batch_size: int) -> tuple[list[dict], list[dict]]:
             flags.append(f.reshape(-1))
             snrs.append(np.repeat(sc.snr_db[ok.cpu()].numpy(), f.shape[1]))
         for kind, values in logp.items():
-            cal += _calibration(kind, channel, np.concatenate(values))
+            cal += _calibration(kind + variant, channel, np.concatenate(values))
         flags, snrs = np.concatenate(flags), np.concatenate(snrs)
         for lo, hi in itertools.pairwise(SNR_BINS):
             sel = (snrs >= lo) & (snrs < hi)
             fa.append(
                 {
-                    "split": "decoded",
+                    "split": "decoded" + variant,
                     "channel": channel,
                     "snr_db": (lo + hi) / 2,
                     "false_alarms": int(flags[sel].sum()),
@@ -247,6 +256,8 @@ CALIBRATION_STYLE = {
     ("decoded_data", "C"): ("#2CA02C", "^", ":", "Decoded, data"),
     ("decoded_dmrs", "C"): ("#9467BD", "v", ":", "Decoded, DMRS"),
     ("dmrs_longdelay", "C"): (BLACK, "D", "-.", "DMRS, 1000 ns"),
+    ("decoded_data_longdelay", "C"): ("#8C564B", "P", "--", "Decoded, 1000 ns"),
+    ("decoded_data_fast", "C"): ("#FF7F0E", "X", "-.", "Decoded, 30 m/s"),
 }
 GROUP_STYLE = {
     "next to the block": (BLACK, "s", "-.", "Next to the block"),
@@ -407,6 +418,9 @@ def main(argv=None):
             if (data_dir() / f"{split}.npz").is_file():
                 cal += dmrs_calibration(split)
         dcal, dfa = decoded_null(args.decoded_slots, args.batch_size)
+        for variant in ("_longdelay", "_fast"):
+            vcal, _ = decoded_null(args.decoded_slots // 2, args.batch_size, variant, ("C",))
+            dcal += vcal
         _write(cal + dcal, out / "residual_calibration.csv")
         _write(dfa, out / "decoded_false_alarm.csv")
     if not args.plot_only and not args.only_decoded:
