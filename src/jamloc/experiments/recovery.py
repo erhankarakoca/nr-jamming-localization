@@ -121,6 +121,9 @@ RECEIVERS = {
     "true_renoise": ("true", "soft"),
     "cell_da": (None, "cell"),
     "true_cell": ("true", "soft"),
+    "p_r_e_full": ("fused", "soft"),
+    "true_full": ("true", "soft"),
+    "cell_full": (None, "cell"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
 DATA_AIDED = {
@@ -131,11 +134,17 @@ DATA_AIDED = {
     "p_r_e_renoise": 3,
     "true_renoise": 3,
     "cell_da": 3,
+    "p_r_e_full": 3,
+    "true_full": 3,
+    "cell_full": 3,
 }
 # Options of the map-aware receiver (jamloc.recovery.MapAwareReceiver.call)
 OPTIONS = {
     "p_r_e_cell": {"cellwise": True},
     "true_cell": {"cellwise": True},
+    "p_r_e_full": {"cellwise": True, "refine": True, "renoise": True},
+    "true_full": {"cellwise": True, "refine": True, "renoise": True},
+    "cell_full": {"renoise": True},
     "p_r_e_refine": {"cellwise": True, "refine": True},
     "p_r_e_renoise": {"renoise": True},
     "true_renoise": {"renoise": True},
@@ -248,6 +257,24 @@ STYLE = {
         "color": "#00A087",
         "marker": "^",
         "linestyle": "--",
+    },
+    "p_r_e_full": {
+        "label": "P+R+E map, per cell, refining passes",
+        "color": "#B2182B",
+        "marker": "*",
+        "linestyle": "-",
+    },
+    "true_full": {
+        "label": "True map, per cell, refining passes",
+        "color": "#1A1A1A",
+        "marker": "P",
+        "linestyle": "-",
+    },
+    "cell_full": {
+        "label": "Per-cell estimate, no map, passes",
+        "color": "#35978F",
+        "marker": "h",
+        "linestyle": "-.",
     },
     "cell_da": {
         "label": "Per-cell estimate, no map, data-aided",
@@ -471,7 +498,7 @@ def simulate(
         cases += [(attack, False, tuple(RECEIVERS)) for attack in ("pilot", "data", "partial")]
         # limit case: no clean pilot left
         whole = ("standard", "lmmse", "p_r_e_soft", "true_hard", "true_soft", "cell_soft")
-        whole += ("p_r_e_cell", *DATA_AIDED)
+        whole += ("p_r_e_cell", "true_cell", *DATA_AIDED)
         cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]

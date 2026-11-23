@@ -122,6 +122,7 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
         "true_soft",
         "cell_soft",
         "p_r_e_cell",
+        "true_cell",
         *recovery.DATA_AIDED,
     }
     assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
