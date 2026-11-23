@@ -300,3 +300,56 @@ def test_decoded_cell_test_finds_the_jammed_cells_of_any_support():
     data[:, :, list(cfg.dmrs_symbols)] = False
     assert (flags & jammed & data).sum() > 0.95 * (jammed & data).sum()
     assert (flags & ~jammed & data).float().sum() < 0.03 * (~jammed & data).sum()
+
+
+def test_refine_adds_the_jammed_cells_a_map_missed():
+    out = link(_scenario(DATA, 9.0, 15.0, n=16), decode=False)
+    rx = MapAwareReceiver(out.tx)
+    x = rx.decoded_symbols(out.b)  # what a decoder that is sure of every symbol returns
+    first = rx(out.y_alloc, out.no, torch.zeros_like(_cells(out)), mode="soft", decode=False)
+    h_hat, err_var = first["h_hat"], first["err_var"]
+    cells = rx._refine(
+        out.y_alloc,
+        out.no,
+        h_hat,
+        err_var,
+        x,
+        torch.zeros_like(x.real),
+        torch.zeros_like(_cells(out)),
+        0.01,
+    )
+    jammed = _cells(out).bool()
+    data = torch.ones_like(jammed)
+    data[:, :, list(cfg.dmrs_symbols)] = False
+    assert (cells & jammed & data).sum() > 0.95 * (jammed & data).sum()
+    assert (cells & ~jammed).float().sum() < 0.05 * (~jammed & data).sum()
+
+
+def test_renoise_recovers_the_noise_power_from_decoded_data():
+    out = link(_scenario(NONE, 0.0, 15.0, n=16), decode=False)
+    rx = MapAwareReceiver(out.tx)
+    x = rx.decoded_symbols(out.b)  # a decoder that is sure of every symbol
+    sure = torch.zeros_like(x.real)
+    no = out.no * 10  # e.g. an estimate from a jammed empty comb
+    cells = torch.zeros_like(_cells(out))
+    for _ in range(2):  # what two passes do
+        first = rx(out.y_alloc, no, cells, mode="soft", decode=False)
+        h_ls, pilot_sc, power = dmrs_ls(out.y_alloc, out.tx)
+        clean, pilot_var, _, _ = rx._pilots(h_ls, pilot_sc, power, no, cells, "soft")
+        h_sc, err_sc = rx._data_aided(
+            out.y_alloc,
+            no,
+            h_ls,
+            pilot_sc,
+            clean,
+            pilot_var,
+            first["h_hat"],
+            x,
+            sure,
+            torch.zeros_like(sure),
+        )
+        no = rx._renoise(
+            out.y_alloc, no, *rx._on_grid(h_sc, err_sc, out.y_alloc), x, sure, cells, "soft"
+        )
+    error_db = (no / out.no).log10().abs() * 10
+    assert error_db.max() < 0.5

@@ -333,18 +333,28 @@ class MapAwareReceiver(Block):
             mean, var = soft_qpsk(post.reshape(y.shape[0], -1, self.tx._num_bits_per_symbol))
             if refine:
                 cells = self._refine(y, no, h_hat, err_var, mean, var, cells, alpha)
-            if renoise:
-                no = self._renoise(y, no, h_hat, err_var, mean, var, cells, mode)
-                clean, pilot_var, r, interfered = self._pilots(
-                    h_ls, pilot_sc, pilot_power, no, cells, mode
-                )
             if refine or renoise:  # the jamming the map now implies, with the old channel
                 extra = self._detect(
                     y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
                 )[3]
-            h_sc, err_sc = self._data_aided(
+            h_new, err_new = self._data_aided(
                 y, no, h_ls, pilot_sc, clean, pilot_var, h_hat, mean, var, extra
             )
+            if renoise:
+                # The data-aided estimate rests on many symbols per subcarrier, so its error is
+                # small; the noise power is estimated around it, and everything that depends on
+                # the noise power is computed again
+                no = self._renoise(y, no, *self._on_grid(h_new, err_new, y), mean, var, cells, mode)
+                clean, pilot_var, r, interfered = self._pilots(
+                    h_ls, pilot_sc, pilot_power, no, cells, mode
+                )
+                extra = self._detect(
+                    y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
+                )[3]
+                h_new, err_new = self._data_aided(
+                    y, no, h_ls, pilot_sc, clean, pilot_var, h_hat, mean, var, extra
+                )
+            h_sc, err_sc = h_new, err_new
             h_hat, err_var = self._on_grid(h_sc, err_sc, y)
             x_hat, no_eff, llr, extra = self._detect(
                 y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
@@ -584,10 +594,15 @@ class MapAwareReceiver(Block):
 
     def _renoise(self, y, no, h_hat, err_var, mean, var, cells, mode):
         """Noise power ``[B]`` from the remodulated residual of the data symbols that the decoder
-        is sure of (``|x_bar|^2 > 0.5``) in cells the map calls clean: the value of ``N0`` for
-        which the median of ``energy / (model + N0)`` equals ln 2, the median of a unit
+        is sure of (``|x_bar|^2 > 0.5``) in cells the map calls clean, around a data-aided channel
+        estimate ``h_hat``: the value of ``N0`` for which the median of
+        ``|y - h_hat x_bar|^2 / (|h_hat|^2 var + N0)`` equals ln 2, the median of a unit
         exponential. Bisection on a log scale; slots without such symbols keep ``no``."""
-        energy, model, _ = self._remodulated(y, no, h_hat, err_var, mean, var)
+        energy, _, _ = self._remodulated(y, no, h_hat, err_var, mean, var)
+        # The filter's error variance assumed the old noise power, so it is left out: the
+        # data-aided estimate passed in is accurate enough for its error to be small
+        h_d = h_hat[:, 0, 0, 0, 0, self.data_sym, self.data_sc]
+        model = h_d.abs() ** 2 * var
         use = mean.abs() ** 2 > 0.5
         if mode == "soft":
             prb = (self.data_sc // 12).to(cells.device)
