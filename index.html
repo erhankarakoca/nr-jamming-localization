@@ -141,10 +141,11 @@
   <h2 id="aided-heading">When every pilot is jammed</h2>
   <p>If the jammer covers every pilot, no clean pilot is left for the map to point to. The receiver
     then decodes, uses the data cells it decoded as extra pilots, and decodes again.</p>
-  <div id="aided-anim" class="anim" aria-busy="true" aria-label="Animated data-aided passes">
-    <div class="anim-stage">
-      <div class="viz-box anim-left">Loading the slot…</div>
-      <div class="viz-box anim-right"></div>
+  <div id="aided-anim" class="anim bleed" aria-busy="true" aria-label="Animated data-aided passes">
+    <div class="anim-stage three">
+      <div class="panel-col"><p class="panel-title">Cells used as pilots</p><div class="viz-box anim-grid"></div></div>
+      <div class="panel-col"><p class="panel-title">Channel estimate</p><div class="viz-box anim-left">Loading the slot…</div></div>
+      <div class="panel-col"><p class="panel-title">Equalized data symbols</p><div class="viz-box anim-right"></div></div>
     </div>
     <div class="anim-legend"></div>
     <div class="anim-caption" aria-live="polite"></div>

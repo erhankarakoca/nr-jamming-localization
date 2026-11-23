@@ -133,7 +133,7 @@ export function decodingPanel(slot, names, labels, { width = BOX.width, height =
     const before = svgNode("text", { x: x0 + gridW / 2, y: y1, "text-anchor": "middle", "font-size": 11 },
       wrong ? `${wrong.toLocaleString()} wrong bits` : "no wrong bits");
     const after = svgNode("text", { x: x0 + gridW / 2, y: y1, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: passed ? "#006600" : RED, opacity: 0 },
-      passed ? "CRC pass" : "CRC fail: sent again");
+      passed ? "CRC pass" : "CRC fail, sent again");
     const trust = decisions ? "flagged cells' bits doubted" : "every bit trusted";
     const where = svgNode("text", { x: x0 + gridW / 2, y: y1 + 14, "text-anchor": "middle", "font-size": 10, fill: "#555" }, trust);
     svg.append(before, after, where);
@@ -159,8 +159,8 @@ export function decodingPanel(slot, names, labels, { width = BOX.width, height =
       p.where.textContent = done ? "after decoding" : p.trust;
     }
     svg.setAttribute("aria-label", panels.map((p, i) => (done
-      ? `${labels[i]} after decoding: ${p.passed ? "CRC pass, every bit right" : "CRC fail, the block is lost and sent again"}`
-      : `${labels[i]} before decoding: ${p.wrong} wrong bits`)).join(". "));
+      ? `${labels[i]} after decoding, ${p.passed ? "CRC pass, every bit right" : "CRC fail, the block is lost and sent again"}`
+      : `${labels[i]} before decoding, ${p.wrong} wrong bits`)).join(". "));
     return Promise.all(jobs.filter(Boolean));
   }
   set("before");

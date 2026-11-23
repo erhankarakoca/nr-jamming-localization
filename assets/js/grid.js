@@ -234,10 +234,10 @@ function definitionList(entries) {
 // One line on what each attack does to the slot.
 const lessons = {
   pilot: "The jammer hits only the pilots (symbol 2). As its power rises, the data points of the jammed PRBs spread as well, because their channel estimate is wrong.",
-  data: "The jammer hits the data symbols directly; the map tells the decoder to give their bits little weight.",
+  data: "The jammer hits the data symbols directly. The map tells the decoder to give their bits little weight.",
   partial: "The jammer hits pilots and data, so both the channel estimate and the symbols suffer.",
-  hopping: "The jammer changes PRBs during the slot. The U-Net trained on mixed attacks follows it; the one trained on fixed blocks flags PRBs outside the hop.",
-  pulsed: "The jammer is on for a few symbols only; the decoder relies on the rest.",
+  hopping: "The jammer changes PRBs during the slot. The U-Net trained on mixed attacks follows it. The one trained on fixed blocks flags PRBs outside the hop.",
+  pulsed: "The jammer is on for a few symbols only, and the decoder relies on the rest.",
   spoof: "The jammer imitates the pilots. The U-Net trained with spoofing flags pilot cells the nominal one misses.",
   pilot_whole_comb: "The pilots of the whole allocation are jammed and the receiver estimates the noise power from the empty pilot comb, which the jammer inflates. At +3 dB even the true map does not save this slot.",
 };
@@ -381,7 +381,7 @@ function failureChart(doc, names, current, onPick) {
     legend.append(item);
   }
   const figure = element("figure");
-  const caption = element("figcaption", `CRC failures among the ${slots} slots simulated at each power (shaded: the slider's power)`);
+  const caption = element("figcaption", `CRC failures among the ${slots} slots simulated at each power (the shaded column is the slider's power)`);
   figure.append(caption, svg, legend);
   return figure;
 }
@@ -409,7 +409,7 @@ function levelSummary(slot, detectorKey, names) {
   const lines = [];
   const power = powerText(slot.metadata.jsr_db);
   if (slot.metadata.jsr_db == null) {
-    lines.push(`${power}: the same slot without the jammer.`);
+    lines.push("With the jammer off, this is the same slot without the jammer.");
   } else {
     const parts = [
       pilotPRBs && `the pilots of ${pilotPRBs} of the user's ${width} PRBs`,
@@ -417,7 +417,7 @@ function levelSummary(slot, detectorKey, names) {
       outside && `${outside} cells outside its allocation`,
     ].filter(Boolean);
     const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
-    lines.push(`${power}: the jammer hits ${jammed} cells (PRB × symbol): ${list}.`);
+    lines.push(`At ${power} the jammer hits ${jammed} cells (PRB × symbol), ${list}.`);
   }
   const detector = detectors[detectorKey] ?? detectorKey;
   lines.push(jammed
@@ -532,7 +532,7 @@ async function explorer(root) {
       pointHost.replaceChildren(element("p", `PRB ${prb} is outside the allocation. Pick a scheduled PRB to see its data symbols.`));
     }
     const where = pointSource.value === "all" ? `the user's ${count} PRBs` : `PRB ${prb}`;
-    pointsNote.textContent = `Each point is one received data symbol of ${where}, where the receiver placed it: red from a jammed cell, blue from a clean one. The paler a point, the less the decoder will trust its bits. No receiver can move the jammed points back; what the map changes is how much the decoder believes them (below).`;
+    pointsNote.textContent = `Each point is one received data symbol of ${where}, where the receiver placed it. Red points come from jammed cells and blue points from clean ones. The paler a point, the less the decoder will trust its bits. No receiver can move the jammed points back; what the map changes is how much the decoder believes them (below).`;
   }
 
   // Before / after decoding, one small grid per receiver
@@ -551,14 +551,14 @@ async function explorer(root) {
     decoding?.set(stage, animate && !reduceMotion);
     const outcomes = decoding?.panels ?? [];
     if (stage === "before") {
-      decodingNote.textContent = "Each cell carries 24 coded bits (12 subcarriers, 2 bits each). Darker: more of them are wrong in what the receiver hands to the decoder. Both receivers start with wrong bits where the jammer hit; the difference is that the map-aware one tells the decoder to doubt the flagged cells (blue dots). Press After decoding to see what the decoder makes of them.";
+      decodingNote.textContent = "Each cell carries 24 coded bits (12 subcarriers, 2 bits each). A darker cell has more of them wrong in what the receiver hands to the decoder. Both receivers start with wrong bits where the jammer hit. The difference is that the map-aware one tells the decoder to doubt the flagged cells (blue dots). Press After decoding to see what the decoder makes of them.";
     } else {
       const lost = outcomes.filter(p => !p.passed).map(p => plotReceiverName(p.name));
       const right = outcomes.filter(p => p.passed).map(p => plotReceiverName(p.name));
       decodingNote.textContent = [
         "The code adds redundancy, so the decoder can rebuild bits it is told to doubt from the bits it can trust.",
-        right.length ? `${right.join(" and ")}: every bit recovered, the CRC check passes.` : "",
-        lost.length ? `${lost.join(" and ")}: the decoder was misled by confident wrong bits, the CRC check fails and the whole block is lost; the user has to send it again.` : "",
+        right.length ? `${right.join(" and ")} ${right.length > 1 ? "recover" : "recovers"} every bit, and the CRC check passes.` : "",
+        lost.length ? `${lost.join(" and ")} fed the decoder confident wrong bits. The CRC check fails, the whole block is lost, and the user has to send it again.` : "",
       ].filter(Boolean).join(" ");
     }
     if (slot) remember();

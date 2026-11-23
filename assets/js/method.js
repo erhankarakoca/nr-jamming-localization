@@ -7,11 +7,12 @@ import { crcBadge } from "./constellation.js";
 import { featureScale, heatColor, svgNode } from "./grid.js";
 import { element, reportError } from "./nav.js";
 import {
-  BLUE, BOX, RED, allocationGrid, cellErrors, cellTrust, constellationView, decodingPanel, drawFrame,
+  BLUE, BOX, PILOT, RED, allocationGrid, cellErrors, cellTrust, constellationView, decodingPanel, drawFrame,
   fadeTo, mean, median, shareText, symbols, tween,
 } from "./points.js";
 
 const GREY = "#9a9a9a";
+const PASS_GREEN = "#1b7f3b";
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const abs = ([re, im]) => Math.hypot(re, im);
 const sqErr = (est, ref, ks) => mean(ks.map(k => (est[k][0] - ref[k][0]) ** 2 + (est[k][1] - ref[k][1]) ** 2));
@@ -89,7 +90,7 @@ function cluesPanel(slot, numbers) {
     ["power_db", "Power P", numbers.power_db],
     ["residual_db", "Pilot residual R", numbers.residual_db],
     ["evm_db", "EVM E", numbers.evm_db],
-    ["map", "→ U-Net map", "blue: flagged, red outline: jammed"],
+    ["map", "→ U-Net map", "blue is flagged, red outline is jammed"],
   ];
   const pw = width / 2;
   const ph = height / 2;
@@ -357,7 +358,7 @@ async function methodAnimation(host) {
     // Legend and CRC line under the panels
     const items = [["alloc", "data cell"], ["pilot", "pilot cell (symbol 2)"], ["truth", "jammed"]];
     if (s.flags) items.push(["flag-dot", "flagged by the U-Net"]);
-    if (s.trust) items.push(["trust", "darker: decoder trusts the cell's bits more"]);
+    if (s.trust) items.push(["trust", "darker means the decoder trusts the cell's bits more"]);
     if (s.view === "channel") {
       items.push(["line grey-line", "true channel"]);
       if (s.pilots) items.push(["circle", "clean pilot"], ["dot", "jammed pilot"]);
@@ -365,13 +366,13 @@ async function methodAnimation(host) {
       if (s.estimate === "map") items.push(["dash faint", "standard estimate"], ["line red-line", "estimate with the map"]);
     }
     if (s.view === "decoding") {
-      items.push(["errors", "darker: more of the cell's bits wrong"], ["lost", "block lost"]);
-    } else if (s.view === "points") items.push(["dot blue-dot", "clean cell"], ["dot", "jammed cell (fainter: less trusted)"]);
+      items.push(["errors", "darker means more of the cell's bits are wrong"], ["lost", "block lost"]);
+    } else if (s.view === "points") items.push(["dot blue-dot", "clean cell"], ["dot", "jammed cell (fainter means less trusted)"]);
     const crcLine = element("p", null, "crc-line");
     if (s.crc) {
       s.crc.forEach((name, k) => {
         if (k) crcLine.append("  →  ");
-        crcLine.append(name === "standard" ? "Standard receiver: " : "With the jamming map: ", crcBadge(slot.receivers[name].crc));
+        crcLine.append(name === "standard" ? "Standard receiver " : "With the jamming map ", crcBadge(slot.receivers[name].crc));
       });
     }
     legend.replaceChildren(legendItems(items), crcLine);
@@ -381,37 +382,37 @@ async function methodAnimation(host) {
   const steps = [
     {
       title: "One uplink slot, and a jammer on part of it",
-      text: `The user sends one slot on PRBs ${start}–${start + count - 1}: ${count} PRBs (frequency) by 14 OFDM symbols (time). Symbol ${dmrs} carries pilots, symbols the receiver knows and uses to learn the channel (grey line, right); the other 13 symbols carry data. The jammer sends noise on every symbol of PRBs ${range} (red): ${share}, so ${jammedShare} of the pilots and ${jammedShare} of the data cells.`,
+      text: `The user sends one slot on PRBs ${start}–${start + count - 1}, which is ${count} PRBs (frequency) by 14 OFDM symbols (time). Symbol ${dmrs} carries pilots, symbols the receiver knows and uses to learn the channel (grey line, right). The other 13 symbols carry data. The jammer sends noise on every symbol of PRBs ${range} (red). That is ${share}, so ${jammedShare} of the pilots and ${jammedShare} of the data cells.`,
     },
     {
-      title: "Standard receiver: the jammed pilots pull the channel estimate",
-      text: `Dividing each received pilot by the known pilot symbol gives one look at the channel. Clean pilots (open circles) sit on it; jammed pilots (red) scatter. The standard receiver interpolates between all of them (dashed), so on PRBs ${range} its squared error is ${ratio} times its error on the clean PRBs.`,
+      title: "Standard receiver. The jammed pilots pull the channel estimate",
+      text: `Dividing each received pilot by the known pilot symbol gives one look at the channel. Clean pilots (open circles) sit on it, and jammed pilots (red) scatter. The standard receiver interpolates between all of them (dashed), so on PRBs ${range} its squared error is ${ratio} times its error on the clean PRBs.`,
     },
     {
-      title: "Standard receiver: every bit is trusted, and the block fails",
-      text: `It equalizes the data and passes each bit to the decoder with a confidence (darker cells, left). The jammed cells' symbols are scattered (red points), yet their bits get almost the confidence of clean ones: mean |LLR| ${llr(before, true).toFixed(0)} against ${llr(before, false).toFixed(0)}. The decoder is misled and the CRC check fails.`,
+      title: "Standard receiver. Every bit is trusted, and the block fails",
+      text: `It equalizes the data and passes each bit to the decoder with a confidence (darker cells, left). The jammed cells' symbols are scattered (red points), yet their bits get almost the confidence of clean ones (mean |LLR| ${llr(before, true).toFixed(0)} against ${llr(before, false).toFixed(0)}). The decoder is misled and the CRC check fails.`,
     },
     {
       title: "Three clues per cell",
-      text: `From the received slot, its pilots and the standard receiver's equalized symbols, the receiver measures for every cell: the received power P (signal plus anything else, relative to the noise), on the pilot symbol the residual R (how far the pilots of a PRB are from a smooth channel), and on the data symbols the EVM E (how far the equalized symbols are from the four QPSK points). On the jammed cells the power rises by only ${(featureNumbers.power_db.jammed - featureNumbers.power_db.clean).toFixed(1)} dB, the residual by ${(featureNumbers.residual_db.jammed - featureNumbers.residual_db.clean).toFixed(0)} dB and the EVM by ${(featureNumbers.evm_db.jammed - featureNumbers.evm_db.clean).toFixed(0)} dB (medians).`,
+      text: `From the received slot, its pilots and the standard receiver's equalized symbols, the receiver measures three things for every cell. The received power P is the signal plus anything else, relative to the noise. On the pilot symbol, the residual R says how far the pilots of a PRB are from a smooth channel. On the data symbols, the EVM E says how far the equalized symbols are from the four QPSK points. On the jammed cells the power rises by only ${(featureNumbers.power_db.jammed - featureNumbers.power_db.clean).toFixed(1)} dB, the residual by ${(featureNumbers.residual_db.jammed - featureNumbers.residual_db.clean).toFixed(0)} dB and the EVM by ${(featureNumbers.evm_db.jammed - featureNumbers.evm_db.clean).toFixed(0)} dB (medians).`,
     },
     {
       title: "A small U-Net turns the clues into a map",
       text: `A U-Net with 66,553 parameters reads the three maps of the whole slot and scores each cell. Cells scoring above a cutoff, set so that 1% of clean cells are flagged, are marked (blue). ${hits === jammedCells && flagged === jammedCells ? `Here it flags all ${jammedCells} jammed cells and no other cell.` : `Here it flags ${hits} of the ${jammedCells} jammed cells and ${flagged - hits} other cells.`}`,
     },
     {
-      title: "Decoding again: the channel from the clean pilots",
+      title: "Decoding again with the channel from the clean pilots",
       text: `The receiver decodes the same buffered samples again, now with the map. Pilots in flagged cells get a noise variance scaled up by their residual, so they barely count (faded), and the estimate across PRBs ${range} is interpolated from the clean pilots around them (red line). Its squared error there falls by ${cut}%.`,
     },
     {
-      title: "Decoding again: jammed data bits count less",
-      text: `For each flagged data cell the receiver adds the jammer power it measured there to the noise variance. Those bits reach the decoder with almost no confidence (mean |LLR| ${llr(after, true).toFixed(1)}, against ${llr(after, false).toFixed(0)} for clean bits; the jammed cells turn light on the left), so the decoder fills them in from the clean ${cleanShare} of the block.`,
+      title: "Decoding again, with jammed data bits counting less",
+      text: `For each flagged data cell the receiver adds the jammer power it measured there to the noise variance. Those bits reach the decoder with almost no confidence (mean |LLR| ${llr(after, true).toFixed(1)}, against ${llr(after, false).toFixed(0)} for clean bits), and the jammed cells turn light on the left. The decoder fills them in from the clean ${cleanShare} of the block.`,
     },
     {
       title: decodedView ? "The decoder rebuilds the jammed bits" : "The block decodes",
       text: decodedView
-        ? `Both receivers hand the decoder wrong bits in the jammed cells (dark, right): ${errors.standard} for the standard receiver, ${errors.map} with the map. The map does not fix them; it only tells the decoder to doubt them. The code's redundancy then lets the decoder rebuild them from the clean ${cleanShare} of the block: every bit comes out right and the CRC passes. The standard receiver gave the same kind of wrong bits full confidence, so decoding fails and the whole block is lost. Over all ${batch.standard.slots} slots simulated under these conditions, the standard receiver lost ${batch.standard.failures} blocks and the receiver with the map ${batch.fused_soft.failures}.`
-        : `Same received samples, one small network and one more decoding: the CRC passes. Over all ${batch.standard.slots} slots simulated under these conditions, the standard receiver failed ${batch.standard.failures} and the receiver with the map ${batch.fused_soft.failures}.`,
+        ? `Both receivers hand the decoder wrong bits in the jammed cells (dark, right), ${errors.standard} for the standard receiver and ${errors.map} with the map. The map does not fix them. It only tells the decoder to doubt them. The code's redundancy then lets the decoder rebuild them from the clean ${cleanShare} of the block, so every bit comes out right and the CRC passes. The standard receiver gave the same kind of wrong bits full confidence, so decoding fails and the whole block is lost. Over all ${batch.standard.slots} slots simulated under these conditions, the standard receiver lost ${batch.standard.failures} blocks and the receiver with the map ${batch.fused_soft.failures}.`
+        : `Same received samples, one small network and one more decoding, and the CRC passes. Over all ${batch.standard.slots} slots simulated under these conditions, the standard receiver failed ${batch.standard.failures} and the receiver with the map ${batch.fused_soft.failures}.`,
     },
   ].map((step, i) => ({ ...step, stage: states[i].stage, render: (animate, from) => apply(i, animate, from) }));
 
@@ -424,13 +425,69 @@ async function methodAnimation(host) {
   host.setAttribute("aria-busy", "false");
 }
 
-// The data-aided passes on a slot whose every pilot is jammed: the estimate and the symbols after
-// each pass, with that pass's CRC.
+// The user's grid during the data-aided passes: the jammed pilot column, and each data cell shaded
+// green by how sure the decoder was of its symbols, which is how much it counts as a pilot.
+function passGrid(slot) {
+  const { width, height } = BOX;
+  const [start, count] = slot.metadata.alloc;
+  const cols = slot.metadata.config.num_symbols;
+  const dmrs = slot.metadata.config.dmrs_symbol;
+  const x0 = 50;
+  const y0 = 24;
+  const cw = (width - x0 - 8) / cols;
+  const ch = (height - y0 - 34) / count;
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, class: "viz", role: "img",
+    "aria-label": "The user's resource grid with the cells used as pilots" });
+  const green = [];
+  for (let b = 0; b < count; b++) {
+    const prb = start + b;
+    green[b] = [];
+    for (let s = 0; s < cols; s++) {
+      const x = x0 + s * cw;
+      const y = y0 + (count - 1 - b) * ch;
+      svg.append(svgNode("rect", { x, y, width: cw, height: ch, fill: s === dmrs ? PILOT : "#e6e6e6", stroke: "#fff", "stroke-width": 1 }));
+      if (s === dmrs) {
+        svg.append(svgNode("rect", { x: x + 1, y: y + 1, width: cw - 2, height: ch - 2, fill: "none", stroke: RED, "stroke-width": 2 }));
+      } else {
+        const cell = svgNode("rect", { x: x + 1, y: y + 1, width: cw - 2, height: ch - 2, fill: PASS_GREEN, opacity: 0 });
+        green[b][s] = cell;
+        svg.append(cell);
+      }
+    }
+    if (count <= 16 || b % 2 === 0) {
+      svg.append(svgNode("text", { x: x0 - 5, y: y0 + (count - 1 - b) * ch + ch / 2 + 3.5, "text-anchor": "end", "font-size": 10 }, prb));
+    }
+  }
+  for (let s = 0; s < cols; s++) {
+    svg.append(svgNode("text", { x: x0 + s * cw + cw / 2, y: y0 - 6, "text-anchor": "middle", "font-size": 10, "font-weight": s === dmrs ? 700 : 400 }, s));
+  }
+  svg.append(svgNode("text", { x: x0 + (cols * cw) / 2, y: height - 8, "text-anchor": "middle", "font-size": 11 }, `OFDM symbol (time); pilots on symbol ${dmrs}`));
+  const mid = y0 + (count * ch) / 2;
+  svg.append(svgNode("text", { x: 12, y: mid, "text-anchor": "middle", "font-size": 11, transform: `rotate(-90 12 ${mid})` }, "PRB (frequency)"));
+  svg.append(svgNode("rect", { x: x0, y: y0, width: cols * cw, height: count * ch, fill: "none", stroke: "#000", "stroke-width": 0.8 }));
+  // One frame between two certainty grids (null: no data cell used yet)
+  const paint = (from, to, t) => {
+    for (let b = 0; b < count; b++) {
+      for (let s = 0; s < cols; s++) {
+        if (!green[b][s]) continue;
+        const a = from?.[b][s] ?? 0;
+        const z = to?.[b][s] ?? 0;
+        green[b][s].setAttribute("opacity", String(a + (z - a) * t));
+      }
+    }
+  };
+  return { svg, paint };
+}
+
+// The data-aided passes on a slot whose every pilot is jammed, in three aligned panels: which cells
+// act as pilots, the channel estimate, and the equalized symbols, after the first attempt and
+// after each pass, with that pass's CRC.
 async function aidedAnimation(host) {
   const slot = await loadCase("aided_flip");
   const { channel, passes } = slot;
   if (!channel || !passes) throw new Error("The recorded slot has no data-aided passes.");
   const [start, width] = slot.metadata.alloc;
+  const grid = passGrid(slot);
   const plot = channelPanel(slot, channel, { jammedPRBs: Array.from({ length: width }, (_, i) => start + i) });
   plot.trueLine.setAttribute("opacity", 1);
   plot.pilots.setAttribute("opacity", 1);
@@ -441,6 +498,7 @@ async function aidedAnimation(host) {
   plot.estimate.setAttribute("stroke-dasharray", "");
   const canvas = element("canvas", null, "viz");
   canvas.setAttribute("role", "img");
+  host.querySelector(".anim-grid").replaceChildren(grid.svg);
   host.querySelector(".anim-left").replaceChildren(plot.svg);
   host.querySelector(".anim-right").replaceChildren(canvas);
   const view = constellationView(canvas, 2.5);
@@ -454,6 +512,7 @@ async function aidedAnimation(host) {
   const firstPass = passes.findIndex(p => p.crc);
   const estimate = i => passes[i].h.map(abs);
   const errors = passes.map(p => sqErr(p.h, channel.true, Array.from({ length: channel.num_sc }, (_, k) => k)));
+  const error = v => (v < 0.001 ? "below 0.001" : v.toFixed(3));
   let token = 0;
   const render = async (i, animate, from) => {
     const mine = ++token;
@@ -461,14 +520,15 @@ async function aidedAnimation(host) {
     const crcLine = element("p", null, "crc-line");
     passes.slice(0, i + 1).forEach((p, k) => {
       const span = element("span", null, "pass-crc");
-      span.append(k === 0 ? "first decoding " : `pass ${k} `, crcBadge(p.crc));
+      span.append(k === 0 ? "first attempt " : `pass ${k} `, crcBadge(p.crc));
       crcLine.append(span);
     });
     legend.replaceChildren(legendItems([
-      ["line grey-line", "true channel"], ["dot", "jammed pilot (all of them)"], ["line red-line", "estimate"],
-      ["dot blue-dot", "data symbol"],
+      ["pilot", "pilot cell (all jammed)"], ["pass-green", "data cell used as a pilot (darker means the decoder is surer)"],
+      ["line grey-line", "true channel"], ["line red-line", "estimate"], ["dot", "jammed pilot"], ["dot blue-dot", "data symbol"],
     ]), crcLine);
     if (!animate || from < 0) {
+      grid.paint(null, passes[i].certainty, 1);
       plot.estimate.setAttribute("d", plot.path(estimate(i)));
       drawFrame(view, passSymbols[i], passSymbols[i], 0);
       return;
@@ -476,20 +536,21 @@ async function aidedAnimation(host) {
     const a = estimate(from);
     const b = estimate(i);
     await Promise.all([
+      tween(1400, t => grid.paint(passes[from].certainty, passes[i].certainty, t), alive),
       tween(1400, t => plot.estimate.setAttribute("d", plot.path(a.map((v, k) => v + (b[k] - v) * t))), alive),
       tween(1400, t => drawFrame(view, passSymbols[from], passSymbols[i], t), alive),
     ]);
   };
   const steps = passes.map((p, i) => ({
-    title: i === 0 ? "Every pilot is jammed: the first estimate is poor" : `Pass ${i}: decoded data cells act as pilots`,
+    title: i === 0 ? "Every pilot is jammed, so the first estimate is poor" : `Pass ${i}`,
     text: i === 0
-      ? `All pilots are red: even down-weighted, they leave the estimate (red line) far from the channel (grey; mean squared error ${errors[0].toFixed(2)}), and the block fails.`
+      ? `All the pilots (yellow column, outlined red) are jammed. Even down-weighted, they leave the estimate (red line) far from the true channel (grey), with a mean squared error of ${error(errors[0])}. The data points spread and the CRC fails.`
       : i <= firstPass || firstPass < 0
-        ? `The decoder's soft output says which symbol each data cell probably carried and how sure it is. The cells it is sure of join the pilots, the estimate moves towards the channel (mean squared error ${errors[i].toFixed(2)}), and the slot is decoded again${p.crc ? ": the CRC passes, and the receiver stops here." : "."}`
-        : `The block already decoded at pass ${firstPass}, where the receiver stops. This pass is shown only to watch the estimate settle (mean squared error ${errors[i].toFixed(2)}).`,
+        ? `The decoder's output says which symbol each data cell most likely carried, and how sure it is. Dividing a cell's received samples by those symbols gives one more look at the channel, so the data cells now count as extra pilots (green, darker when the decoder is surer, left out when it is nearly unsure). With them the estimate moves towards the channel (error ${error(errors[i])}) and the slot is decoded again.${p.crc ? " The CRC passes, so the receiver stops here." : ""}`
+        : `The block already decoded at pass ${firstPass}, so the receiver stops there. This pass is shown only to watch the estimate settle (error ${error(errors[i])}).`,
     render: (animate, from) => render(i, animate, from),
   }));
-  stepper(host, steps, { param: "pass", dwell: 4200 });
+  stepper(host, steps, { param: "pass", dwell: 4600 });
   host.querySelector(".anim-note").replaceChildren(`${conditions(slot)}, every pilot of the allocation jammed. ${selectionText(slot)}`);
   host.setAttribute("aria-busy", "false");
 }
@@ -591,12 +652,12 @@ function checksAnimation(host) {
 
   host.querySelector(".checks-box").replaceChildren(svg);
   const steps = [
-    { title: "Six bits", text: "A toy code: the phone sends 3 data bits (d) and 3 check bits (c). Each check bit is the XOR of two data bits, as written under the boxes." },
+    { title: "Six bits", text: "A toy code. The phone sends 3 data bits (d) and 3 check bits (c). Each check bit is the XOR of two data bits, as written under the boxes." },
     { title: "The jammer hits two bits", text: "d2 and c3 arrive buried in noise (red outline)." },
-    { title: "Unknown, or wrongly trusted", text: "With the map the receiver marks them unknown (?). The standard receiver reads them anyway: both come out wrong (red), and it trusts them." },
-    { title: "Reading check c1 = d1 ⊕ d2", text: "With the map: 1 = 1 ⊕ ?, so d2 must be 0. Standard receiver: 1 ⊕ 1 = 0, but c1 is 1, a conflict." },
-    { title: "Reading check c3 = d1 ⊕ d3", text: "With the map: 1 ⊕ 1 = 0, so the missing c3 is 0. Standard receiver: 0, but it read 1, another conflict." },
-    { title: "The result", text: "With the map, check c2 agrees too: every bit is back and the CRC passes. For the standard receiver every check conflicts; it cannot tell which bits to blame, settles on wrong data, and the CRC fails. The real code works the same way with thousands of bits and checks." },
+    { title: "Unknown, or wrongly trusted", text: "With the map the receiver marks them unknown (?). The standard receiver reads them anyway. Both come out wrong (red), and it trusts them." },
+    { title: "Reading check c1 = d1 ⊕ d2", text: "With the map, 1 = 1 ⊕ ? means d2 must be 0. For the standard receiver 1 ⊕ 1 = 0, but c1 is 1, which is a conflict." },
+    { title: "Reading check c3 = d1 ⊕ d3", text: "With the map, 1 ⊕ 1 = 0, so the missing c3 is 0. The standard receiver gets 0 too, but it read 1, which is another conflict." },
+    { title: "The result", text: "With the map, check c2 agrees too: every bit is back and the CRC passes. For the standard receiver every check conflicts. It cannot tell which bits to blame, settles on wrong data, and the CRC fails. The real code works the same way with thousands of bits and checks." },
   ].map((step, i) => ({ ...step, render: () => render(i) }));
   stepper(host, steps, { param: "bits", dwell: 3600 });
   host.setAttribute("aria-busy", "false");
