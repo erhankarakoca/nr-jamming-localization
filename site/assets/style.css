@@ -245,6 +245,12 @@ main > figure + section { margin-top: 2rem; }
 .anim-dots button { min-width: 2rem; padding-inline: 0.35rem; }
 .anim-note { margin-top: 0.5rem; }
 .anim-stage.single { grid-template-columns: minmax(0, 1fr); }
+.anim-stage.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.panel-title { margin: 0 0 0.3rem; font-size: 0.88rem; font-weight: 600; color: var(--ink); }
+/* Wider than the text column, so three panels side by side stay legible */
+.anim.bleed { width: min(78rem, calc(100vw - 32px)); position: relative; left: 50%; transform: translateX(-50%); box-sizing: border-box; }
+.swatch.pass-green { background: #1b7f3b; border-color: #1b7f3b; opacity: 0.75; }
+@media (max-width: 760px) { .anim-stage.three { grid-template-columns: minmax(0, 1fr); } }
 .checks-box { background: #fff; border: 1px solid var(--line); }
 .checks-viz { display: block; width: 100%; height: auto; }
 .checks-viz text { font-family: var(--serif); }

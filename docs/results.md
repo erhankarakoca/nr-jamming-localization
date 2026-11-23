@@ -1300,6 +1300,16 @@ Paired differences on the slots both receivers decoded (percentage points, 95% i
   start in a 256-slot trial (all pilots jammed, 15 dB SNR: 56% against 47% at +9 dB before any
   pass) and was dropped.
 
+**The passes on one slot (23 Nov).** The site's passes animation and the paper's figure
+`data_aided_passes` (`experiments.figures`) follow the `aided_flip` slot (+9 dB JSR, every pilot of
+the 12-PRB allocation jammed, TDL-C, 15 dB SNR, seed 7, slot 6). The mean squared error of the soft
+U-Net receiver's channel estimate over the allocation's subcarriers is 0.565 after the first attempt
+(CRC fail), 0.259 after pass 1 (CRC pass), 0.009 after pass 2 and below 0.001 after pass 3. The
+receiver stops at pass 1 for this slot. Passes 2 and 3 ran because other slots of the batch had not
+yet decoded. The mean certainty of the data symbols that pass 1 used as pilots (|mean|^2 of the
+decoder's soft symbol) is 0.76, then 0.99 and 1.00. Each pass after the first attempt records this
+per cell in the export (`passes[i].certainty`).
+
 ## 22. Partial-band walkthrough and the jammer's width
 
 Partial-band jamming hits the pilots and the data cells of its PRBs, so one slot shows both uses of

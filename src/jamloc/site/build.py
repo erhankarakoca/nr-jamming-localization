@@ -193,7 +193,7 @@ def _check_symbol_refs(document, location, receiver, label, num_points):
         )
 
 
-def _check_passes(document, location, width, num_points, iterations):
+def _check_passes(document, location, width, num_points, iterations, symbols):
     _require_fields(document, location, passes=list)
     passes = document["passes"]
     if not passes or (iterations and not 2 <= len(passes) <= iterations + 1):
@@ -203,6 +203,9 @@ def _check_passes(document, location, width, num_points, iterations):
         _require_fields(step, label, h=list)
         _require_numeric_shape(step["h"], f"{label}.h", width * 12, 2)
         _check_symbol_refs(document, location, step, label, num_points)
+        if index:
+            _require_fields(step, label, certainty=list)
+            _require_numeric_shape(step["certainty"], f"{label}.certainty", width, symbols)
 
 
 def _check_case(document, location, name):
@@ -327,7 +330,7 @@ def _check_case(document, location, name):
         _require_fields(document, location, channel=dict)
         _check_channel(document["channel"], f"{location}.channel", width, cfg["dmrs_symbol"])
     if "passes" in document or iterations:
-        _check_passes(document, location, width, num_points, iterations)
+        _check_passes(document, location, width, num_points, iterations, symbols)
 
     if name == "jsr_sweep":
         _require_fields(meta, f"{location}.metadata", jam=list)

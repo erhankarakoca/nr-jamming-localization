@@ -19,8 +19,8 @@ commit that adds this file.
 | `docs/results.md` | 3 | 11 | 5 | 1 | 20 |
 | Partial-band walkthrough and jammer width (added) | 10 | 2 | 0 | 0 | 12 |
 | `README.md` rewrite (added) | 5 | 0 | 0 | 0 | 5 |
-| Explore power slider (added) | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **102** | **104** | **19** | **11** | **236** |
+| Explore power slider (added) | 6 | 0 | 0 | 0 | 6 |
+| **Total** | **103** | **104** | **19** | **11** | **237** |
 
 Counts are register rows. A row can cover repeated wording or several numbers from the same table and population.
 
@@ -335,3 +335,4 @@ in the browser from the exported case files; the rows below cover its fixed sent
 | X03 | Explore lesson, `pilot` | As the power rises, the data points of the jammed PRBs spread because their channel estimate is wrong. | The jammer hits only DMRS cells (truth grid); data-cell spread comes through the channel estimate (`main.tex` attack description, N04 for the walkthrough slot). | CORRECT | — |
 | X04 | Explore "What decoding does with the bits", walkthrough step 8 | Before decoding each cell is darker the more of its 24 coded bits are wrong in what the receiver hands to the decoder (362 standard, 352 with the map in the walkthrough slot, all in jammed cells); after decoding the map-aware block has every bit right (CRC pass) and the standard receiver's block is lost (CRC fail). | `J/site/export.py` `_bit_refs` (decoded block re-encoded with the transmitter's TB encoder); `tests/test_site.py` (decoded equals sent for every CRC-passing receiver; raw digits agree with the plotted quadrant). `S/partial_flip.json` bits: standard 362 → 564, fused_soft 352 → 0, all raw errors in jammed cells. | CORRECT | — |
 | X05 | `docs/results.md` §19, the reply on uncorrected symbols | The map does not repair the jammed symbols (26% of their bits still wrong before decoding, the same with the true map) but makes their wrong bits nearly weightless (mean \|LLR\| 0.2 against 17.7 per jammed bit). | `results/site/decoding_bits.csv` from `python -m jamloc.experiments.decoding_bits` (`partial`, +3 dB, 64 slots, seed 7): fused_soft and true_soft jammed wrong_before 0.262, llr_wrong 0.20; standard 0.290 and 17.67. | CORRECT | — |
+| X06 | `main.tex` Fig. `fig:passes` caption and the reference before it, site passes animation | On the `aided_flip` slot the estimate's mean squared error is 0.565 after the first attempt (CRC fail), 0.259 after pass 1 (CRC pass) and 0.009 after pass 2. The decoded data cells act as pilots, weighted by the decoder's certainty. | `S/aided_flip.json` `passes[i].h` against `channel.true` (all 144 subcarriers), `passes[i].crc`; `J/recovery.py` `_data_aided` (cells with \|mean\|^2 ≤ 0.01 left out, weights from the symbol variance); `docs/results.md` §21. | CORRECT | — |

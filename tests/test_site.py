@@ -156,9 +156,15 @@ def test_aided_payload_records_passes(tiny_models, monkeypatch):
     assert case["passes"][0]["crc"] is case["receivers"]["fused_soft"]["crc"] is False
     assert case["receivers"]["fused_soft_da"]["crc"] is True
     assert any(step["crc"] for step in case["passes"][1:])
-    for step in case["passes"]:
+    for index, step in enumerate(case["passes"]):
         assert len(step["h"]) == 144 and all(len(row) == 2 for row in step["h"])
         assert len(case["x_hat"][step["x_hat"]]) == len(case["abs_llr"][step["abs_llr"]]) == 1872
+        assert ("certainty" in step) is (index > 0)
+        if index:
+            grid = step["certainty"]
+            assert len(grid) == 12 and all(len(row) == 14 and row[2] is None for row in grid)
+            values = [v for row in grid for v in row if v is not None]
+            assert len(values) == 12 * 13 and all(0 <= v <= 1 for v in values) and max(values) > 0.5
 
 
 def test_pilot_whole_comb_selects_first_true_soft_failure():
@@ -473,6 +479,7 @@ def _write_case_data(data):
                     "x_hat": "shared",
                     "abs_llr": "shared",
                     "crc": crc,
+                    **({"certainty": [[0.5] * cfg.num_symbols] * width} if crc else {}),
                 }
                 for crc in (False, True)
             ]
@@ -517,6 +524,7 @@ def test_check_build_requires_page_cases(tmp_path):
         ("partial_flip", ("channel", "standard", 0, 1)),
         ("aided_flip", ("passes", 0, "x_hat")),
         ("aided_flip", ("passes", 0, "h", 0)),
+        ("aided_flip", ("passes", 1, "certainty")),
         ("data", ("levels",)),
         ("partial", ("levels", 1, "batch_crc")),
         ("hopping", ("levels", 2, "detectors", "fused_atk")),

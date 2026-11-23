@@ -50,7 +50,10 @@ Numbers have about four significant digits. Undefined values are JSON null.
   map-aware estimates follow subcarrier order. Residuals and thresholds follow PRB order.
 * passes: the soft map-aware receiver's initial attempt and each data-aided pass that ran.
   Each has h (the estimate in subcarrier order), crc (that pass's outcome), x_hat and
-  abs_llr (references into the same tables the receivers use).
+  abs_llr (references into the same tables the receivers use). Every pass after the first
+  attempt also has certainty, [allocation PRB][OFDM symbol]: the mean over the cell's
+  subcarriers of how sure the decoder was of each data symbol (|mean|^2, 0 for a symbol the
+  pass left out), which sets how much the cell counts as a pilot; null on the DMRS symbol.
 * levels (cases with Explore levels): one entry per jammer power, in the case's order. Each
   replays the case's batch seed with only the JSR changed and shows the same slot index.
   jsr_db is null for the jammer switched off (its truth grid is then all zero, since nothing
@@ -421,6 +424,19 @@ def _frame(run: CaseRun, i: int) -> dict:
     }
 
 
+def _cell_means(values: torch.Tensor, alloc_size: int, cfg) -> list:
+    """Per-cell means [allocation PRB][OFDM symbol] of one value per data symbol (in the x_hat
+    order: symbol by symbol, skipping the DMRS symbol, 12 subcarriers per PRB); null on DMRS."""
+    dmrs = cfg.dmrs_symbols[0]
+    data = values.reshape(cfg.num_symbols - 1, alloc_size, 12).mean(-1)  # [data symbol, PRB]
+    grid = [[None] * cfg.num_symbols for _ in range(alloc_size)]
+    for ordinal in range(cfg.num_symbols - 1):
+        symbol = ordinal + (ordinal >= dmrs)
+        for prb in range(alloc_size):
+            grid[prb][symbol] = float(data[ordinal, prb])
+    return _numbers(grid)
+
+
 def _qpsk(batch: SlotBatch) -> list:
     """The constellation point of each symbol digit 2 b0 + b1, from the transmitter's mapper."""
     pairs = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]], device=batch.b.device)
@@ -500,6 +516,11 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
                 "h": _numbers(step["h_sc"][i]),
                 **_symbol_refs(frame["x_hat"], frame["abs_llr"], f"pass_{index}", step, i),
                 "crc": bool(step["tb_crc"][i]),
+                **(
+                    {"certainty": _cell_means(step["certainty"][i], case.alloc[1], cfg)}
+                    if "certainty" in step
+                    else {}
+                ),
             }
             for index, step in enumerate(run.receivers[AIDED_RECEIVER]["history"])
         ]

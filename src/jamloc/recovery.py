@@ -334,6 +334,10 @@ class MapAwareReceiver(Block):
             )
             b_new, crc_new = self.decoder(self.layer_demapper(llr))
             if history:
+                # How sure the decoder was of each data cell's symbol (|mean|^2), as used by this
+                # pass: zero for the cells it left out
+                certainty = mean.abs() ** 2
+                certainty = torch.where((certainty > 0.01) & torch.isfinite(extra), certainty, 0.0)
                 passes.append(
                     {
                         "h_sc": h_sc,
@@ -341,6 +345,7 @@ class MapAwareReceiver(Block):
                         "x_hat": x_hat[:, 0, 0],
                         "llr": llr,
                         "tb_crc": crc_new.flatten(),
+                        "certainty": certainty,
                     }
                 )
             b_hat = torch.where(tb_crc[..., None], b_hat, b_new)  # keep a block once it passed
