@@ -129,4 +129,35 @@ uv run python -m jamloc.experiments.dmrs_count --seeds 0 1 2 --batch-size 64 --b
 uv run python -m jamloc.experiments.dmrs_count --small
 ```
 
+**Known-symbol residuals after decoding and the refining receiver (§23).** Each command runs on
+the checkpoints of `paper_run`. The recovery runs write per-seed CSVs, so seeds can run as
+parallel processes; `--plot-only` then pools them and writes the paired differences.
+
+```bash
+# The null laws of both residuals, including long delays and 30 m/s (calibration panel)
+uv run python -m jamloc.experiments.residual_theory --only-decoded --decoded-slots 2048
+
+# Localization after decoding on replayed test grids, then the pooled table
+for split in test sched combjam qpskjam neighbor hopjam pulsejam tonejam spoofjam spoofpart; do
+  uv run python -m jamloc.experiments.decoded_map --split $split --seed 0 --per-point 8 --refine
+done
+uv run python -m jamloc.experiments.decoded_map --table results/decoded_map/*_refine.csv
+uv run python -m jamloc.experiments.figures --only after_decoding
+
+# Receivers with per-cell estimates and refining passes (TDL-C, 15 dB SNR, one seed per process)
+RX="standard p_r_e_soft p_r_e_cell p_r_e_full true_soft true_cell true_full cell_soft cell_full p_r_e_soft_da true_soft_da"
+uv run python -m jamloc.experiments.recovery --channel C --seeds 0 --attacks none pilot data partial \
+    --jsr-db -15 9 --max-mc-iter 25 --receivers $RX
+uv run python -m jamloc.experiments.recovery --channel C --seeds 0 --attacks pilot_whole_allocation \
+    --jsr-db 3 9 --max-mc-iter 25 --receivers $RX
+uv run python -m jamloc.experiments.recovery --channel C --seeds 0 --jammer hopping --jsr-db 9 \
+    --max-mc-iter 25 --receivers $RX
+uv run python -m jamloc.experiments.recovery --channel C --seeds 0 --noise-estimate comb \
+    --attacks pilot_whole_allocation partial --jsr-db 3 9 --max-mc-iter 25 \
+    --receivers standard p_r_e_soft p_r_e_soft_da p_r_e_full true_soft true_full cell_soft cell_full
+uv run python -m jamloc.experiments.recovery --channel C --snr-db 18 --mcs 13 --seeds 0 \
+    --attacks none pilot data partial --jsr-db 3 9 --max-mc-iter 25 --target-block-errors 200 \
+    --receivers standard lmmse true_soft true_cell cell_soft
+```
+
 The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`.
