@@ -62,7 +62,7 @@ def test_same_received_grid_and_selection(tiny_models, monkeypatch):
 
     for cls in (PUSCHReceiverChain, MapAwareReceiver):
         monkeypatch.setattr(cls, "call", record(cls.call))
-    run = simulate_case(replace(CASES["pilot"], batch_size=4))
+    run = simulate_case(replace(CASES["pilot"], batch_size=4, levels=()))
     assert len(grids) == 5 and set(grids) == {run.batch.y_alloc.data_ptr()}
     assert run.batch.y_alloc.device.type == "cpu"
     labels = run.batch.labels
@@ -286,6 +286,36 @@ def test_sweep_repeats_channel_and_noise(tiny_models):
     np.testing.assert_allclose(hi - benign, (lo - benign) * 10 ** (24 / 20), atol=0.02)
 
 
+def test_levels_replay_the_slot_at_each_power(tiny_models):
+    from dataclasses import replace
+
+    import numpy as np
+
+    from jamloc.site.cases import CASES
+    from jamloc.site.export import payload, simulate_case
+
+    case = replace(CASES["partial"], batch_size=2, levels=(None, -9, 3))
+    document = payload(simulate_case(case))
+    off, weak, own = document["levels"]
+    assert own == {"jsr_db": 3} and off["jsr_db"] is None and weak["jsr_db"] == -9
+    truth = np.asarray(document["grids"]["truth"], bool)
+    assert truth.any() and not np.asarray(off["grids"]["truth"]).any()
+    assert weak["grids"]["truth"] == document["grids"]["truth"]
+    power = np.asarray(document["grids"]["power_db"], float)
+    for level in (off, weak):
+        # The same draws: cells the jammer leaves alone receive the same samples at every power
+        level_power = np.asarray(level["grids"]["power_db"], float)
+        np.testing.assert_array_equal(level_power[~truth], power[~truth])
+        assert (level_power[truth] < power[truth]).all()
+        assert level["detectors"].keys() == document["detectors"].keys()
+        assert level["batch_crc"].keys() == level["receivers"].keys()
+        assert level["receivers"].keys() == document["receivers"].keys()
+        for name, rx in level["receivers"].items():
+            assert np.shape(level["x_hat"][rx["x_hat"]]) == (1872, 2)
+            assert len(level["abs_llr"][rx["abs_llr"]]) == 1872
+            assert level["batch_crc"][name]["slots"] == 2
+
+
 def test_median_tie_uses_first_slot():
     import torch
 
@@ -381,6 +411,17 @@ def _write_case_data(data):
             "x_hat": {"shared": [[0, 0]] * num_points},
             "abs_llr": {"shared": [0] * num_points},
         }
+        if case.levels:
+            frame = {key: document[key] for key in ("grids", "detectors", "receivers")}
+            frame.update(
+                x_hat=document["x_hat"],
+                abs_llr=document["abs_llr"],
+                batch_crc=document["metadata"]["batch_crc"],
+            )
+            document["levels"] = [
+                {"jsr_db": db} if db == case.jsr_db else {"jsr_db": db, **frame}
+                for db in case.levels
+            ]
         if case.name in ("fig3", "jsr_sweep"):
             document["benign"] = {"jsr_db": None, "pilots": pilots, "r_b": [0] * width}
         if case.name == "jsr_sweep":
@@ -450,6 +491,10 @@ def test_check_build_requires_page_cases(tmp_path):
         ("partial_flip", ("channel", "standard", 0, 1)),
         ("aided_flip", ("passes", 0, "x_hat")),
         ("aided_flip", ("passes", 0, "h", 0)),
+        ("data", ("levels",)),
+        ("partial", ("levels", 1, "batch_crc")),
+        ("hopping", ("levels", 2, "detectors", "fused_atk")),
+        ("spoof", ("levels", 0, "receivers", "fused_atk2_soft")),
     ],
 )
 def test_check_build_requires_case_fields(tmp_path, name, keys):
@@ -470,6 +515,31 @@ def test_check_build_requires_case_fields(tmp_path, name, keys):
     path.write_text(json.dumps(document), encoding="utf-8")
     field = next(key for key in reversed(keys) if isinstance(key, str))
     with pytest.raises(ValueError, match=rf"{name}\.json.*{re.escape(field)}"):
+        check_build(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "change, message",
+    [
+        (lambda levels: levels.pop(3), "expected the jammer powers"),
+        (lambda levels: levels[0]["grids"].update(truth=[[1] * 14] * 24), "switched-off jammer"),
+        (lambda levels: levels[7].update(grids={}), "own power refers"),
+    ],
+)
+def test_check_build_checks_levels(tmp_path, change, message):
+    import json
+
+    from jamloc.site.build import check_build
+
+    data = tmp_path / "data"
+    _write_case_data(data)
+    (data / "results.json").write_text("{}", encoding="utf-8")
+    path = data / "partial.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["levels"][7] == {"jsr_db": 3}
+    change(document["levels"])
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=rf"partial\.json.*{message}"):
         check_build(tmp_path)
 
 

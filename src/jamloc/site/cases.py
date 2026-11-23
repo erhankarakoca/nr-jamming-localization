@@ -5,6 +5,10 @@ from dataclasses import dataclass, replace
 from jamloc.config import SimConfig
 from jamloc.experiments.recovery import ALLOC, JAMMERS, NEST_DETECTORS, TRAINED_ON
 
+# Jammer powers (JSR, dB) of the Explore slider: off, then -15 to +9 dB in 3 dB steps. Every level
+# replays the same random draws, so only the jammer's power changes between them.
+EXPLORE_LEVELS = (None, *range(-15, 10, 3))
+
 NOMINAL = ("fused", "no_residual", "power", "block_test", "evm_threshold", "residual_threshold")
 DETECTORS = (*NOMINAL, "power_threshold", *TRAINED_ON, "fused_atk2")
 AIDED_RECEIVER = "fused_soft_da"
@@ -31,6 +35,7 @@ class Case:
     batch_size: int = 64
     include_channel: bool = False
     iterations: int = 0
+    levels: tuple[float | None, ...] = ()
 
     @property
     def detectors(self):
@@ -44,42 +49,45 @@ class Case:
         return SimConfig(noise_estimate=self.noise_estimate, **options)
 
 
-_PILOT = Case("pilot", "Pilot jamming, +3 dB", "pilot", 3, include_channel=True)
-_PARTIAL = Case("partial", "Partial-band jamming, +3 dB", "partial", 3)
+_PILOT = Case("pilot", "Pilot jamming", "pilot", 3, include_channel=True, levels=EXPLORE_LEVELS)
+_PARTIAL = Case("partial", "Partial-band jamming", "partial", 3, levels=EXPLORE_LEVELS)
 CASES = {
     case.name: case
     for case in (
         Case("benign", "Benign reference", "none", None),
         _PILOT,
         Case("pilot_weak", "Weak pilot jamming, −12 dB", "pilot", -12),
-        Case("data", "Data jamming, +3 dB", "data", 3),
+        Case("data", "Data jamming", "data", 3, levels=EXPLORE_LEVELS),
         _PARTIAL,
         Case(
             "hopping",
-            "Hopping jammer, +9 dB",
+            "Hopping jammer",
             "partial",
             9,
             jammer="hopping",
             decode_maps=("fused", "fused_atk"),
+            levels=EXPLORE_LEVELS,
         ),
-        Case("pulsed", "Pulsed jammer, +9 dB", "partial", 9, jammer="pulsed"),
+        Case("pulsed", "Pulsed jammer", "partial", 9, jammer="pulsed", levels=EXPLORE_LEVELS),
         Case(
             "spoof",
-            "Pilot spoofing, −9 dB",
+            "Pilot spoofing",
             "pilot",
             -9,
             jam=ALLOC,
             jammer="spoof",
             decode_maps=("fused", "fused_atk2"),
+            levels=EXPLORE_LEVELS,
         ),
         Case(
             "pilot_whole_comb",
-            "Whole-allocation pilot jamming with estimated noise, +3 dB",
+            "Whole-allocation pilot jamming with estimated noise",
             "pilot",
             3,
             jam=ALLOC,
             noise_estimate="comb",
             selection_rule="first_true_soft_failure",
+            levels=EXPLORE_LEVELS,
         ),
         Case("jsr_sweep", "Pilot jamming across JSR", "pilot", 0),
         # Seed 0 is the first CPU realization passing the paper's no-deep-fade test.
@@ -101,6 +109,7 @@ CASES = {
             title="Partial-band jamming with a recovered CRC",
             selection_rule="first_crc_flip",
             include_channel=True,
+            levels=(),
         ),
         Case(
             "aided_flip",

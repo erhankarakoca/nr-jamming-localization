@@ -46,6 +46,12 @@ Numbers have about four significant digits. Undefined values are JSON null.
 * passes: the soft map-aware receiver's initial attempt and each data-aided pass that ran.
   Each has h (the estimate in subcarrier order), crc (that pass's outcome), x_hat and
   abs_llr (references into the same tables the receivers use).
+* levels (cases with Explore levels): one entry per jammer power, in the case's order. Each
+  replays the case's batch seed with only the JSR changed and shows the same slot index.
+  jsr_db is null for the jammer switched off (its truth grid is then all zero, since nothing
+  was transmitted). The entry at the case's own jsr_db has only jsr_db: the top-level fields
+  are that level. Every other entry has grids, detectors, receivers, x_hat, abs_llr and
+  batch_crc as above for that power.
 * fig3 and jsr_sweep also have benign (jsr_db null for zero power, pilots, r_b), from the
   same batch seed and slot index. jsr_sweep adds sweep, nine such frames with finite
   jsr_db values from -15 to +9. The selected index comes from its 0 dB batch.
@@ -56,7 +62,7 @@ import math
 import subprocess
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -204,24 +210,37 @@ class CaseRun:
     thresholds: dict
     receivers: dict
     selection: dict
+    levels: dict = field(default_factory=dict)
 
 
 def simulate_case(case: Case, *, load_detector: Callable = _load_detector) -> CaseRun:
-    """Select a slot, advancing the simulation seed if a data-aided flip is absent."""
+    """Select a slot, advancing the simulation seed if a data-aided flip is absent, then replay
+    the same batch at the case's other jammer powers."""
     load_detector = cache(load_detector)
     with _cpu():
         while True:
             try:
-                return _simulate_batch(case, load_detector)
+                run = _simulate_batch(case, load_detector)
+                break
             except _NoSelectedSlot:
                 if case.selection_rule != "first_aided_crc_flip":
                     raise
                 case = replace(case, seed=case.seed + 1)
+        slot = run.selection["slot"]
+        for jsr_db in case.levels:
+            if jsr_db != case.jsr_db:
+                level = replace(case, jsr_db=jsr_db, include_channel=False, iterations=0)
+                run.levels[jsr_db] = _simulate_batch(level, load_detector, slot=slot)
+        return run
 
 
-def _simulate_batch(case, load_detector):
-    """Decode every map on the same received allocation and then select one slot."""
+def _simulate_batch(case, load_detector, slot=None):
+    """Decode every map on the same received allocation and then select one slot (or keep
+    ``slot``, the index chosen at the case's own jammer power)."""
     batch = _batch(case, case.jsr_db, receive=True, keep_channel=case.include_channel)
+    if case.jsr_db is None:
+        # The labels mark the attack pattern; with the jammer off it transmitted nothing
+        batch = replace(batch, labels=torch.zeros_like(batch.labels))
     cfg = case.config()
     maps, thresholds = {}, {}
     for name in case.detectors:
@@ -250,7 +269,10 @@ def _simulate_batch(case, load_detector):
             history=True,
         )
     crc = {name: rx["tb_crc"].bool().flatten() for name, rx in receivers.items()}
-    selection = _select(case, batch.labels, maps["fused"][1], crc)
+    if slot is None:
+        selection = _select(case, batch.labels, maps["fused"][1], crc)
+    else:
+        selection = {"rule": "same_slot", "slot": slot}
     return CaseRun(case, batch, maps, thresholds, receivers, selection)
 
 
@@ -333,12 +355,9 @@ def _symbol_refs(points, reliability, name, rx, slot):
     }
 
 
-def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | None = None) -> dict:
-    """Build the versioned JSON document for the selected slot."""
-    if git_commit is None:
-        git_commit, git_dirty = _git_revision()
-    case, batch = run.case, run.batch
-    cfg, i = case.config(), run.selection["slot"]
+def _frame(run: CaseRun, i: int) -> dict:
+    """Grids, detector layers, receivers and batch CRC counts of slot ``i`` of one batch."""
+    batch, cfg = run.batch, run.case.config()
     features = dict(zip(FEATURE_NAMES, extract(batch, cfg)[i], strict=True))
     grids = {
         "power_db": features["power_db"],
@@ -363,6 +382,23 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
             "crc": bool(crc[i]),
             **_symbol_refs(points, reliability, name, rx, i),
         }
+    return {
+        "grids": _numbers(grids),
+        "detectors": _numbers(detectors),
+        "receivers": receivers,
+        "x_hat": points,
+        "abs_llr": reliability,
+        "batch_crc": batch_crc,
+    }
+
+
+def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | None = None) -> dict:
+    """Build the versioned JSON document for the selected slot."""
+    if git_commit is None:
+        git_commit, git_dirty = _git_revision()
+    case, batch = run.case, run.batch
+    cfg, i = case.config(), run.selection["slot"]
+    frame = _frame(run, i)
     anchor = _pilot_frame(batch, cfg, i, case.jsr_db)
     result = {
         "schema_version": SCHEMA_VERSION,
@@ -374,14 +410,14 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
                 "git_commit": git_commit,
                 "git_dirty": git_dirty,
                 "selection": run.selection,
-                "batch_crc": batch_crc,
+                "batch_crc": frame["batch_crc"],
                 "thresholds": run.thresholds,
                 "noise_variance": batch.no[i],
                 "true_noise_variance": batch.no_true[i],
             }
         ),
-        "grids": _numbers(grids),
-        "detectors": _numbers(detectors),
+        "grids": frame["grids"],
+        "detectors": frame["detectors"],
         "prb": {
             "r_b": anchor["r_b"],
             "threshold": _numbers(
@@ -389,10 +425,17 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
             ),
         },
         "pilots": anchor["pilots"],
-        "receivers": receivers,
-        "x_hat": points,
-        "abs_llr": reliability,
+        "receivers": frame["receivers"],
+        "x_hat": frame["x_hat"],
+        "abs_llr": frame["abs_llr"],
     }
+    if case.levels:
+        result["levels"] = [
+            {"jsr_db": jsr_db}
+            if jsr_db == case.jsr_db
+            else {"jsr_db": jsr_db, **_frame(run.levels[jsr_db], i)}
+            for jsr_db in case.levels
+        ]
     if case.include_channel:
         dmrs = cfg.dmrs_symbols[0]
         pilots = result["pilots"]
@@ -417,7 +460,7 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
         result["passes"] = [
             {
                 "h": _numbers(step["h_sc"][i]),
-                **_symbol_refs(points, reliability, f"pass_{index}", step, i),
+                **_symbol_refs(frame["x_hat"], frame["abs_llr"], f"pass_{index}", step, i),
                 "crc": bool(step["tb_crc"][i]),
             }
             for index, step in enumerate(run.receivers[AIDED_RECEIVER]["history"])

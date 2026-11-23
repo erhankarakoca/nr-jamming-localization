@@ -1,6 +1,6 @@
 import { receiverName } from "./data.js";
 import { element } from "./nav.js";
-import { symbols } from "./points.js";
+import { symbols, tween } from "./points.js";
 
 const AXIS_LIMIT = 4;
 const INSET = 20;
@@ -41,18 +41,14 @@ export function comparisonReceivers(slot) {
   )];
 }
 
-function draw(slot, name, prbs) {
-  const receiver = slot.receivers[name];
-  const label = plotReceiverName(name);
-  const canvas = element("canvas");
-  canvas.setAttribute("role", "img");
-  const density = Math.min(3, window.devicePixelRatio || 1);
-  canvas.width = canvas.height = Math.round(SIZE * density);
-  const ctx = canvas.getContext("2d");
-  ctx.scale(canvas.width / SIZE, canvas.height / SIZE);
+// One frame of the points moving from `from` (t = 0) to `to` (t = 1); points pair up by their
+// position in the slot, so the same data symbol moves when the jammer's power changes.
+function paint(ctx, to, from, t) {
   const xOf = x => SIZE / 2 + SCALE * x;
   const yOf = y => SIZE / 2 - SCALE * y;
-
+  ctx.clearRect(0, 0, SIZE, SIZE);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, SIZE, SIZE);
   ctx.lineWidth = 0.6;
   ctx.strokeStyle = "#000";
   ctx.strokeRect(INSET, INSET, SPAN, SPAN);
@@ -81,21 +77,38 @@ function draw(slot, name, prbs) {
   ctx.beginPath();
   ctx.rect(INSET, INSET, SPAN, SPAN);
   ctx.clip();
-  let shown = 0;
-  let outside = 0;
-  for (const { x, y, alpha, jammed } of symbols(slot, name, prbs)) {
-    if (Math.abs(x) > AXIS_LIMIT || Math.abs(y) > AXIS_LIMIT) {
-      outside++;
-      continue;
-    }
-    shown++;
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = jammed ? "#cc0000" : "#0033cc";
+  for (const point of to) {
+    const before = from?.get(point.index) ?? point;
+    const x = before.x + (point.x - before.x) * t;
+    const y = before.y + (point.y - before.y) * t;
+    if (Math.abs(x) > AXIS_LIMIT + 0.5 || Math.abs(y) > AXIS_LIMIT + 0.5) continue;
+    ctx.globalAlpha = before.alpha + (point.alpha - before.alpha) * t;
+    ctx.fillStyle = point.jammed ? "#cc0000" : "#0033cc";
     ctx.beginPath();
     ctx.arc(xOf(x), yOf(y), 1.1, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+// `from` (optional): the same slot at another jammer power; the points then move into place.
+// `alive` stops that movement when a newer drawing replaces this one.
+function draw(slot, name, prbs, { from = null, alive = () => true } = {}) {
+  const receiver = slot.receivers[name];
+  const label = plotReceiverName(name);
+  const canvas = element("canvas");
+  canvas.setAttribute("role", "img");
+  const density = Math.min(3, window.devicePixelRatio || 1);
+  canvas.width = canvas.height = Math.round(SIZE * density);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(canvas.width / SIZE, canvas.height / SIZE);
+  const to = symbols(slot, name, prbs);
+  const previous = from?.receivers[name] ? new Map(symbols(from, name, prbs).map(p => [p.index, p])) : null;
+  paint(ctx, to, previous, previous ? 0 : 1);
+  if (previous) tween(450, t => paint(ctx, to, previous, t), alive);
+  const outside = to.filter(({ x, y }) => Math.abs(x) > AXIS_LIMIT || Math.abs(y) > AXIS_LIMIT).length;
+  const shown = to.length - outside;
   const extent = `I and Q axes from −${AXIS_LIMIT} to +${AXIS_LIMIT}.`;
   const outsideLabel = `${outside.toLocaleString()} ${outside === 1 ? "point" : "points"} outside the axes`;
   const description = `${label}, ${shown.toLocaleString()} points on the plot. ${extent} ${outsideLabel}.`;
@@ -109,8 +122,8 @@ function draw(slot, name, prbs) {
   return figure;
 }
 
-export function constellations(slot, names, prbs) {
+export function constellations(slot, names, prbs, motion = {}) {
   const group = element("div", null, "constellation-set");
-  for (const name of names) group.append(draw(slot, name, prbs));
+  for (const name of names) group.append(draw(slot, name, prbs, motion));
   return group;
 }

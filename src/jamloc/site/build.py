@@ -137,6 +137,37 @@ def _check_channel(channel, location, width, dmrs_symbol):
         _require_numeric_shape(channel[field], f"{location}.{field}", width)
 
 
+def _check_levels(document, location, levels, check_frame):
+    """The Explore slider: one entry per jammer power, the case's own power as a bare marker."""
+    _require_fields(document, location, levels=list)
+    entries = document["levels"]
+    for index, entry in enumerate(entries):
+        _require_fields(entry, f"{location}.levels[{index}]", jsr_db=_NULLABLE_NUMBER)
+    powers = [entry["jsr_db"] for entry in entries]
+    own = document["metadata"]["jsr_db"]
+    if (levels is not None and powers != list(levels)) or own not in powers:
+        raise ValueError(f"{location}.levels: expected the jammer powers {levels or powers}")
+    for index, entry in enumerate(entries):
+        label = f"{location}.levels[{index}]"
+        if entry["jsr_db"] == own:
+            if set(entry) != {"jsr_db"}:
+                raise ValueError(f"{label}: the case's own power refers to the top-level fields")
+            continue
+        _require_fields(
+            entry,
+            label,
+            grids=dict,
+            detectors=dict,
+            receivers=dict,
+            x_hat=dict,
+            abs_llr=dict,
+            batch_crc=dict,
+        )
+        check_frame(entry, label, entry["batch_crc"], f"{label}.batch_crc")
+        if entry["jsr_db"] is None and any(any(row) for row in entry["grids"]["truth"]):
+            raise ValueError(f"{label}.grids.truth: the switched-off jammer hit no cell")
+
+
 def _check_symbol_refs(document, location, receiver, label, num_points):
     _require_fields(receiver, label, crc=bool, x_hat=str, abs_llr=str)
     for field, columns in (("x_hat", 2), ("abs_llr", None)):
@@ -236,21 +267,8 @@ def _check_case(document, location, name):
     if name == "pilot_whole_comb":
         _require_fields(meta, label, noise_variance=_NUMBER, true_noise_variance=_NUMBER)
 
-    grids = document["grids"]
-    grid_fields = ("allocation", "truth", "power_db", "residual_db", "evm_db")
-    for field in grid_fields:
-        _require_shape(grids.get(field), f"{location}.grids.{field}", prbs, symbols)
-    maps = document["detectors"]
     definition = CASES.get(name)
     required_maps = definition.detectors if definition else ("fused",)
-    _require_fields(maps, f"{location}.detectors", **dict.fromkeys(required_maps, dict))
-    for detector, layer in maps.items():
-        label = f"{location}.detectors.{detector}"
-        _require_fields(layer, label, scores=list, decisions=list, unscored=list)
-        for field in ("scores", "decisions", "unscored"):
-            _require_shape(layer[field], f"{label}.{field}", prbs, symbols)
-
-    receivers = document["receivers"]
     decode_maps = definition.decode_maps if definition else ("fused",)
     iterations = definition.iterations if definition else 0
     required_receivers = (
@@ -260,12 +278,31 @@ def _check_case(document, location, name):
         *(f"{m}_soft" for m in decode_maps),
         *((AIDED_RECEIVER,) if iterations else ()),
     )
-    _require_fields(receivers, f"{location}.receivers", **dict.fromkeys(required_receivers, dict))
     num_points = width * 12 * (symbols - 1 - cfg.get("dmrs_additional_position", 0))
-    for rx, receiver in receivers.items():
-        _check_symbol_refs(document, location, receiver, f"{location}.receivers.{rx}", num_points)
-        counts = meta["batch_crc"].get(rx)
-        _require_fields(counts, f"{location}.metadata.batch_crc.{rx}", slots=int, failures=int)
+
+    def check_frame(frame, location, batch_crc, crc_label):
+        grids = frame["grids"]
+        for field in ("allocation", "truth", "power_db", "residual_db", "evm_db"):
+            _require_shape(grids.get(field), f"{location}.grids.{field}", prbs, symbols)
+        maps = frame["detectors"]
+        _require_fields(maps, f"{location}.detectors", **dict.fromkeys(required_maps, dict))
+        for detector, layer in maps.items():
+            label = f"{location}.detectors.{detector}"
+            _require_fields(layer, label, scores=list, decisions=list, unscored=list)
+            for field in ("scores", "decisions", "unscored"):
+                _require_shape(layer[field], f"{label}.{field}", prbs, symbols)
+        receivers = frame["receivers"]
+        _require_fields(
+            receivers, f"{location}.receivers", **dict.fromkeys(required_receivers, dict)
+        )
+        for rx, receiver in receivers.items():
+            _check_symbol_refs(frame, location, receiver, f"{location}.receivers.{rx}", num_points)
+            counts = batch_crc.get(rx)
+            _require_fields(counts, f"{crc_label}.{rx}", slots=int, failures=int)
+
+    check_frame(document, location, meta["batch_crc"], f"{location}.metadata.batch_crc")
+    if "levels" in document or (definition and definition.levels):
+        _check_levels(document, location, definition.levels if definition else None, check_frame)
 
     if "channel" in document or (definition and definition.include_channel):
         _require_fields(document, location, channel=dict)

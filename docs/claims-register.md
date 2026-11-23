@@ -19,7 +19,8 @@ commit that adds this file.
 | `docs/results.md` | 3 | 11 | 5 | 1 | 20 |
 | Partial-band walkthrough and jammer width (added) | 10 | 2 | 0 | 0 | 12 |
 | `README.md` rewrite (added) | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **97** | **104** | **19** | **11** | **231** |
+| Explore power slider (added) | 3 | 0 | 0 | 0 | 3 |
+| **Total** | **100** | **104** | **19** | **11** | **234** |
 
 Counts are register rows. A row can cover repeated wording or several numbers from the same table and population.
 
@@ -320,3 +321,15 @@ earlier README. The rewrite's numbers restate rows that were already checked.
 | R28 | `README.md` results table | Partial-band, +3 dB: 0.06%, 2.1%, 38% with the map at 4, 6, 8 of 12 jammed PRBs; standard 53%, 79%, 92%. | N08; `W/width_bler_C.csv` `p_r_e_soft` 3/4,800, 102/4,800, 319/832; `standard` 339/640, 353/448, 352/384. | CORRECT | — |
 | R29 | `README.md` results table | 0.68 ms per slot for features and U-Net, one M1 Pro core, 24-PRB allocation, without estimation, equalization and decoding. | M80, item 7: `R/size_sweep/size_sweep_latency.csv`, 0.684 ms for the frozen 66,553-parameter model. | CORRECT | — |
 | R30 | `README.md` "How it works" | Residual has a known distribution under the ideal null (no jamming, channel in the delay subspace, white noise of known power); data-aided passes help when every pilot is jammed. | `J/theory.py`, M02; `docs/results.md` §21 and N11 (36.0% to 22.8% at +9 dB, 12 PRBs). | CORRECT | — |
+
+## Explore power slider — added 23 Nov
+
+The Explore page steps each recorded slot through the jammer powers (`docs/results.md` §19).
+Its counts (jammed cells, flags, CRC outcomes, the batch's CRC failures per power) are computed
+in the browser from the exported case files; the rows below cover its fixed sentences.
+
+| ID | Source | Claim | Evidence | Verdict | Corrected wording |
+|---|---|---|---|---|---|
+| X01 | `site/explore.html` intro, settings note | Every position replays the same slot with the same channel, noise, data and jammer waveform; only the jammer's power changes. | `J/site/export.py` `_batch` resets the seed before building the link, and levels keep the selected slot index; `tests/test_site.py::test_levels_replay_the_slot_at_each_power` (unjammed cells identical at every level, jammed cells weaker at −9 dB) and `test_sweep_repeats_channel_and_noise` (jammer excess scales as the square root of power). | CORRECT | — |
+| X02 | Explore lesson, `pilot_whole_comb` | At +3 dB even the true map does not save this slot. | Selection rule `first_true_soft_failure` at the case's +3 dB: `S/pilot_whole_comb.json` `receivers.true_soft.crc` is false. | CORRECT | — |
+| X03 | Explore lesson, `pilot` | As the power rises, the data points of the jammed PRBs spread because their channel estimate is wrong. | The jammer hits only DMRS cells (truth grid); data-cell spread comes through the channel estimate (`main.tex` attack description, N04 for the walkthrough slot). | CORRECT | — |

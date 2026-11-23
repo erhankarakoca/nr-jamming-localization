@@ -23,15 +23,36 @@
   <main class="shell" id="main" tabindex="-1">
 <header class="page-intro">
   <h1>Explore</h1>
-  <p>Explore a saved uplink slot to see where the jammer hit and how the receivers decoded the block.</p>
+  <p>Pick an attack and move the jammer's power. Every position replays the same simulated slot, with
+    the same channel, noise, data and jammer waveform; only the jammer's power changes. Watch where
+    the jammer hits, what the detector flags and whether each receiver decodes the block.</p>
 </header>
 <div id="explorer" aria-busy="true">
-  <section aria-label="Resource grid and layers">
+  <section class="power-panel" aria-label="Attack and jammer power">
     <div class="controls">
-      <label>Slot <select id="case-select" disabled></select></label>
+      <label>Attack <select id="case-select" disabled></select></label>
     </div>
-    <div id="explore-context" class="context" aria-live="polite">Loading the slots…</div>
+    <div class="power-control">
+      <label for="level">Jammer-to-signal ratio (JSR) per jammed cell <output id="level-value" for="level"></output></label>
+      <div class="power-row">
+        <div class="power-track">
+          <input id="level" type="range" min="0" max="0" value="0" step="1" disabled>
+          <div id="level-ticks" class="power-ticks" aria-hidden="true"></div>
+        </div>
+        <button id="level-play" type="button" aria-pressed="false" disabled>Play</button>
+      </div>
+    </div>
     <p id="explore-lesson"></p>
+    <div class="power-body">
+      <div>
+        <div id="level-summary" class="power-summary" aria-live="polite"></div>
+        <div id="explore-context" class="context">Loading the slots…</div>
+      </div>
+      <div id="level-chart" class="power-chart"></div>
+    </div>
+  </section>
+  <section class="panel" aria-labelledby="grid-heading">
+    <h2 id="grid-heading">The resource grid</h2>
     <div class="controls" role="group" aria-label="Grid layers">
       <label>Colour cells by <select id="feature-select" disabled>
         <option value="">None</option><option value="power_db">Power P</option>
@@ -43,19 +64,25 @@
     <div class="slot-row">
       <div id="explore-grid"></div>
       <div>
-        <h2>How to read this</h2>
-        <p>Rows are physical resource blocks (PRBs). Columns are OFDM symbols. Symbol 2 carries the pilots (DMRS).</p>
-        <p>Choose a cell to inspect it. Use the arrow keys when the grid has focus. The layer controls change the grid.</p>
-        <h2 id="cell-heading">Selected cell</h2>
+        <p>Rows are physical resource blocks (PRBs), columns are OFDM symbols, and symbol 2 carries
+          the pilots (DMRS). The colour scale stays fixed while the power changes.</p>
+        <p>Choose a cell to inspect it; the arrow keys move between cells when the grid has focus.</p>
+        <h3 id="cell-heading">Selected cell</h3>
         <div id="cell-details" aria-live="polite"></div>
       </div>
     </div>
   </section>
   <section class="panel" aria-labelledby="points-heading">
     <h2 id="points-heading">Equalized symbols</h2>
-    <p>Red points come from jammed cells and blue points from clean cells. Darker points indicate more reliable bits.</p>
-    <p>The map-aware receiver uses the saved U-Net map. The CRC checks the whole decoded block.</p>
-    <div class="controls"><label class="check"><input id="all-receivers" type="checkbox"> Show all saved receivers</label></div>
+    <p>Red points come from jammed cells and blue points from clean cells; the paler a point, the
+      less the decoder trusts its bits. The map-aware receiver uses the U-Net's map, and the CRC
+      checks the whole decoded block.</p>
+    <div class="controls">
+      <label>Points from <select id="point-source">
+        <option value="all">All of the user's PRBs</option><option value="prb">The selected cell's PRB</option>
+      </select></label>
+      <label class="check"><input id="all-receivers" type="checkbox"> Show all saved receivers</label>
+    </div>
     <div id="explore-points"></div>
     <p id="explore-batch" class="context"></p>
   </section>

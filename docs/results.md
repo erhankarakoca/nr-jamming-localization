@@ -1139,6 +1139,15 @@ Design `docs/superpowers/specs/2026-11-20-showcase-site-design.md`, plan
 - Examples are chosen by a stated rule: the median U-Net hit rate by default, outcome-conditioned
   for `walkthrough_flip` (2/64) and `pilot_whole_comb` (true map fails in 42/64).
 - The checked export manifest records commit `ebff348` and a clean working tree.
+- **Jammer-power levels (23 Nov).** The seven Explore cases (pilot, data, partial-band, hopping,
+  pulsed, spoofing, whole-allocation pilot jamming with estimated noise) also hold their slot at
+  every jammer power: off, then -15 to +9 dB in 3 dB steps. Each level replays the case's batch
+  seed with only the JSR changed and keeps the slot chosen at the case's own power, so the
+  channel, noise, data and jammer waveform are the same (checked in `tests/test_site.py`: cells
+  the jammer leaves alone receive identical power at every level). With the jammer off the truth
+  grid is empty. Each level also records the CRC failures of the full 64-slot batch, which the
+  page plots against the power. The nominal level of every case is unchanged from the earlier
+  export. The files grow to 1.3–1.8 MB each (0.38–0.55 MB gzipped), loaded only by Explore.
 
 **Site** (`python -m jamloc.site build | serve | deploy`, static build on the `gh-pages` branch):
 
