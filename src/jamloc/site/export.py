@@ -34,7 +34,12 @@ Numbers have about four significant digits. Undefined values are JSON null.
   pilots: subcarrier (relative to allocation start), ls, projection and residual_power
   (squared magnitude, linear). Each complex value is a [real, imaginary] pair.
 * receivers: entries named standard or <map>_<mode>, each with crc (boolean) and keys
-  x_hat and abs_llr into the two like-named tables at the top level. Each table stores
+  x_hat and abs_llr into the two like-named tables at the top level, and keys raw and decoded
+  into the bits table.
+* sent, bits: the transmitted QPSK symbols and, per receiver, the symbols its bits give before
+  decoding (raw: the signs of its LLRs) and after decoding (decoded: its decoded block encoded
+  again), in the x_hat order. Each is a string with one digit per symbol, 2 b0 + b1 for the
+  symbol's two coded bits b0 b1; metadata.qpsk gives the constellation point of each digit. Each table stores
   a shared numerical array once. x_hat is a list of float16-rounded complex points.
   abs_llr gives the mean absolute LLR of the two QPSK bits per point. Both arrays run
   in symbol order, skipping the DMRS symbol, then in increasing allocation subcarrier
@@ -355,6 +360,27 @@ def _symbol_refs(points, reliability, name, rx, slot):
     }
 
 
+def _digits(bits: torch.Tensor) -> str:
+    """Coded bits (b0 b1 per QPSK symbol) as one digit 2 b0 + b1 per symbol."""
+    pairs = bits.reshape(-1, 2).long()
+    return "".join(map(str, (2 * pairs[:, 0] + pairs[:, 1]).tolist()))
+
+
+def _coded_bits(batch: SlotBatch, info_bits: torch.Tensor) -> torch.Tensor:
+    """The scrambled coded bits the transmitter sends for these information bits."""
+    return batch.tx._tb_encoder(info_bits.to(batch.b.device)).flatten()
+
+
+def _bit_refs(table, name, rx, batch, slot):
+    """The symbols a receiver's bits give before decoding (LLR signs; Sionna's LLRs are
+    log P(1)/P(0)) and after decoding (the decoded block encoded again)."""
+    refs = {"raw": _share(table, f"{name}_raw", _digits(rx["llr"][slot].flatten() > 0))}
+    if rx.get("b_hat") is not None:
+        decoded = _coded_bits(batch, rx["b_hat"][slot : slot + 1].float())
+        refs["decoded"] = _share(table, f"{name}_decoded", _digits(decoded))
+    return refs
+
+
 def _frame(run: CaseRun, i: int) -> dict:
     """Grids, detector layers, receivers and batch CRC counts of slot ``i`` of one batch."""
     batch, cfg = run.batch, run.case.config()
@@ -374,13 +400,14 @@ def _frame(run: CaseRun, i: int) -> dict:
         }
         for name, (scores, flags) in run.maps.items()
     }
-    receivers, points, reliability, batch_crc = {}, {}, {}, {}
+    receivers, points, reliability, bits, batch_crc = {}, {}, {}, {}, {}
     for name, rx in run.receivers.items():
         crc = rx["tb_crc"].bool().flatten()
         batch_crc[name] = {"slots": len(crc), "failures": int((~crc).sum())}
         receivers[name] = {
             "crc": bool(crc[i]),
             **_symbol_refs(points, reliability, name, rx, i),
+            **_bit_refs(bits, name, rx, batch, i),
         }
     return {
         "grids": _numbers(grids),
@@ -388,8 +415,16 @@ def _frame(run: CaseRun, i: int) -> dict:
         "receivers": receivers,
         "x_hat": points,
         "abs_llr": reliability,
+        "sent": _digits(_coded_bits(batch, batch.b[i : i + 1])),
+        "bits": bits,
         "batch_crc": batch_crc,
     }
+
+
+def _qpsk(batch: SlotBatch) -> list:
+    """The constellation point of each symbol digit 2 b0 + b1, from the transmitter's mapper."""
+    pairs = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]], device=batch.b.device)
+    return _numbers(torch.view_as_real(batch.tx._mapper(pairs.reshape(1, -1)).flatten()))
 
 
 def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | None = None) -> dict:
@@ -414,6 +449,7 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
                 "thresholds": run.thresholds,
                 "noise_variance": batch.no[i],
                 "true_noise_variance": batch.no_true[i],
+                "qpsk": _qpsk(batch),
             }
         ),
         "grids": frame["grids"],
@@ -428,6 +464,8 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
         "receivers": frame["receivers"],
         "x_hat": frame["x_hat"],
         "abs_llr": frame["abs_llr"],
+        "sent": frame["sent"],
+        "bits": frame["bits"],
     }
     if case.levels:
         result["levels"] = [

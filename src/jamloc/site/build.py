@@ -161,11 +161,27 @@ def _check_levels(document, location, levels, check_frame):
             receivers=dict,
             x_hat=dict,
             abs_llr=dict,
+            sent=str,
+            bits=dict,
             batch_crc=dict,
         )
         check_frame(entry, label, entry["batch_crc"], f"{label}.batch_crc")
         if entry["jsr_db"] is None and any(any(row) for row in entry["grids"]["truth"]):
             raise ValueError(f"{label}.grids.truth: the switched-off jammer hit no cell")
+
+
+def _check_bits(frame, location, receivers, num_points):
+    """The sent symbols and each receiver's symbols before and after decoding, one digit each."""
+    _require_fields(frame, location, sent=str, bits=dict)
+    strings = {"sent": frame["sent"], **{f"bits.{k}": v for k, v in frame["bits"].items()}}
+    for label, digits in strings.items():
+        if type(digits) is not str or len(digits) != num_points or set(digits) - set("0123"):
+            raise ValueError(f"{location}.{label}: expected {num_points} symbol digits 0-3")
+    for rx, receiver in receivers.items():
+        _require_fields(receiver, f"{location}.receivers.{rx}", raw=str, decoded=str)
+        for field in ("raw", "decoded"):
+            if receiver[field] not in frame["bits"]:
+                raise ValueError(f"{location}.receivers.{rx}.{field}: missing from bits")
 
 
 def _check_symbol_refs(document, location, receiver, label, num_points):
@@ -266,6 +282,8 @@ def _check_case(document, location, name):
     )
     if name == "pilot_whole_comb":
         _require_fields(meta, label, noise_variance=_NUMBER, true_noise_variance=_NUMBER)
+    _require_fields(meta, label, qpsk=list)
+    _require_numeric_shape(meta["qpsk"], f"{label}.qpsk", 4, 2)
 
     definition = CASES.get(name)
     required_maps = definition.detectors if definition else ("fused",)
@@ -299,6 +317,7 @@ def _check_case(document, location, name):
             _check_symbol_refs(frame, location, receiver, f"{location}.receivers.{rx}", num_points)
             counts = batch_crc.get(rx)
             _require_fields(counts, f"{crc_label}.{rx}", slots=int, failures=int)
+        _check_bits(frame, location, receivers, num_points)
 
     check_frame(document, location, meta["batch_crc"], f"{location}.metadata.batch_crc")
     if "levels" in document or (definition and definition.levels):

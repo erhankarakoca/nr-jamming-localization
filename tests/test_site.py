@@ -250,9 +250,20 @@ def test_cli_payload_and_manifest(tiny_models, monkeypatch, dirty):
         "true_prb_soft",
     }
     assert meta["batch_crc"].keys() == case["receivers"].keys()
+    assert np.shape(meta["qpsk"]) == (4, 2) and len(case["sent"]) == 1872
     for name, rx in case["receivers"].items():
         assert np.shape(case["x_hat"][rx["x_hat"]]) == (1872, 2)
         assert len(case["abs_llr"][rx["abs_llr"]]) == 1872
+        raw, decoded = case["bits"][rx["raw"]], case["bits"][rx["decoded"]]
+        assert len(raw) == len(decoded) == 1872 and not set(raw + decoded) - set("0123")
+        # The raw symbols agree with the quadrant of the equalized point (QPSK sign decisions)
+        points = np.asarray(case["x_hat"][rx["x_hat"]], float)
+        qpsk = np.sign(np.asarray(meta["qpsk"], float))
+        quadrant = [qpsk[int(d)] for d in raw]
+        agree = np.mean(np.all(np.sign(points) == quadrant, axis=1))
+        assert agree > 0.99
+        if rx["crc"]:
+            assert decoded == case["sent"]
         assert isinstance(rx["crc"], bool)
         counts = meta["batch_crc"][name]
         assert counts["slots"] == meta["batch_size"] == 2
@@ -310,9 +321,12 @@ def test_levels_replay_the_slot_at_each_power(tiny_models):
         assert level["detectors"].keys() == document["detectors"].keys()
         assert level["batch_crc"].keys() == level["receivers"].keys()
         assert level["receivers"].keys() == document["receivers"].keys()
+        assert level["sent"] == document["sent"]  # the same data at every power
         for name, rx in level["receivers"].items():
             assert np.shape(level["x_hat"][rx["x_hat"]]) == (1872, 2)
             assert len(level["abs_llr"][rx["abs_llr"]]) == 1872
+            if rx["crc"]:
+                assert level["bits"][rx["decoded"]] == level["sent"]
             assert level["batch_crc"][name]["slots"] == 2
 
 
@@ -406,16 +420,28 @@ def _write_case_data(data):
             "prb": {"r_b": [0] * width, "threshold": [1] * width},
             "pilots": pilots,
             "receivers": {
-                name: {"crc": True, "x_hat": "shared", "abs_llr": "shared"} for name in receivers
+                name: {
+                    "crc": True,
+                    "x_hat": "shared",
+                    "abs_llr": "shared",
+                    "raw": "shared",
+                    "decoded": "shared",
+                }
+                for name in receivers
             },
             "x_hat": {"shared": [[0, 0]] * num_points},
             "abs_llr": {"shared": [0] * num_points},
+            "sent": "0" * num_points,
+            "bits": {"shared": "0" * num_points},
         }
+        document["metadata"]["qpsk"] = [[0.7, 0.7], [0.7, -0.7], [-0.7, 0.7], [-0.7, -0.7]]
         if case.levels:
             frame = {key: document[key] for key in ("grids", "detectors", "receivers")}
             frame.update(
                 x_hat=document["x_hat"],
                 abs_llr=document["abs_llr"],
+                sent=document["sent"],
+                bits=document["bits"],
                 batch_crc=document["metadata"]["batch_crc"],
             )
             document["levels"] = [
@@ -495,6 +521,10 @@ def test_check_build_requires_page_cases(tmp_path):
         ("partial", ("levels", 1, "batch_crc")),
         ("hopping", ("levels", 2, "detectors", "fused_atk")),
         ("spoof", ("levels", 0, "receivers", "fused_atk2_soft")),
+        ("data", ("sent",)),
+        ("pilot", ("receivers", "standard", "decoded")),
+        ("partial", ("levels", 2, "bits")),
+        ("hopping", ("metadata", "qpsk")),
     ],
 )
 def test_check_build_requires_case_fields(tmp_path, name, keys):
