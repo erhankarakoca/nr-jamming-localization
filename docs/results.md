@@ -1496,23 +1496,24 @@ allocation of a slot that failed keeps the U-Net map), `fused` (U-Net as prior: 
 the U-Net flags, 1% elsewhere), `genie` (as `post` with the transmitted symbols on every slot).
 Decoding by the soft receiver with per-cell estimates and refining passes.
 
-F1 over all cells, seed 0 (`results/da_study/loc2`), seeds 1 and 2 pending:
+F1 over all cells, mean over the U-Net's training seeds 0, 1 and 2 (`results/decoded_map/table.csv`,
+from `--table results/decoded_map/*_refine.csv`; the range over seeds is at most 0.03):
 
 | Grid | U-Net | Exact tests | Fused | Genie | Benign FA, exact tests |
 | --- | --- | --- | --- | --- | --- |
-| test (nominal) | 0.953 | 0.887 | 0.913 | 0.886 | 1.01% |
-| sched | 0.924 | 0.892 | 0.914 | 0.897 | - |
-| combjam | 0.955 | 0.886 | 0.913 | 0.885 | 0.98% |
-| qpskjam | 0.959 | 0.890 | 0.917 | 0.889 | 1.03% |
+| test (nominal) | 0.951 | 0.887 | 0.913 | 0.886 | 1.01% |
+| sched | 0.936 | 0.898 | 0.920 | 0.897 | - |
+| combjam | 0.953 | 0.886 | 0.913 | 0.885 | 0.98% |
+| qpskjam | 0.956 | 0.890 | 0.917 | 0.889 | 1.03% |
 | neighbor | 0.961 | 0.907 | 0.933 | 0.906 | 0.99% |
-| hopjam | 0.581 | 0.876 | 0.862 | 0.884 | 1.00% |
-| pulsejam | 0.637 | 0.878 | 0.860 | 0.879 | 0.96% |
-| tonejam | 0.769 | 0.585 | 0.657 | 0.583 | 0.96% |
-| spoofjam | 0.032 | 0.252 | 0.227 | 0.773 | 1.00% |
-| spoofpart | 0.140 | 0.497 | 0.425 | 0.683 | 1.02% |
+| hopjam | 0.597 | 0.877 | 0.865 | 0.884 | 1.00% |
+| pulsejam | 0.638 | 0.878 | 0.860 | 0.879 | 0.96% |
+| tonejam | 0.768 | 0.585 | 0.657 | 0.583 | 0.96% |
+| spoofjam | 0.027 | 0.255 | 0.227 | 0.773 | 1.00% |
+| spoofpart | 0.138 | 0.510 | 0.432 | 0.683 | 1.02% |
 
 - The exact tests stay at their 1% design rate on every grid's benign slots (0.96-1.03% over all
-  cells); the U-Net varies between 0.35% and 1.33%, the fusion 1.05-1.21%.
+  cells); the U-Net varies between 0.59% and 1.40%, the fusion 1.04-1.20%.
 - The network wins on the attacks it was trained on (it pools weak evidence across a PRB row);
   the exact tests win on every support it never saw, without training.
 - Spoofing: the scheduled-cell F1 of the exact tests is 0.46-0.79 between -15 and -6 dB JSR
@@ -1538,19 +1539,63 @@ Bug found and fixed during the round: the first `renoise` used the filter's erro
 the wrong noise power and came out several dB low (commit 8aa773e). Numbers from before the fix are
 not used.
 
-Hopping and pulsed jammers at +9 dB JSR, TDL-C, 15 dB SNR, 4 of 12 PRBs, three seeds of 1,600 slots
-(`results/da_study/table`, `table_full`), BLER per seed:
+All receivers of a jammer decode the same slots (three detector seeds, up to 1,600 slots each, a
+receiver stops after 100 block errors). Runs: `results/da_study/{table_nom,table_nom_old,
+table_whole,table,table_old,table_full}`, merged per seed into `results/receiver_v7/recovery`
+(pooled `recovery_C{,_hopping,_pulsed}.csv`, paired differences in `*_paired.csv`). The older replay
+files in `results/recovery` are on different slots (the draws of a point depend on the JSR grid run
+before it) and are not mixed in. BLER (%), TDL-C, 15 dB SNR, known noise power, +9 dB JSR on 4 of
+12 PRBs, or every DMRS cell of the allocation (last two columns):
 
-| Jammer | U-Net soft | U-Net per cell | U-Net full | True map soft | No map, per cell | No map, full |
-| --- | --- | --- | --- | --- | --- | --- |
-| hopping data | 25.9 / 17.7 / 21.1% | 1.3 / 2.5 / 0.9% | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
-| hopping partial | 32.2 / 29.4 / 31.2% | | 0.3 / 0.3 / 0.2% | | | 0.2 / 0.2 / 0.1% |
-| pulsed partial | 0.2 / 0.4 / 0.6% | | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| Receiver | nom. pilot | nom. data | nom. partial | pulsed data | pulsed partial | hop data | hop partial | all pilots +3 | all pilots +9 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| No protection | 30 | 79 | 91 | 19 | 45 | 26 | 61 | 40 | 96 |
+| LMMSE, no map | 16 | 80 | 86 | 18 | 35 | 25 | 50 | - | - |
+| Slot-wide estimate | 12 | 81 | 91 | 60 | 69 | 75 | 84 | - | - |
+| DMRS only | 0.77 | 80 | 0.77 | 18 | 10 | 25 | 58 | - | - |
+| Power test, hard | 4.6 | 20 | 24 | 1.4 | 4.9 | 1.4 | 12 | - | - |
+| Block test, soft | 0.04 | 0 | 7.8 | 0.06 | 2.7 | 51 | 64 | - | - |
+| U-Net, hard | 0.29 | 0.08 | 0.15 | 0.54 | 0.62 | 35 | 51 | - | - |
+| U-Net, soft per PRB | 0.06 | 0 | 0.04 | 0.06 | 0.38 | 21 | 31 | 3.6 | 39 |
+| ... with channel passes | 0.04 | 0 | 0.02 | 0 | 0.29 | 20 | 24 | 1.3 | 24 |
+| U-Net, soft per cell | 0.06 | 0 | 0.06 | 0 | 0.33 | 1.6 | 10 | 3.6 | 39 |
+| ... with refining passes (`p_r_e_full`) | 0 | 0 | 0 | 0 | 0 | 0 | 0.25 | 0.98 | 22 |
+| U-Net, mixed attacks, soft | 0.04 | 0 | 0.06 | 0 | 0.04 | 0 | 0.23 | - | - |
+| No map, per cell | 0.04 | 0 | 0.08 | 0 | 0.02 | 0 | 0.35 | 4.6 | 44 |
+| ... with refining passes | 0.02 | 0 | 0.04 | 0 | 0 | 0 | 0.15 | 1.3 | 25 |
+| True map per PRB, soft | 0.02 | 0 | 0.02 | 0.06 | 0.08 | 50 | 58 | - | - |
+| True map, soft per PRB | 0.02 | 0 | 0.02 | 0 | 0 | 0 | 0.12 | 3.6 | 39 |
+| True map, per cell, refining | 0 | 0 | 0 | 0 | 0 | 0 | 0.08 | 1.0 | 21 |
 
-16-QAM (MCS 13, 18 dB SNR, seed 0, true map against no map; Colab, `--mcs 13`): pilot +3/+9 dB
-0.4/0.9% against 1.6/4.9%; data 4.2/7.8% against 20.2/19.1%; partial-band 5.6/7.9% against
-21.4/31.2%. The per-cell estimate with the true map gives 7.6/9.1% (data) and 7.8/8.8% (partial),
-so with 16-QAM pooling over the flagged cells of a PRB is more precise when the map is right.
+Zeros are 0 of 4,800. Without a jammer and at -15 dB JSR every receiver had no block error in
+4,800 slots. Paired differences (percentage points, 95% interval, common slots):
 
-Pending in this section: nominal grid and every-pilot-jammed case (three seeds), estimated noise
-power, 8 dB SNR, localization seeds 1 and 2.
+- Hopping data: per-PRB minus full 21.1 (19.1 to 23.1); per cell minus full 1.56 (1.24 to 1.95);
+  full equals the true map and the mixed-attack U-Net (0.00, -0.08 to 0.08).
+- Hopping partial: per-PRB minus full 30.8 (28.0 to 33.7); per cell minus full 10.1 (9.1 to 11.3);
+  full minus true full 0.17 (0.06 to 0.33); mixed-attack minus full -0.02 (-0.19 to 0.14).
+- Pulsed partial: per-PRB minus full 0.38 (0.22 to 0.59).
+- Every pilot jammed: per-PRB minus full 2.65 (2.22 to 3.14) at +3 dB and 16.7 (14.3 to 19.2) at
+  +9 dB; channel passes minus full 0.31 (0.11 to 0.54) and 2.46 (1.25 to 3.68); full minus true
+  full -0.02 (-0.13 to 0.08) and 0.61 (0.12 to 1.12); no map minus map, one attempt 0.94 (0.60 to
+  1.29) and 4.43 (2.61 to 6.23), with the refining passes 0.29 (0.10 to 0.51) and 2.96 (1.60 to
+  4.33). The map matters here because the excess energy of clean cells is measured against a
+  poor channel estimate.
+- Nominal attacks: every difference among the soft receivers is within noise (all intervals
+  include zero); the power test with hard use is 4.6-24 points worse than the full receiver.
+
+Estimated noise power (`--noise-estimate comb`, Colab, `recovery_C_nest*`), every pilot jammed,
+three seeds: per-PRB soft 52% (+3 dB) and 98% (+9 dB), channel passes 15.3% and 84%, full 4.4% and
+68%, true map full 4.3% and 68%, map-free full 4.2% and 68%. Channel passes minus full 10.6 (9.2 to
+12.0) and 17.2 (13.4 to 21.1); full minus true full 0.10 (-0.06 to 0.27) and 0.87 (0.08 to 1.67).
+Partial-band on 4 PRBs: every map receiver at or below 0.38%.
+
+16-QAM (MCS 13, 18 dB SNR, seeds 0 and 1, `recovery_C_snr18_mcs13*`), BLER with the true map per
+PRB / true map per cell / no map per cell: pilot +3 dB 0.53 / 0.53 / 1.75%, +9 dB 1.0 / 1.0 / 5.4%;
+data 4.0 / 7.4 / 19.7% and 7.8 / 8.9 / 19.7%; partial-band 5.6 / 7.5 / 21.1% and 7.8 / 8.8 /
+28.1%. Without jamming no receiver erred in 3,200 slots. On a clean cell the per-cell excess energy
+has the variance (2|h|^2 N0 + N0^2 + |h|^4 kappa) per resource element, kappa = Var|x|^2 = 0 for
+QPSK and 0.32 for 16-QAM, so without a map 16-QAM cells get false jamming power.
+
+Not finished: an 8 dB SNR run of the same receivers on Colab (benign point only: every receiver at
+or below 0.3% BLER).
