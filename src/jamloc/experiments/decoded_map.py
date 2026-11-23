@@ -48,6 +48,7 @@ from jamloc.recovery import MapAwareReceiver
 from jamloc.train import load_model
 
 MAPS = ("unet", "post", "fused", "genie")
+PEAKS = False  # combine each cell's sum test with a test on its largest error (see _with_peak)
 
 
 def _jobs(split: str, per_point: int):
@@ -69,14 +70,26 @@ def _slot_pvalues(rx, out, x_data) -> torch.Tensor:
     _, r, count = rx.decoded_cell_test(out.y_alloc, out.no, x_data)
     m = count.to(r.dtype)
     pv = torch.special.gammaincc(m.clamp_min(1), m * torch.nan_to_num(r, nan=0.0))
+    if PEAKS:
+        pv = _with_peak(pv, torch.nan_to_num(rx.last_peaks, nan=0.0), m)
     return torch.where(count > 0, pv, torch.ones_like(pv))
+
+
+def _with_peak(p_sum, peak, m):
+    """Combined p-value of the sum test and the test on the largest of m unit exponentials, each
+    at half the level (Bonferroni), so that a jammer on one subcarrier of a cell is not diluted."""
+    p_peak = 1 - (1 - torch.exp(-peak)) ** m.clamp_min(1)
+    return torch.clamp(2 * torch.minimum(p_sum, p_peak), max=1.0)
 
 
 def _power_pvalues(y, no) -> torch.Tensor:
     """P-values ``[B, B_c, num_symbols]`` of the received power of every carrier cell without the
     UE's signal: its mean energy over the 12 subcarriers divided by N0 is Gamma(12, 1/12)."""
-    energy = (y.abs() ** 2).reshape(y.shape[0], y.shape[1], -1, 12).sum(-1) / no[:, None, None]
-    return torch.special.gammaincc(torch.tensor(12.0), energy).transpose(1, 2)
+    unit = (y.abs() ** 2).reshape(y.shape[0], y.shape[1], -1, 12) / no[:, None, None, None]
+    pv = torch.special.gammaincc(torch.tensor(12.0), unit.sum(-1))
+    if PEAKS:
+        pv = _with_peak(pv, unit.amax(-1), torch.tensor(12.0))
+    return pv.transpose(1, 2)
 
 
 def run(
@@ -189,7 +202,7 @@ def run(
         )
     out_dir = results_dir() / "decoded_map"
     out_dir.mkdir(parents=True, exist_ok=True)
-    suffix = "_refine" if refine else ""
+    suffix = ("_refine" if refine else "") + ("_peaks" if PEAKS else "")
     path = out_dir / f"{split}_seed{seed}{suffix}.csv"
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
@@ -220,7 +233,10 @@ def main(argv=None):
     )
     p.add_argument("--passes", type=int, default=3)
     p.add_argument("--refine", action="store_true", help="passes refine the map")
+    p.add_argument("--peaks", action="store_true", help="also test the largest error of each cell")
     args = p.parse_args(argv)
+    global PEAKS
+    PEAKS = args.peaks
     run(
         args.split,
         args.seed,

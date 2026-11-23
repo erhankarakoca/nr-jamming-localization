@@ -419,7 +419,7 @@ class MapAwareReceiver(Block):
             out[:, :, sym] = residual_per_prb(h_ls, sc, no, power, self.cfg)
         return out
 
-    def slot_residuals(self, y, no, x_data, exclude=None, order=1):
+    def slot_residuals(self, y, no, x_data, exclude=None, order=1, peaks=False):
         """Residual ``[B, n, num_symbols]`` of every data and DMRS cell of a decoded slot, and
         the number of known symbols in each cell (NaN and 0 where a cell has none).
 
@@ -433,7 +433,9 @@ class MapAwareReceiver(Block):
         predict. The prediction of ``(k, l)`` does not contain ``y_{k,l}``, so without jamming the
         difference is circular Gaussian with variance ``N0 / |x|^2`` plus the variance of the
         fit. The residual of a cell is the energy of its differences divided by the sum of these
-        variances, Gamma(m, 1/m) for m known symbols of equal energy (``cell_threshold``)."""
+        variances, Gamma(m, 1/m) for m known symbols of equal energy (``cell_threshold``). With
+        ``peaks``, also return the largest error of each cell divided by its variance, the maximum
+        of m unit exponentials without jamming, which a jammer on a single subcarrier raises."""
         num_prb, width = y.shape[-1] // 12, y.shape[-1]
         num_sym = self.cfg.num_symbols
         dev, rows = y.device, y.shape[0]
@@ -480,6 +482,11 @@ class MapAwareReceiver(Block):
         fine = (ok | ~known).reshape(cells).all(-1) & (count > 0)
         r = err.reshape(cells).sum(-1) / (no[:, None, None] * var.reshape(cells).sum(-1))
         r = torch.where(fine, r, torch.nan)
+        # The largest normalized error of a cell, each unit exponential without jamming
+        unit = torch.where(known, err / (no[:, None, None] * var.clamp_min(1e-12)), 0.0)
+        peak = torch.where(fine, unit.reshape(cells).amax(-1), torch.nan)
+        if peaks:
+            return r.transpose(1, 2), count.transpose(1, 2), peak.transpose(1, 2)
         return r.transpose(1, 2), count.transpose(1, 2)
 
     def decoded_cell_test(self, y, no, x_data, alpha=0.01, peel=1e-6, exclude=None, order=1):
@@ -499,10 +506,11 @@ class MapAwareReceiver(Block):
         excl = data.new_zeros((y.shape[0], num_prb, self.cfg.num_symbols))
         if exclude is not None:
             excl = excl | (exclude.to(excl.device) & data)
-        last, count = None, None
+        last, count, top_err = None, None, None
         for _ in range(self.cfg.num_symbols + 1):
-            r, count = self.slot_residuals(y, no, x_data, excl, order)
+            r, count, peak = self.slot_residuals(y, no, x_data, excl, order, peaks=True)
             last = r if last is None else torch.where(torch.isnan(r), last, r)
+            top_err = peak if top_err is None else torch.where(torch.isnan(peak), top_err, peak)
             high = self._null_quantile(count, peel)
             score = torch.nan_to_num(r / high, nan=-1.0).masked_fill(excl | ~data, -1.0)
             top = score.max(dim=2, keepdim=True).values
@@ -510,7 +518,9 @@ class MapAwareReceiver(Block):
             if not new.any():
                 break
             excl = excl | new
-        return torch.nan_to_num(last, nan=0.0) > self._null_quantile(count, alpha), last, count
+        flags = torch.nan_to_num(last, nan=0.0) > self._null_quantile(count, alpha)
+        self.last_peaks = top_err  # the largest normalized error of each cell (see slot_residuals)
+        return flags, last, count
 
     @staticmethod
     def _null_quantile(count: torch.Tensor, alpha: float) -> torch.Tensor:
