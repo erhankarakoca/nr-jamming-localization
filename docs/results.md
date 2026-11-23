@@ -1150,8 +1150,9 @@ Design `docs/superpowers/specs/2026-11-20-showcase-site-design.md`, plan
   export. The files grow to 1.3–1.8 MB each (0.38–0.55 MB gzipped), loaded only by Explore.
 - **Bits before and after decoding (23 Nov).** Every case also records the transmitted QPSK
   symbols and, per receiver, the symbols its bits give before decoding (LLR signs) and after
-  decoding (its decoded block encoded again). Explore's "After decoding" view and the walkthrough's
-  last step draw them. In the walkthrough slot (partial-band, +3 dB) all wrong bits before decoding
+  decoding (its decoded block encoded again). Explore's "What decoding does with the bits" grids
+  and the walkthrough's last step draw the wrong bits per cell before decoding and the CRC outcome
+  after it. In the walkthrough slot (partial-band, +3 dB) all wrong bits before decoding
   lie in the jammed cells: 362 for the standard receiver and 352 with the U-Net map. After decoding
   the map-aware block equals the one sent (0 wrong bits), while the standard receiver's decoded
   block differs from it in 564 coded bits. Over the 64-slot batch (`partial` at +3 dB), 26% of the

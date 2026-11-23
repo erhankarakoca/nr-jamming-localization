@@ -317,10 +317,11 @@ main > figure + section { margin-top: 2rem; }
 .segmented button + button { margin-left: -1px; }
 #explore-points .constellation-set { grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr)); gap: 1rem; }
 #explore-points .constellation-set figcaption { font-family: var(--serif); font-size: 1rem; }
-.ledger { flex-basis: 100%; font-family: var(--sans, inherit); font-size: 0.85rem; }
-.ledger b { font-variant-numeric: tabular-nums; }
-.ledger .good { color: #006600; }
-.ledger .bad { color: var(--red); }
+.decoding-block { margin-top: 1.2rem; padding-top: 0.9rem; border-top: 1px solid var(--rule); }
+.decoding-block h3 { margin: 0 0 0.4rem; font-size: 1.02rem; }
+.decoding-panel { display: block; width: 100%; max-width: 30rem; height: auto; margin-top: 0.5rem; }
+.swatch.errors { background: linear-gradient(to right, #c8c8c8, #1a1a1a); width: 1.6rem; border-color: #999; }
+.swatch.lost { background: repeating-linear-gradient(135deg, #d9d9d9 0 3px, #8c8c8c 3px 5px); border-color: #8c8c8c; }
 .points-note { color: var(--muted); font-size: 0.9rem; margin-top: 0.6rem; }
 .explore-batch {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 27rem); gap: 2rem; align-items: start;
