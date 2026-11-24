@@ -595,12 +595,27 @@ class MapAwareReceiver(Block):
             pilot_var = s2[:, None] * inflate[:, pilot_dmrs, pilot_prb]
         return clean, pilot_var, r, interfered
 
+    def _grid_sums(self, values: torch.Tensor) -> torch.Tensor:
+        """Sums of ``values`` ``[B, num_data]`` over the data resource elements of each PRB and
+        OFDM symbol, ``[B, num_symbols, num_prb]``. Like ``sum_over_symbols``, the values go onto
+        a zero grid that is then summed, which gives the same bits on every device."""
+        sym = self.data_sym.to(values.device)
+        sc = self.data_sc.to(values.device)
+        num_sc = (int(sc.max()) // 12 + 1) * 12
+        grid = values.new_zeros(values.shape[0], self.cfg.num_symbols, num_sc)
+        grid[:, sym, sc] = values
+        return grid.reshape(values.shape[0], self.cfg.num_symbols, num_sc // 12, 12).sum(-1)
+
     def _cell_sum(self, values: torch.Tensor) -> torch.Tensor:
         """Sum of ``values`` ``[B, num_data]`` over the data resource elements of each cell
         (PRB and OFDM symbol), returned on every resource element of that cell."""
-        cell = ((self.data_sc // 12) * self.cfg.num_symbols + self.data_sym).to(values.device)
-        total = values.new_zeros(values.shape[0], int(cell.max()) + 1).index_add_(1, cell, values)
-        return total[:, cell]
+        prb = (self.data_sc // 12).to(values.device)
+        return self._grid_sums(values)[:, self.data_sym.to(values.device), prb]
+
+    def _prb_sum(self, values: torch.Tensor) -> torch.Tensor:
+        """Sum of ``values`` ``[B, num_data]`` over the data resource elements of each PRB,
+        ``[B, num_prb]``."""
+        return self._grid_sums(values).sum(dim=1)
 
     def _cell_mean(self, values: torch.Tensor) -> torch.Tensor:
         return self._cell_sum(values) / self._cell_sum(torch.ones_like(values[:1]))
@@ -762,13 +777,8 @@ class MapAwareReceiver(Block):
         if self._cellwise is True:  # each flagged cell from its own resource elements
             return torch.where(flagged, self._cell_mean(excess).clamp_min(0), 0.0)
         # Average over the flagged data REs of each PRB.
-        num_prb = y.shape[-1] // 12
-        total = excess.new_zeros(excess.shape[0], num_prb).index_add_(
-            1, data_prb, torch.where(flagged, excess, torch.zeros_like(excess))
-        )
-        count = excess.new_zeros(excess.shape[0], num_prb).index_add_(
-            1, data_prb, flagged.to(excess.dtype)
-        )
+        total = self._prb_sum(torch.where(flagged, excess, torch.zeros_like(excess)))
+        count = self._prb_sum(flagged.to(excess.dtype))
         pooled = (total / count.clamp_min(1))[:, data_prb]
         if self._cellwise == "shrink":
             # Random-effects shrinkage: each flagged cell's own estimate is pulled towards the
@@ -781,9 +791,7 @@ class MapAwareReceiver(Block):
             se2 = (self._cell_mean(excess**2) - own**2).clamp_min(0) / (per_cell - 1).clamp_min(1)
 
             def row_mean(values):
-                sums = values.new_zeros(values.shape[0], num_prb).index_add_(
-                    1, data_prb, torch.where(flagged, values, torch.zeros_like(values))
-                )
+                sums = self._prb_sum(torch.where(flagged, values, torch.zeros_like(values)))
                 return (sums / count.clamp_min(1))[:, data_prb]
 
             num_cells = count[:, data_prb] / per_cell
