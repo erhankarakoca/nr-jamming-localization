@@ -208,13 +208,31 @@ def test_soft_qpsk_matches_the_constellation():
 
     from jamloc.recovery import soft_qpsk
 
-    points = Constellation("qam", 2).points
-    bits = torch.tensor([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=torch.float32)
+    points = Constellation("qam", 2).points  # on Sionna's device, so the LLRs go there too
+    bits = torch.tensor([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=torch.float32, device=config.device)
     mean, var = soft_qpsk(40.0 * (2 * bits - 1))  # confident LLRs of each point's label
     assert torch.allclose(mean, points, atol=1e-6)
-    assert torch.allclose(var, torch.zeros(4), atol=1e-6)
-    mean, var = soft_qpsk(torch.zeros(1, 2))  # nothing known: mean 0, unit variance
-    assert mean.abs().item() == 0 and var.item() == 1
+    assert torch.allclose(var, torch.zeros_like(var), atol=1e-6)
+    mean, var = soft_qpsk(torch.zeros(1, 2, device=config.device))  # nothing known
+    assert mean.abs().item() == 0 and var.item() == 1  # mean 0, unit variance
+
+
+def test_sum_over_symbols_matches_a_sum_per_subcarrier():
+    from jamloc.receiver import data_positions
+    from jamloc.recovery import sum_over_symbols
+
+    # In the data cells of a 12-PRB slot, every subcarrier appears once per data symbol
+    tx = UEPool(cfg).transmitter(ALLOC[1])
+    sym, sc = data_positions(tx)
+    num_sc = 12 * ALLOC[1]
+    gen = torch.Generator(device=config.device).manual_seed(0)
+    values = torch.randn(3, len(sc), generator=gen, device=config.device)
+    out = sum_over_symbols(values, sym, sc, cfg.num_symbols, num_sc)
+    assert out.shape == (3, num_sc)
+    for k in range(num_sc):
+        assert torch.allclose(out[:, k], values[:, sc == k].sum(1), rtol=1e-5, atol=1e-6)
+    # Same inputs, same bits, also on a GPU
+    assert torch.equal(out, sum_over_symbols(values, sym, sc, cfg.num_symbols, num_sc))
 
 
 def test_data_aided_passes_rescue_blocks_without_clean_pilots():

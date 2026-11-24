@@ -1,4 +1,5 @@
 import torch
+from sionna.phy import config
 
 from jamloc.config import SimConfig
 from jamloc.jammer import ATTACKS, Jammer, cell_mask
@@ -131,9 +132,13 @@ def test_spoofing_jammer_replays_the_pilots():
     import dataclasses
 
     spoof = dataclasses.replace(cfg, jammer_waveform="dmrs")
-    # UE grid: QPSK pilots of energy 2 on the even subcarriers of PRBs 4-9 (DMRS symbol only)
-    x = torch.zeros(1, 1, 1, 14, 288, dtype=torch.complex64)
-    pilots = (torch.randint(0, 2, (36,)) * 2 - 1) + 1j * (torch.randint(0, 2, (36,)) * 2 - 1)
+    # The UE grid has QPSK pilots of energy 2 on the even subcarriers of PRBs 4-9, DMRS symbol
+    # only. It is built on Sionna's device, where the jammer returns its output.
+    dev = config.device
+    x = torch.zeros(1, 1, 1, 14, 288, dtype=torch.complex64, device=dev)
+    pilots = (torch.randint(0, 2, (36,), device=dev) * 2 - 1) + 1j * (
+        torch.randint(0, 2, (36,), device=dev) * 2 - 1
+    )
     x[0, 0, 0, spoof.dmrs_symbol, 48:120:2] = pilots.to(torch.complex64)
     cells = cell_mask(torch.tensor([3]), torch.tensor([2]), torch.tensor([10]), spoof)
     z = Jammer(spoof)(cells, torch.tensor([0.0]), x)[0, 0, 0]
@@ -141,9 +146,10 @@ def test_spoofing_jammer_replays_the_pilots():
     # Inside the allocation: the UE's pilots (unit energy) times one common phase
     ratio = dmrs[48:120:2] / (x[0, 0, 0, spoof.dmrs_symbol, 48:120:2] / 2**0.5)
     assert torch.allclose(ratio, ratio[:1].expand_as(ratio), atol=1e-5)
-    assert torch.allclose(ratio.abs(), torch.ones(36), atol=1e-5)
+    assert torch.allclose(ratio.abs(), torch.ones_like(ratio.real), atol=1e-5)
     # Outside the allocation (PRBs 2-3, 10-11): unit-energy symbols; the empty comb stays clean
-    assert torch.allclose(dmrs[24:48:2].abs(), torch.ones(12), atol=1e-5)
+    outside = dmrs[24:48:2].abs()
+    assert torch.allclose(outside, torch.ones_like(outside), atol=1e-5)
     assert (dmrs[25:144:2] == 0).all()
     assert (z[5, 24:144] != 0).all()  # partial-band: data symbols get Gaussian noise
 
