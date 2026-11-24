@@ -34,7 +34,12 @@ Numbers have about four significant digits. Undefined values are JSON null.
   pilots: subcarrier (relative to allocation start), ls, projection and residual_power
   (squared magnitude, linear). Each complex value is a [real, imaginary] pair.
 * receivers: entries named standard or <map>_<mode>, each with crc (boolean) and keys
-  x_hat and abs_llr into the two like-named tables at the top level. Each table stores
+  x_hat and abs_llr into the two like-named tables at the top level, and keys raw and decoded
+  into the bits table.
+* sent, bits: the transmitted QPSK symbols and, per receiver, the symbols its bits give before
+  decoding (raw: the signs of its LLRs) and after decoding (decoded: its decoded block encoded
+  again), in the x_hat order. Each is a string with one digit per symbol, 2 b0 + b1 for the
+  symbol's two coded bits b0 b1; metadata.qpsk gives the constellation point of each digit. Each table stores
   a shared numerical array once. x_hat is a list of float16-rounded complex points.
   abs_llr gives the mean absolute LLR of the two QPSK bits per point. Both arrays run
   in symbol order, skipping the DMRS symbol, then in increasing allocation subcarrier
@@ -45,7 +50,16 @@ Numbers have about four significant digits. Undefined values are JSON null.
   map-aware estimates follow subcarrier order. Residuals and thresholds follow PRB order.
 * passes: the soft map-aware receiver's initial attempt and each data-aided pass that ran.
   Each has h (the estimate in subcarrier order), crc (that pass's outcome), x_hat and
-  abs_llr (references into the same tables the receivers use).
+  abs_llr (references into the same tables the receivers use). Every pass after the first
+  attempt also has certainty, [allocation PRB][OFDM symbol]: the mean over the cell's
+  subcarriers of how sure the decoder was of each data symbol (|mean|^2, 0 for a symbol the
+  pass left out), which sets how much the cell counts as a pilot; null on the DMRS symbol.
+* levels (cases with Explore levels): one entry per jammer power, in the case's order. Each
+  replays the case's batch seed with only the JSR changed and shows the same slot index.
+  jsr_db is null for the jammer switched off (its truth grid is then all zero, since nothing
+  was transmitted). The entry at the case's own jsr_db has only jsr_db: the top-level fields
+  are that level. Every other entry has grids, detectors, receivers, x_hat, abs_llr and
+  batch_crc as above for that power.
 * fig3 and jsr_sweep also have benign (jsr_db null for zero power, pilots, r_b), from the
   same batch seed and slot index. jsr_sweep adds sweep, nine such frames with finite
   jsr_db values from -15 to +9. The selected index comes from its 0 dB batch.
@@ -56,7 +70,7 @@ import math
 import subprocess
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -204,24 +218,37 @@ class CaseRun:
     thresholds: dict
     receivers: dict
     selection: dict
+    levels: dict = field(default_factory=dict)
 
 
 def simulate_case(case: Case, *, load_detector: Callable = _load_detector) -> CaseRun:
-    """Select a slot, advancing the simulation seed if a data-aided flip is absent."""
+    """Select a slot, advancing the simulation seed if a data-aided flip is absent, then replay
+    the same batch at the case's other jammer powers."""
     load_detector = cache(load_detector)
     with _cpu():
         while True:
             try:
-                return _simulate_batch(case, load_detector)
+                run = _simulate_batch(case, load_detector)
+                break
             except _NoSelectedSlot:
                 if case.selection_rule != "first_aided_crc_flip":
                     raise
                 case = replace(case, seed=case.seed + 1)
+        slot = run.selection["slot"]
+        for jsr_db in case.levels:
+            if jsr_db != case.jsr_db:
+                level = replace(case, jsr_db=jsr_db, include_channel=False, iterations=0)
+                run.levels[jsr_db] = _simulate_batch(level, load_detector, slot=slot)
+        return run
 
 
-def _simulate_batch(case, load_detector):
-    """Decode every map on the same received allocation and then select one slot."""
+def _simulate_batch(case, load_detector, slot=None):
+    """Decode every map on the same received allocation and then select one slot (or keep
+    ``slot``, the index chosen at the case's own jammer power)."""
     batch = _batch(case, case.jsr_db, receive=True, keep_channel=case.include_channel)
+    if case.jsr_db is None:
+        # The labels mark the attack pattern; with the jammer off it transmitted nothing
+        batch = replace(batch, labels=torch.zeros_like(batch.labels))
     cfg = case.config()
     maps, thresholds = {}, {}
     for name in case.detectors:
@@ -250,7 +277,10 @@ def _simulate_batch(case, load_detector):
             history=True,
         )
     crc = {name: rx["tb_crc"].bool().flatten() for name, rx in receivers.items()}
-    selection = _select(case, batch.labels, maps["fused"][1], crc)
+    if slot is None:
+        selection = _select(case, batch.labels, maps["fused"][1], crc)
+    else:
+        selection = {"rule": "same_slot", "slot": slot}
     return CaseRun(case, batch, maps, thresholds, receivers, selection)
 
 
@@ -333,12 +363,30 @@ def _symbol_refs(points, reliability, name, rx, slot):
     }
 
 
-def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | None = None) -> dict:
-    """Build the versioned JSON document for the selected slot."""
-    if git_commit is None:
-        git_commit, git_dirty = _git_revision()
-    case, batch = run.case, run.batch
-    cfg, i = case.config(), run.selection["slot"]
+def _digits(bits: torch.Tensor) -> str:
+    """Coded bits (b0 b1 per QPSK symbol) as one digit 2 b0 + b1 per symbol."""
+    pairs = bits.reshape(-1, 2).long()
+    return "".join(map(str, (2 * pairs[:, 0] + pairs[:, 1]).tolist()))
+
+
+def _coded_bits(batch: SlotBatch, info_bits: torch.Tensor) -> torch.Tensor:
+    """The scrambled coded bits the transmitter sends for these information bits."""
+    return batch.tx._tb_encoder(info_bits.to(batch.b.device)).flatten()
+
+
+def _bit_refs(table, name, rx, batch, slot):
+    """The symbols a receiver's bits give before decoding (LLR signs; Sionna's LLRs are
+    log P(1)/P(0)) and after decoding (the decoded block encoded again)."""
+    refs = {"raw": _share(table, f"{name}_raw", _digits(rx["llr"][slot].flatten() > 0))}
+    if rx.get("b_hat") is not None:
+        decoded = _coded_bits(batch, rx["b_hat"][slot : slot + 1].float())
+        refs["decoded"] = _share(table, f"{name}_decoded", _digits(decoded))
+    return refs
+
+
+def _frame(run: CaseRun, i: int) -> dict:
+    """Grids, detector layers, receivers and batch CRC counts of slot ``i`` of one batch."""
+    batch, cfg = run.batch, run.case.config()
     features = dict(zip(FEATURE_NAMES, extract(batch, cfg)[i], strict=True))
     grids = {
         "power_db": features["power_db"],
@@ -355,14 +403,53 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
         }
         for name, (scores, flags) in run.maps.items()
     }
-    receivers, points, reliability, batch_crc = {}, {}, {}, {}
+    receivers, points, reliability, bits, batch_crc = {}, {}, {}, {}, {}
     for name, rx in run.receivers.items():
         crc = rx["tb_crc"].bool().flatten()
         batch_crc[name] = {"slots": len(crc), "failures": int((~crc).sum())}
         receivers[name] = {
             "crc": bool(crc[i]),
             **_symbol_refs(points, reliability, name, rx, i),
+            **_bit_refs(bits, name, rx, batch, i),
         }
+    return {
+        "grids": _numbers(grids),
+        "detectors": _numbers(detectors),
+        "receivers": receivers,
+        "x_hat": points,
+        "abs_llr": reliability,
+        "sent": _digits(_coded_bits(batch, batch.b[i : i + 1])),
+        "bits": bits,
+        "batch_crc": batch_crc,
+    }
+
+
+def _cell_means(values: torch.Tensor, alloc_size: int, cfg) -> list:
+    """Per-cell means [allocation PRB][OFDM symbol] of one value per data symbol (in the x_hat
+    order: symbol by symbol, skipping the DMRS symbol, 12 subcarriers per PRB); null on DMRS."""
+    dmrs = cfg.dmrs_symbols[0]
+    data = values.reshape(cfg.num_symbols - 1, alloc_size, 12).mean(-1)  # [data symbol, PRB]
+    grid = [[None] * cfg.num_symbols for _ in range(alloc_size)]
+    for ordinal in range(cfg.num_symbols - 1):
+        symbol = ordinal + (ordinal >= dmrs)
+        for prb in range(alloc_size):
+            grid[prb][symbol] = float(data[ordinal, prb])
+    return _numbers(grid)
+
+
+def _qpsk(batch: SlotBatch) -> list:
+    """The constellation point of each symbol digit 2 b0 + b1, from the transmitter's mapper."""
+    pairs = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]], device=batch.b.device)
+    return _numbers(torch.view_as_real(batch.tx._mapper(pairs.reshape(1, -1)).flatten()))
+
+
+def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | None = None) -> dict:
+    """Build the versioned JSON document for the selected slot."""
+    if git_commit is None:
+        git_commit, git_dirty = _git_revision()
+    case, batch = run.case, run.batch
+    cfg, i = case.config(), run.selection["slot"]
+    frame = _frame(run, i)
     anchor = _pilot_frame(batch, cfg, i, case.jsr_db)
     result = {
         "schema_version": SCHEMA_VERSION,
@@ -374,14 +461,15 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
                 "git_commit": git_commit,
                 "git_dirty": git_dirty,
                 "selection": run.selection,
-                "batch_crc": batch_crc,
+                "batch_crc": frame["batch_crc"],
                 "thresholds": run.thresholds,
                 "noise_variance": batch.no[i],
                 "true_noise_variance": batch.no_true[i],
+                "qpsk": _qpsk(batch),
             }
         ),
-        "grids": _numbers(grids),
-        "detectors": _numbers(detectors),
+        "grids": frame["grids"],
+        "detectors": frame["detectors"],
         "prb": {
             "r_b": anchor["r_b"],
             "threshold": _numbers(
@@ -389,10 +477,19 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
             ),
         },
         "pilots": anchor["pilots"],
-        "receivers": receivers,
-        "x_hat": points,
-        "abs_llr": reliability,
+        "receivers": frame["receivers"],
+        "x_hat": frame["x_hat"],
+        "abs_llr": frame["abs_llr"],
+        "sent": frame["sent"],
+        "bits": frame["bits"],
     }
+    if case.levels:
+        result["levels"] = [
+            {"jsr_db": jsr_db}
+            if jsr_db == case.jsr_db
+            else {"jsr_db": jsr_db, **_frame(run.levels[jsr_db], i)}
+            for jsr_db in case.levels
+        ]
     if case.include_channel:
         dmrs = cfg.dmrs_symbols[0]
         pilots = result["pilots"]
@@ -417,8 +514,13 @@ def payload(run: CaseRun, *, git_commit: str | None = None, git_dirty: bool | No
         result["passes"] = [
             {
                 "h": _numbers(step["h_sc"][i]),
-                **_symbol_refs(points, reliability, f"pass_{index}", step, i),
+                **_symbol_refs(frame["x_hat"], frame["abs_llr"], f"pass_{index}", step, i),
                 "crc": bool(step["tb_crc"][i]),
+                **(
+                    {"certainty": _cell_means(step["certainty"][i], case.alloc[1], cfg)}
+                    if "certainty" in step
+                    else {}
+                ),
             }
             for index, step in enumerate(run.receivers[AIDED_RECEIVER]["history"])
         ]

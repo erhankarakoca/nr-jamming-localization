@@ -46,6 +46,127 @@ export function symbols(slot, receiver, prbs = null) {
   return out;
 }
 
+const popcount = digit => (digit & 1) + ((digit >> 1) & 1);
+
+// Wrong coded bits per cell ("prb,symbol" -> count; two bits per subcarrier, so up to 24 in a
+// cell) before decoding: the signs of the receiver's LLRs against the bits sent. Null without
+// exported bits.
+export function cellErrors(slot, receiver) {
+  const raw = slot.bits?.[slot.receivers[receiver]?.raw];
+  if (!raw || !slot.sent) return null;
+  const errors = new Map();
+  for (const p of symbols(slot, receiver)) {
+    const key = `${p.prb},${p.symbol}`;
+    errors.set(key, (errors.get(key) ?? 0) + popcount(Number(raw[p.index]) ^ Number(slot.sent[p.index])));
+  }
+  return errors;
+}
+
+// What decoding does with the bits: one small grid per receiver (the user's PRBs by OFDM symbols).
+// Before decoding each cell is darker the more of its bits are wrong. After decoding, a receiver
+// whose CRC passes has recovered every bit (the dark cells clear), and one whose CRC fails has
+// lost the whole block (hatched). `flags` (one decisions grid or null per receiver) marks the cells
+// a receiver's map tells the decoder to doubt. `set(stage, animate)` switches "before" / "after".
+export function decodingPanel(slot, names, labels, { width = BOX.width, height = 250, flags = [] } = {}) {
+  const [start, count] = slot.metadata.alloc;
+  const cols = slot.grids.allocation[0].length;
+  const dmrs = slot.metadata.config.dmrs_symbol;
+  const left = 30;
+  const gap = 22;
+  const top = 30;
+  const bottom = 46;
+  const gridW = (width - left - 6 - gap * (names.length - 1)) / names.length;
+  const cw = gridW / cols;
+  const ch = (height - top - bottom) / count;
+  const gridH = ch * count;
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, class: "viz decoding-panel", role: "img" });
+  const defs = svgNode("defs");
+  const hatch = svgNode("pattern", { id: `lost-${Math.random().toString(36).slice(2)}`, width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+  hatch.append(svgNode("rect", { width: 6, height: 6, fill: "#d9d9d9" }), svgNode("line", { x1: 1, x2: 1, y1: 0, y2: 6, stroke: "#8c8c8c", "stroke-width": 1.6 }));
+  defs.append(hatch);
+  svg.append(defs);
+  const mid = top + gridH / 2;
+  svg.append(svgNode("text", { x: 10, y: mid, "text-anchor": "middle", "font-size": 10, transform: `rotate(-90 10 ${mid})` }, "PRB"));
+  for (const prb of [start, start + count - 1]) {
+    svg.append(svgNode("text", { x: left - 4, y: top + (start + count - 1 - prb) * ch + ch / 2 + 3.5, "text-anchor": "end", "font-size": 9 }, prb));
+  }
+  const panels = names.map((name, n) => {
+    const x0 = left + n * (gridW + gap);
+    const errors = cellErrors(slot, name) ?? new Map();
+    const passed = slot.receivers[name].crc;
+    const wrong = [...errors.values()].reduce((a, b) => a + b, 0);
+    svg.append(svgNode("text", { x: x0 + gridW / 2, y: top - 10, "text-anchor": "middle", "font-size": 12, "font-weight": 700 }, labels[n]));
+    const base = svgNode("g");
+    const errorLayer = svgNode("g", { opacity: 1 });
+    const jam = svgNode("g");
+    const doubted = svgNode("g", { opacity: 1 });
+    const decisions = flags[n];
+    for (let prb = start; prb < start + count; prb++) {
+      for (let s = 0; s < cols; s++) {
+        const x = x0 + s * cw;
+        const y = top + (start + count - 1 - prb) * ch;
+        base.append(svgNode("rect", { x, y, width: cw, height: ch, fill: s === dmrs ? PILOT : "#fff", stroke: "#e0e0e0", "stroke-width": 0.6 }));
+        const bad = errors.get(`${prb},${s}`) ?? 0;
+        if (bad) {
+          errorLayer.append(svgNode("rect", { x: x + 0.5, y: y + 0.5, width: cw - 1, height: ch - 1, fill: "#1a1a1a", opacity: Math.min(1, 0.25 + bad / 10) }));
+        }
+        if (slot.grids.truth[prb][s]) {
+          jam.append(svgNode("rect", { x: x + 0.4, y: y + 0.4, width: cw - 0.8, height: ch - 0.8, fill: "none", stroke: RED, "stroke-width": 1 }));
+        }
+        if (decisions?.[prb][s]) {
+          doubted.append(svgNode("circle", { cx: x + cw / 2, cy: y + ch / 2, r: Math.min(cw, ch) * 0.22, fill: BLUE, stroke: "#fff", "stroke-width": 0.8 }));
+        }
+      }
+    }
+    const lost = svgNode("rect", { x: x0, y: top, width: gridW, height: gridH, fill: `url(#${hatch.id})`, opacity: 0 });
+    const frame = svgNode("rect", { x: x0, y: top, width: gridW, height: gridH, fill: "none", stroke: "#000", "stroke-width": 0.8 });
+    // A stamp across the grid after decoding: "all bits right" or "block lost"
+    const stamp = svgNode("g", { opacity: 0 });
+    const stampText = passed ? "All bits right" : "Block lost";
+    const stampW = 12 + stampText.length * 6.6;
+    stamp.append(
+      svgNode("rect", { x: x0 + gridW / 2 - stampW / 2, y: mid - 11, width: stampW, height: 22, fill: "#fff", stroke: passed ? "#006600" : RED, "stroke-width": 1.5 }),
+      svgNode("text", { x: x0 + gridW / 2, y: mid + 4.5, "text-anchor": "middle", "font-size": 12, "font-weight": 700, fill: passed ? "#006600" : RED }, stampText),
+    );
+    svg.append(base, errorLayer, jam, doubted, lost, frame, stamp);
+    const y1 = top + gridH + 16;
+    const before = svgNode("text", { x: x0 + gridW / 2, y: y1, "text-anchor": "middle", "font-size": 11 },
+      wrong ? `${wrong.toLocaleString()} wrong bits` : "no wrong bits");
+    const after = svgNode("text", { x: x0 + gridW / 2, y: y1, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: passed ? "#006600" : RED, opacity: 0 },
+      passed ? "CRC pass" : "CRC fail, sent again");
+    const trust = decisions ? "flagged cells' bits doubted" : "every bit trusted";
+    const where = svgNode("text", { x: x0 + gridW / 2, y: y1 + 14, "text-anchor": "middle", "font-size": 10, fill: "#555" }, trust);
+    svg.append(before, after, where);
+    return { name, passed, wrong, errorLayer, doubted, lost, stamp, before, after, where, trust };
+  });
+  let token = 0;
+  function set(stage, animate = false) {
+    const mine = ++token;
+    const alive = () => mine === token;
+    const done = stage === "after";
+    const fade = (node, to, ms, delay = 0) => {
+      if (!animate) return node.setAttribute("opacity", to);
+      return new Promise(r => setTimeout(r, delay)).then(() => (alive() ? fadeTo(node, to, ms, alive) : null));
+    };
+    const jobs = [];
+    for (const p of panels) {
+      jobs.push(fade(p.errorLayer, done && p.passed ? 0 : 1, 1200));
+      jobs.push(fade(p.lost, done && !p.passed ? 0.85 : 0, 900));
+      jobs.push(fade(p.stamp, done ? 1 : 0, 400, done ? 900 : 0));
+      jobs.push(fade(p.before, done ? 0 : 1, 300));
+      jobs.push(fade(p.after, done ? 1 : 0, 300, done ? 900 : 0));
+      jobs.push(fade(p.doubted, done ? 0 : 1, 600));
+      p.where.textContent = done ? "after decoding" : p.trust;
+    }
+    svg.setAttribute("aria-label", panels.map((p, i) => (done
+      ? `${labels[i]} after decoding, ${p.passed ? "CRC pass, every bit right" : "CRC fail, the block is lost and sent again"}`
+      : `${labels[i]} before decoding, ${p.wrong} wrong bits`)).join(". "));
+    return Promise.all(jobs.filter(Boolean));
+  }
+  set("before");
+  return { svg, set, panels };
+}
+
 // Mean bit reliability per cell ("prb,symbol" -> mean |LLR|) of a receiver's symbols
 export function cellTrust(points) {
   const sums = new Map();

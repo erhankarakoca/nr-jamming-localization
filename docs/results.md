@@ -1139,6 +1139,27 @@ Design `docs/superpowers/specs/2026-11-20-showcase-site-design.md`, plan
 - Examples are chosen by a stated rule: the median U-Net hit rate by default, outcome-conditioned
   for `walkthrough_flip` (2/64) and `pilot_whole_comb` (true map fails in 42/64).
 - The checked export manifest records commit `ebff348` and a clean working tree.
+- **Jammer-power levels (23 Nov).** The seven Explore cases (pilot, data, partial-band, hopping,
+  pulsed, spoofing, whole-allocation pilot jamming with estimated noise) also hold their slot at
+  every jammer power: off, then -15 to +9 dB in 3 dB steps. Each level replays the case's batch
+  seed with only the JSR changed and keeps the slot chosen at the case's own power, so the
+  channel, noise, data and jammer waveform are the same (checked in `tests/test_site.py`: cells
+  the jammer leaves alone receive identical power at every level). With the jammer off the truth
+  grid is empty. Each level also records the CRC failures of the full 64-slot batch, which the
+  page plots against the power. The nominal level of every case is unchanged from the earlier
+  export. The files grow to 1.3–1.8 MB each (0.38–0.55 MB gzipped), loaded only by Explore.
+- **Bits before and after decoding (23 Nov).** Every case also records the transmitted QPSK
+  symbols and, per receiver, the symbols its bits give before decoding (LLR signs) and after
+  decoding (its decoded block encoded again). Explore's "What decoding does with the bits" grids
+  and the walkthrough's last step draw the wrong bits per cell before decoding and the CRC outcome
+  after it. In the walkthrough slot (partial-band, +3 dB) all wrong bits before decoding
+  lie in the jammed cells: 362 for the standard receiver and 352 with the U-Net map. After decoding
+  the map-aware block equals the one sent (0 wrong bits), while the standard receiver's decoded
+  block differs from it in 564 coded bits. Over the 64-slot batch (`partial` at +3 dB), 26% of the
+  jammed cells' bits are still wrong before decoding with either the U-Net map or the true map
+  (29% for the standard receiver), but they reach the decoder with a mean |LLR| of 0.2 on the wrong
+  bits per jammed bit, against 17.7 for the standard receiver
+  (`python -m jamloc.experiments.decoding_bits`, `results/site/decoding_bits.csv`).
 
 **Site** (`python -m jamloc.site build | serve | deploy`, static build on the `gh-pages` branch):
 
@@ -1279,6 +1300,16 @@ Paired differences on the slots both receivers decoded (percentage points, 95% i
   start in a 256-slot trial (all pilots jammed, 15 dB SNR: 56% against 47% at +9 dB before any
   pass) and was dropped.
 
+**The passes on one slot (23 Nov).** The site's passes animation and the paper's figure
+`data_aided_passes` (`experiments.figures`) follow the `aided_flip` slot (+9 dB JSR, every pilot of
+the 12-PRB allocation jammed, TDL-C, 15 dB SNR, seed 7, slot 6). The mean squared error of the soft
+U-Net receiver's channel estimate over the allocation's subcarriers is 0.565 after the first attempt
+(CRC fail), 0.259 after pass 1 (CRC pass), 0.009 after pass 2 and below 0.001 after pass 3. The
+receiver stops at pass 1 for this slot. Passes 2 and 3 ran because other slots of the batch had not
+yet decoded. The mean certainty of the data symbols that pass 1 used as pilots (|mean|^2 of the
+decoder's soft symbol) is 0.76, then 0.99 and 1.00. Each pass after the first attempt records this
+per cell in the export (`passes[i].certainty`).
+
 ## 22. Partial-band walkthrough and the jammer's width
 
 Partial-band jamming hits the pilots and the data cells of its PRBs, so one slot shows both uses of
@@ -1410,7 +1441,7 @@ Partial-band jamming, BLER (%) by jammed PRBs of 12 (share of the allocation):
   point is an independent replicate of section 21's whole-allocation run (39.3% and 24.4%) and
   agrees with it within the sampling error.
 - Data and partial-band jamming fall off a cliff between 6 and 8 jammed PRBs. A block has 3,744
-  coded bits and about 1,385 information bits (code rate about 0.37). With 6 of 12 PRBs jammed the
+  coded bits and 1,416 information bits, plus a 16-bit CRC (code rate about 0.37). With 6 of 12 PRBs jammed the
   clean half still holds 1,872 coded bits; with 8 jammed the clean third holds 1,248, fewer than the
   information bits, so the block must draw on the jammed cells. Partial-band at +3 dB: 0.06% at 4
   PRBs, 2.12% at 6, 38.3% at 8 (the true map the same); at -3 dB, where jammed cells still carry

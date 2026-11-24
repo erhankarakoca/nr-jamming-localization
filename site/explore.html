@@ -20,44 +20,81 @@
       </nav>
     </div>
   </header>
-  <main class="shell" id="main" tabindex="-1">
+  <main class="shell wide" id="main" tabindex="-1">
 <header class="page-intro">
   <h1>Explore</h1>
-  <p>Explore a saved uplink slot to see where the jammer hit and how the receivers decoded the block.</p>
+  <p>Pick an attack and move the jammer's power. It is always the same simulated slot (same
+    channel, noise, data and jammer waveform); only the jammer's power changes.</p>
 </header>
 <div id="explorer" aria-busy="true">
-  <section aria-label="Resource grid and layers">
-    <div class="controls">
-      <label>Slot <select id="case-select" disabled></select></label>
-    </div>
-    <div id="explore-context" class="context" aria-live="polite">Loading the slots…</div>
-    <p id="explore-lesson"></p>
-    <div class="controls" role="group" aria-label="Grid layers">
-      <label>Colour cells by <select id="feature-select" disabled>
-        <option value="">None</option><option value="power_db">Power P</option>
-        <option value="residual_db">Pilot residual R</option><option value="evm_db">EVM E</option>
-      </select></label>
-      <label>Flags from <select id="detector-select" disabled></select></label>
-      <label class="check"><input id="truth-toggle" type="checkbox" checked disabled> Outline the jammed cells</label>
-    </div>
-    <div class="slot-row">
-      <div id="explore-grid"></div>
-      <div>
-        <h2>How to read this</h2>
-        <p>Rows are physical resource blocks (PRBs). Columns are OFDM symbols. Symbol 2 carries the pilots (DMRS).</p>
-        <p>Choose a cell to inspect it. Use the arrow keys when the grid has focus. The layer controls change the grid.</p>
-        <h2 id="cell-heading">Selected cell</h2>
-        <div id="cell-details" aria-live="polite"></div>
+  <div class="explore-bar" role="region" aria-label="Attack and jammer power">
+    <label class="bar-attack">Attack <select id="case-select" disabled></select></label>
+    <div class="bar-power">
+      <label for="level">Jammer power (JSR) <output id="level-value" for="level"></output></label>
+      <div class="power-row">
+        <div class="power-track">
+          <input id="level" type="range" min="0" max="0" value="0" step="1" disabled>
+          <div id="level-ticks" class="power-ticks" aria-hidden="true"></div>
+        </div>
+        <button id="level-play" type="button" aria-pressed="false" disabled>Play</button>
       </div>
     </div>
-  </section>
-  <section class="panel" aria-labelledby="points-heading">
-    <h2 id="points-heading">Equalized symbols</h2>
-    <p>Red points come from jammed cells and blue points from clean cells. Darker points indicate more reliable bits.</p>
-    <p>The map-aware receiver uses the saved U-Net map. The CRC checks the whole decoded block.</p>
-    <div class="controls"><label class="check"><input id="all-receivers" type="checkbox"> Show all saved receivers</label></div>
-    <div id="explore-points"></div>
-    <p id="explore-batch" class="context"></p>
+    <div id="bar-outcome" class="bar-outcome" aria-live="polite"></div>
+  </div>
+  <p id="explore-lesson" class="lesson"></p>
+  <div class="explore-stage">
+    <section class="stage-panel" aria-labelledby="grid-heading">
+      <h2 id="grid-heading">Where the jammer hit</h2>
+      <div id="level-summary" class="power-summary"></div>
+      <div class="controls" role="group" aria-label="Grid layers">
+        <label>Colour cells by <select id="feature-select" disabled>
+          <option value="">Nothing</option><option value="power_db">Power P</option>
+          <option value="residual_db">Pilot residual R</option><option value="evm_db">EVM E</option>
+        </select></label>
+        <label>Flags from <select id="detector-select" disabled></select></label>
+        <label class="check"><input id="truth-toggle" type="checkbox" checked disabled> Outline jammed cells</label>
+      </div>
+      <div id="explore-grid"></div>
+      <div id="cell-readout" class="cell-readout" aria-live="polite"></div>
+      <details class="more"><summary>Every feature and detector score of the selected cell</summary>
+        <div id="cell-details"></div></details>
+    </section>
+    <section class="stage-panel" aria-labelledby="points-heading">
+      <h2 id="points-heading">What the receivers see</h2>
+      <div class="controls">
+        <label>Points from <select id="point-source">
+          <option value="all">All of the user's PRBs</option><option value="prb">The selected cell's PRB</option>
+        </select></label>
+        <label class="check"><input id="all-receivers" type="checkbox"> All receivers</label>
+      </div>
+      <div id="explore-points"></div>
+      <p id="points-note" class="points-note"></p>
+      <div class="decoding-block">
+        <h3 id="decoding-heading">What decoding does with the bits</h3>
+        <div class="segmented" role="group" aria-labelledby="decoding-heading">
+          <button id="show-before" type="button" aria-pressed="true">Before decoding</button>
+          <button id="show-after" type="button" aria-pressed="false">After decoding</button>
+        </div>
+        <div id="decoding-panel"></div>
+        <ul class="legend">
+          <li><i class="swatch errors" aria-hidden="true"></i>darker means more of the cell's bits are wrong</li>
+          <li><i class="swatch truth" aria-hidden="true"></i>jammed</li>
+          <li><i class="swatch flag-dot" aria-hidden="true"></i>flagged by the U-Net, so its bits are doubted</li>
+          <li><i class="swatch pilot" aria-hidden="true"></i>pilots (no data bits)</li>
+          <li><i class="swatch lost" aria-hidden="true"></i>block lost</li>
+        </ul>
+        <p id="decoding-note" class="points-note"></p>
+      </div>
+    </section>
+  </div>
+  <section class="explore-batch" aria-labelledby="batch-heading">
+    <div>
+      <h2 id="batch-heading">The whole batch at every power</h2>
+      <p>The slider shows one slot. The chart counts how many of all the slots simulated with this
+        attack failed their CRC check at each power; click a column to jump there.</p>
+      <div id="explore-context" class="context">Loading the slots…</div>
+    </div>
+    <div id="level-chart" class="power-chart"></div>
   </section>
 </div>
   </main>

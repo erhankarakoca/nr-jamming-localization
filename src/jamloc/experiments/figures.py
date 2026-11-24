@@ -1059,8 +1059,98 @@ def system_views():
     return fig, caption
 
 
+@paper_style()
+def data_aided_passes():
+    """The data-aided passes on one slot whose every pilot is jammed: the channel estimate and the
+    equalized data symbols after the first attempt and after each of the first two passes (the
+    slot of the site's passes animation)."""
+    from matplotlib.patches import FancyArrowPatch
+
+    from jamloc.site.cases import CASES
+
+    d = _case_payload(CASES["aided_flip"])
+    meta = d["metadata"]
+    a0, n = meta["alloc"]
+    ch = d["channel"]
+    true = np.array(ch["true"], dtype=float)
+    x = a0 - 0.5 + (np.arange(ch["num_sc"]) + 0.5) / 12
+    pilot_x = a0 - 0.5 + (np.array(ch["pilot_sc"]) + 0.5) / 12
+    ls = np.hypot(*np.array(ch["ls"], dtype=float).T)
+    passes = d["passes"][:3]
+    num_points = len(d["x_hat"][passes[0]["x_hat"]])
+    errors = [
+        float(np.mean(np.sum((np.array(p["h"], dtype=float) - true) ** 2, axis=1))) for p in passes
+    ]
+    ymax = 1.15 * float(np.max(np.hypot(*true.T))) * 1.6
+
+    width, height = 7.16, 1.72
+    fig = Figure(figsize=(width, height))
+    names = ("First attempt", "Pass 1", "Pass 2")
+    pair, chan_w, cons_w, gap, arrow = 2.08, 1.15, 0.85, 0.08, 0.2
+    bottom, h = 0.5, 0.85
+    lefts = [0.32 + k * (pair + arrow) for k in range(3)]
+    for k, (step, left) in enumerate(zip(passes, lefts, strict=True)):
+        c = fig.add_axes((left / width, bottom / height, chan_w / width, h / height))
+        q = fig.add_axes(
+            ((left + chan_w + gap) / width, bottom / height, cons_w / width, h / height)
+        )
+        c.plot(x, np.hypot(*true.T), color="0.6", lw=1.6)
+        c.plot(pilot_x, ls, ls="none", marker="s", ms=1.3, mfc=JAM_COLOR, mec="none", alpha=0.35)
+        c.plot(x, np.hypot(*np.array(step["h"], dtype=float).T), color=JAM_COLOR, lw=0.8)
+        c.set(xlim=(a0 - 0.5, a0 + n - 0.5), ylim=(0, ymax), xticks=[a0, a0 + n - 1])
+        c.set_xlabel("PRB", labelpad=1)
+        c.tick_params(length=2, width=0.5, pad=1.5, labelleft=k == 0)
+        c.grid(False)
+        if k == 0:
+            c.set_ylabel("Magnitude", labelpad=1)
+        xy = np.array(d["x_hat"][step["x_hat"]], dtype=float)
+        llr = np.array(d["abs_llr"][step["abs_llr"]], dtype=float)
+        _constellation(q, xy, np.zeros(num_points, dtype=bool), "", reliability=llr)
+        crc = "CRC pass" if step["crc"] else "CRC fail"
+        box_c, box_q = c.get_position(), q.get_position()
+        fig.text(
+            (box_c.x0 + box_q.x1) / 2,
+            (bottom + h + 0.08) / height,
+            f"MSE {errors[k]:.3f}, {crc}",
+            ha="center",
+            va="bottom",
+        )
+        fig.text(
+            (box_c.x0 + box_q.x1) / 2,
+            0.02 / height,
+            f"({'ace'[k]}), ({'bdf'[k]}) {names[k]}",
+            ha="center",
+            va="bottom",
+        )
+        if k:
+            mid = (bottom + h / 2) / height
+            fig.add_artist(
+                FancyArrowPatch(
+                    ((left - arrow + 0.03) / width, mid),
+                    ((left - 0.03) / width, mid),
+                    transform=fig.transFigure,
+                    arrowstyle="-|>",
+                    mutation_scale=6,
+                    lw=0.7,
+                    color="0.2",
+                )
+            )
+    caption = (
+        f"Data-aided passes on one slot whose every pilot is jammed ({meta['jsr_db']:+g} dB JSR, "
+        f"TDL-C, {meta['snr_db']} dB SNR, the UE on PRBs {a0}-{a0 + n - 1}). (a), (c), (e) The channel "
+        "magnitude (grey), the LS estimates of the jammed pilots (red squares) and the estimate of the "
+        "soft receiver with the U-Net map (red line). (b), (d), (f) The equalized data symbols, fainter "
+        f"where the decoder is told to trust them less. The first attempt rests on jammed pilots only, "
+        f"its mean squared error is {errors[0]:.3f} and the CRC fails. After one pass the decoded data "
+        f"cells act as pilots, the error falls to {errors[1]:.3f} and the CRC passes. A second pass, "
+        f"which the receiver skips once the CRC has passed, would bring it to {errors[2]:.3f}."
+    )
+    return fig, caption
+
+
 FIGURES = {
     "system_views": system_views,
+    "data_aided_passes": data_aided_passes,
     "attack_patterns": attack_patterns,
     "residual_explained": residual_explained,
     "constellations": constellations,
