@@ -269,8 +269,9 @@ class MapAwareReceiver(Block):
         * ``renoise``: after each failed decoding, estimate the noise power again from the
           remodulated residual of the confidently decoded data cells the map calls clean, and
           recompute everything that depends on it (pilot variances, residuals, LLRs). With
-          ``"auto"``, only in slots whose noise power came from the empty DMRS comb while the map
-          flags a DMRS cell (``_comb_suspect``).
+          ``"auto"``, only when the noise power was estimated within the slot
+          (``cfg.noise_estimate`` ``"comb"``), where the jammer may have raised it, and never
+          when it is known, as a noise floor tracked over many slots is.
         """
         cfg = self.cfg
         num_sc = y.shape[-1]
@@ -290,6 +291,8 @@ class MapAwareReceiver(Block):
             raise ValueError("refine needs the soft mode")
         if renoise and mode not in ("soft", "cell"):
             raise ValueError("renoise needs the soft or the cell mode")
+        if renoise == "auto":
+            renoise = cfg.noise_estimate != "true"
         self._cellwise = cellwise
 
         # 1. Stack the LS observations in symbol order. The frequency indices repeat, so
@@ -354,8 +357,6 @@ class MapAwareReceiver(Block):
                 fresh = self._renoise(
                     y, no, *self._on_grid(h_new, err_new, y), mean, var, cells, mode
                 )
-                if renoise == "auto":  # only where the estimate came from a flagged empty comb
-                    fresh = torch.where(self._comb_suspect(cells, interfered, mode), fresh, no)
                 no = fresh
                 clean, pilot_var, r, interfered = self._pilots(
                     h_ls, pilot_sc, pilot_power, no, cells, mode
@@ -578,19 +579,6 @@ class MapAwareReceiver(Block):
             inflate = torch.where(interfered, r, torch.ones_like(r))
             pilot_var = s2[:, None] * inflate[:, pilot_dmrs, pilot_prb]
         return clean, pilot_var, r, interfered
-
-    def _comb_suspect(self, cells, interfered, mode) -> torch.Tensor:
-        """``[B]``: slots whose noise power came from the empty DMRS comb (``noise_estimate``
-        ``"comb"``) while the map flags a DMRS cell of the allocation, so that the jammer may have
-        raised the estimate. With the noise power known, no slot is suspect."""
-        rows = cells.shape[0] if cells is not None else interfered.shape[0]
-        if self.cfg.noise_estimate != "comb":
-            return torch.zeros(
-                rows, dtype=torch.bool, device=(cells if cells is not None else interfered).device
-            )
-        if mode == "soft":
-            return cells[:, :, list(self.dmrs_symbols)].flatten(1).any(dim=1)
-        return interfered.flatten(1).any(dim=1)
 
     def _cell_sum(self, values: torch.Tensor) -> torch.Tensor:
         """Sum of ``values`` ``[B, num_data]`` over the data resource elements of each cell
