@@ -353,3 +353,51 @@ def test_renoise_recovers_the_noise_power_from_decoded_data():
         )
     error_db = (no / out.no).log10().abs() * 10
     assert error_db.max() < 0.5
+
+
+def test_shrinkage_pools_a_filled_row_and_separates_a_moving_jammer():
+    out = link(_scenario(NONE, 0.0, 15.0, n=32), decode=False)
+    rx = MapAwareReceiver(out.tx)
+    y = out.y_alloc.clone()
+    data_symbols = list(cfg.data_symbols)
+    moving = data_symbols[::2]  # PRB 8 is jammed on every other data symbol
+    jam = torch.zeros(y.shape[-2:], dtype=torch.bool, device=y.device)
+    jam[data_symbols, 2 * 12 : 6 * 12] = True  # PRBs 2-5 on every data symbol
+    jam[moving, 8 * 12 : 9 * 12] = True
+    torch.manual_seed(3)
+    noise = (torch.randn_like(y.real) + 1j * torch.randn_like(y.real)) * 2**0.5  # power 4
+    y = torch.where(jam, y + noise, y)
+    cells = torch.zeros_like(_cells(out))
+    cells[:, 2:6, data_symbols] = 1
+    cells[:, 8, :] = 1  # the map flags the whole row of the moving jammer
+
+    h_ls, pilot_sc, pilot_power = dmrs_ls(y, out.tx)
+    h_sc, err_sc = lmmse_interpolation(
+        h_ls,
+        pilot_sc,
+        torch.ones_like(h_ls, dtype=torch.bool),
+        out.no / pilot_power,
+        y.shape[-1],
+        cfg.scs,
+        cfg.tau_max,
+    )
+    estimates = {}
+    for option in (False, True, "shrink"):
+        rx._cellwise = option
+        estimates[option] = rx._jamming_variance(y, out.no, h_sc, err_sc, cells, None, None, "soft")
+    sym, sc = data_positions(out.tx)
+    prb = sc // 12
+    hit = jam[sym, sc]
+    row8 = prb == 8
+    # The moving jammer: shrinkage keeps the jammed and the clean cells of its row apart, the
+    # row average gives both about half the power
+    shrink = estimates["shrink"]
+    assert shrink[:, row8 & hit].mean() > 3.0
+    assert shrink[:, row8 & ~hit].mean() < 0.5
+    assert estimates[False][:, row8 & ~hit].mean() > 1.0
+    # The filled rows: shrinkage stays close to the row average, much closer than the per-cell
+    # estimates are
+    filled = (prb >= 2) & (prb < 6)
+    to_row = (shrink[:, filled] - estimates[False][:, filled]).abs().mean()
+    per_cell = (estimates[True][:, filled] - estimates[False][:, filled]).abs().mean()
+    assert to_row < 0.3 * per_cell

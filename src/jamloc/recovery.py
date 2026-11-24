@@ -140,9 +140,6 @@ def lmmse_interpolation(
 
 
 MODES = ("hard", "soft", "dmrs", "lmmse", "slot", "cell")
-# A flagged cell joins the pooled jamming estimate of its PRB row when its own estimate lies within
-# this many standard errors of it (``cellwise="adaptive"``)
-POOL_Z = 2.5
 
 
 def cell_threshold(num_re: int, alpha: float) -> float:
@@ -258,14 +255,17 @@ class MapAwareReceiver(Block):
 
         Options of the soft mode and its passes:
 
-        * ``cellwise``: estimate the jamming power of a flagged data cell from its own resource
-          elements instead of averaging it over the flagged data cells of its PRB. With
-          ``"adaptive"``, a cell keeps the PRB average when its own estimate agrees with it
-          within ``POOL_Z`` standard errors, and its own estimate otherwise.
+        * ``cellwise``: ``False`` averages the jamming power over the flagged data cells of a
+          PRB, ``True`` estimates it for each flagged cell from its own resource elements, and
+          ``"shrink"`` pulls each cell's own estimate towards the PRB average by the weight
+          ``tau2 / (tau2 + s2)`` of random-effects (empirical Bayes) estimation, with ``s2`` the
+          sampling variance of the cell's estimate and ``tau2`` the spread of the true powers
+          over the row. A jammer that fills the row gives the average, the cells of a jammer that
+          moves keep about their own power. In the cell mode (no map), ``"shrink"`` treats every
+          data cell as flagged.
         * ``refine``: after each failed decoding, test every data cell on its remodulated residual
-          ``y - h_hat x_bar`` (``_refine``) and add the cells that fail it to the map, which then
-          also has per-cell jamming estimates. The detector's map is the starting point; decoding
-          adds what it missed.
+          ``y - h_hat x_bar`` (``_refine``) and add the cells that fail it to the map. The
+          detector's map is the starting point, and decoding adds what it missed.
         * ``renoise``: after each failed decoding, estimate the noise power again from the
           remodulated residual of the confidently decoded data cells the map calls clean, and
           recompute everything that depends on it (pilot variances, residuals, LLRs). With
@@ -284,7 +284,7 @@ class MapAwareReceiver(Block):
                     f"cells must cover the allocation, [B, {num_prb}, {cfg.num_symbols}]; got "
                     f"{tuple(cells.shape)} (cut a carrier map to the scheduled PRBs first)"
                 )
-        if mode == "cell":  # no map: every data cell gets its own jamming estimate
+        if mode == "cell" and cellwise != "shrink":  # no map: every data cell its own estimate
             cellwise = True
         if refine and mode != "soft":
             raise ValueError("refine needs the soft mode")
@@ -741,9 +741,12 @@ class MapAwareReceiver(Block):
             return per_prb[:, data_prb]
 
         excess = self._excess_energy(y, no, h_sc, err_sc)
-        if mode == "cell":  # no map: every data cell's own excess energy
+        if mode == "cell" and self._cellwise != "shrink":  # no map: each cell's own excess
             return self._cell_mean(excess).clamp_min(0)
-        flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]
+        if mode == "cell":  # no map, shrinkage over every data cell of a PRB row
+            flagged = torch.ones_like(excess, dtype=torch.bool)
+        else:
+            flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]
         if self._cellwise is True:  # each flagged cell from its own resource elements
             return torch.where(flagged, self._cell_mean(excess).clamp_min(0), 0.0)
         # Average over the flagged data REs of each PRB.
@@ -755,15 +758,27 @@ class MapAwareReceiver(Block):
             1, data_prb, flagged.to(excess.dtype)
         )
         pooled = (total / count.clamp_min(1))[:, data_prb]
-        if self._cellwise == "adaptive":
-            # A flagged cell takes the pooled estimate of its PRB row when its own estimate agrees
-            # with it within its sampling noise, and keeps its own otherwise: rows a jammer fills
-            # pool for precision, cells of a jammer that moves keep their own power
+        if self._cellwise == "shrink":
+            # Random-effects shrinkage: each flagged cell's own estimate is pulled towards the
+            # mean of its PRB row by the share of its sampling variance in the total. The spread
+            # of the true powers across the row's cells (tau2) is the spread of the cell
+            # estimates minus their mean sampling variance. A jammer that fills the row gives
+            # tau2 = 0 and the row mean, cells of a jammer that moves keep about their own power.
+            per_cell = self._cell_sum(torch.ones_like(excess[:1]))
             own = self._cell_mean(excess)
-            spread = (self._cell_mean(excess**2) - own**2).clamp_min(0)
-            noise = (spread / self._cell_sum(torch.ones_like(excess[:1]))).sqrt()
-            agree = (own - pooled).abs() <= POOL_Z * noise
-            pooled = torch.where(agree, pooled, own)
+            se2 = (self._cell_mean(excess**2) - own**2).clamp_min(0) / (per_cell - 1).clamp_min(1)
+
+            def row_mean(values):
+                sums = values.new_zeros(values.shape[0], num_prb).index_add_(
+                    1, data_prb, torch.where(flagged, values, torch.zeros_like(values))
+                )
+                return (sums / count.clamp_min(1))[:, data_prb]
+
+            num_cells = count[:, data_prb] / per_cell
+            spread = row_mean((own - pooled) ** 2) * num_cells / (num_cells - 1).clamp_min(1)
+            tau2 = (spread - row_mean(se2)).clamp_min(0)
+            weight = tau2 / (tau2 + se2).clamp_min(torch.finfo(excess.dtype).tiny)
+            pooled = pooled + weight * (own - pooled)
         return torch.where(flagged, pooled.clamp_min(0), torch.zeros_like(excess))
 
     def _excess_energy(self, y, no, h_sc, err_sc):
