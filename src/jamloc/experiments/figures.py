@@ -1188,7 +1188,7 @@ def after_decoding(jsr_db: float = 3.0, seed: int = 11):
             unet[:, alloc].to(out.y.device),
             mode="soft",
             iterations=3,
-            cellwise=True,
+            cellwise="shrink",
             refine=True,
         )
     crc = res["tb_crc"].reshape(-1).bool().cpu()

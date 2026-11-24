@@ -143,7 +143,7 @@ def run(
                 unet[:, alloc],
                 mode="soft",
                 iterations=passes,
-                cellwise=refine,
+                cellwise="shrink" if refine else False,
                 refine=refine,
             )
         crc = res["tb_crc"].reshape(-1).bool()
@@ -275,7 +275,7 @@ def main(argv=None):
         "--alpha-prior", type=float, default=0.1, help="test level on cells the U-Net flags"
     )
     p.add_argument("--passes", type=int, default=3)
-    p.add_argument("--refine", action="store_true", help="passes refine the map")
+    p.add_argument("--refine", action="store_true", help="passes refine the map (shrinkage jamming estimates)")
     p.add_argument("--peaks", action="store_true", help="also test the largest error of each cell")
     args = p.parse_args(argv)
     if args.table:
