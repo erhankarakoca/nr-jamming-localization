@@ -206,7 +206,12 @@ def sweep(folders: list[Path], out: Path) -> None:
             ax.set_xlabel("JSR per jammed RE [dB]")
             ax.set_title(title, fontsize=7)
         axes[0].set_ylabel("BLER")
-        handles, labels = axes[0].get_legend_handles_labels()
+        legend = {}  # one entry per receiver, from whichever panel has its curve
+        for ax in axes:
+            for handle, label in zip(*ax.get_legend_handles_labels(), strict=True):
+                legend.setdefault(label, handle)
+        labels = [s[0] for s in SWEEP_RECEIVERS.values() if s[0] in legend]
+        handles = [legend[label] for label in labels]
         handles.append(zero_error_handle())
         labels.append(handles[-1].get_label())
         fig.legend(handles, labels, loc="outside lower center", ncols=4, fontsize=6)
