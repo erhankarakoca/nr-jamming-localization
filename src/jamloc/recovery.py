@@ -79,7 +79,7 @@ from sionna.phy.ofdm import LMMSEEqualizer
 
 from jamloc import theory
 from jamloc.config import SimConfig
-from jamloc.features import dmrs_ls, dmrs_residuals
+from jamloc.features import dmrs_ls, dmrs_residuals, residual_per_prb
 from jamloc.receiver import data_positions
 
 
@@ -139,7 +139,16 @@ def lmmse_interpolation(
     return h_hat, err_var.clamp(0, 1).to(device=device, dtype=torch.float32)
 
 
-MODES = ("hard", "soft", "dmrs", "lmmse", "slot")
+MODES = ("hard", "soft", "dmrs", "lmmse", "slot", "cell")
+
+
+def cell_threshold(num_re: int, alpha: float) -> float:
+    """Threshold on the normalized energy of a cell of ``num_re`` resource elements whose
+    remodulated residuals are independent circular Gaussians of known variance: their mean energy
+    divided by its expectation is Gamma(num_re, 1 / num_re), exceeded with probability ``alpha``."""
+    from scipy.stats import gamma
+
+    return float(gamma.ppf(1 - alpha, a=num_re, scale=1 / num_re))
 
 
 class SoftTBDecoder(Block):
@@ -236,6 +245,7 @@ class MapAwareReceiver(Block):
         self.decoder = TBDecoder(tx._tb_encoder)
         self.soft_decoder = SoftTBDecoder(self.decoder)
         self.data_sym, self.data_sc = data_positions(tx)
+        self._cellwise = False  # set per call (see ``call``)
 
     def call(
         self,
@@ -246,13 +256,38 @@ class MapAwareReceiver(Block):
         mode: str = "hard",
         iterations: int = 0,
         history: bool = False,
+        cellwise: bool = False,
+        refine: bool = False,
+        renoise: bool = False,
+        alpha: float = 0.01,
     ):
         """``mode``: ``"hard"``, ``"soft"`` (both use ``cells``), or ``"dmrs"``, ``"lmmse"``,
-        ``"slot"`` (no map, ``cells`` is ignored). ``iterations``: data-aided passes after the
-        first decoding (they need ``decode``). With ``history=True``, return a list of
+        ``"slot"``, ``"cell"`` (no map, ``cells`` is ignored). ``iterations``: data-aided passes
+        after the first decoding (they need ``decode``). With ``history=True``, return a list of
         pass records starting with that first attempt. Each contains ``h_sc`` and
         ``err_var`` on the first DMRS symbol, ``x_hat``, ``llr``, and the
-        individual pass's ``tb_crc`` (None with ``decode=False``)."""
+        individual pass's ``tb_crc`` (None with ``decode=False``).
+
+        Options of the soft mode and its passes:
+
+        * ``cellwise``: ``False`` averages the jamming power over the flagged data cells of a
+          PRB, ``True`` estimates it for each flagged cell from its own resource elements, and
+          ``"shrink"`` pulls each cell's own estimate towards the PRB average by the weight
+          ``tau2 / (tau2 + s2)`` of random-effects (empirical Bayes) estimation, with ``s2`` the
+          sampling variance of the cell's estimate and ``tau2`` the spread of the true powers
+          over the row. A jammer that fills the row gives the average, the cells of a jammer that
+          moves keep about their own power. In the cell mode (no map), ``"shrink"`` treats every
+          data cell as flagged.
+        * ``refine``: after each failed decoding, test every data cell on its remodulated residual
+          ``y - h_hat x_bar`` (``_refine``) and add the cells that fail it to the map. The
+          detector's map is the starting point, and decoding adds what it missed.
+        * ``renoise``: after each failed decoding, estimate the noise power again from the
+          remodulated residual of the confidently decoded data cells the map calls clean, and
+          recompute everything that depends on it (pilot variances, residuals, LLRs). With
+          ``"auto"``, only when the noise power was estimated within the slot
+          (``cfg.noise_estimate`` ``"comb"``), where the jammer may have raised it, and never
+          when it is known, as a noise floor tracked over many slots is.
+        """
         cfg = self.cfg
         num_sc = y.shape[-1]
         num_prb = num_sc // 12
@@ -265,40 +300,21 @@ class MapAwareReceiver(Block):
                     f"cells must cover the allocation, [B, {num_prb}, {cfg.num_symbols}]; got "
                     f"{tuple(cells.shape)} (cut a carrier map to the scheduled PRBs first)"
                 )
+        if mode == "cell" and cellwise != "shrink":  # no map: every data cell its own estimate
+            cellwise = True
+        if refine and mode != "soft":
+            raise ValueError("refine needs the soft mode")
+        if renoise and mode not in ("soft", "cell"):
+            raise ValueError("renoise needs the soft or the cell mode")
+        if renoise == "auto":
+            renoise = cfg.noise_estimate != "true"
+        self._cellwise = cellwise
 
         # 1. Stack the LS observations in symbol order. The frequency indices repeat, so
         # indexing the prior by them gives the same frequency correlation within and between
         # DMRS symbols. Each observation still has its own diagonal noise variance.
         h_ls, pilot_sc, pilot_power = dmrs_ls(y, self.tx)
-        num_dmrs = len(self.dmrs_symbols)
-        pilot_prb = pilot_sc // 12
-        s2 = no / pilot_power  # LS noise variance per pilot without jamming
-        clean = torch.ones_like(h_ls, dtype=torch.bool)
-        pilot_var = s2
-        r, interfered = None, None
-        pilot_dmrs = torch.arange(num_dmrs, device=y.device).repeat_interleave(
-            pilot_sc.numel() // num_dmrs
-        )
-        if mode in ("hard", "soft"):
-            flagged = cells[:, :, self.dmrs_symbols].transpose(1, 2)  # [B, num_dmrs, n]
-        if mode == "hard":
-            clean = ~flagged[:, pilot_dmrs, pilot_prb]
-        elif mode != "lmmse":
-            r = dmrs_residuals(h_ls, pilot_sc, no, pilot_power, cfg, num_dmrs).clamp_min(1)
-            if mode == "slot":  # one allocation-wide level per DMRS symbol
-                r = r.mean(dim=-1, keepdim=True).expand_as(r)
-                interfered = torch.ones_like(r, dtype=torch.bool)
-            elif mode == "dmrs":  # interfered cells: residual above the analytic 1% threshold
-                thr = torch.tensor(
-                    [theory.threshold(num_prb, b, 0.01, cfg) for b in range(num_prb)],
-                    device=r.device,
-                    dtype=r.dtype,
-                )
-                interfered = r > thr
-            else:
-                interfered = flagged
-            inflate = torch.where(interfered, r, torch.ones_like(r))
-            pilot_var = s2[:, None] * inflate[:, pilot_dmrs, pilot_prb]
+        clean, pilot_var, r, interfered = self._pilots(h_ls, pilot_sc, pilot_power, no, cells, mode)
 
         # 2. Repair: LMMSE interpolation, the same on all 14 symbols
         h_sc, err_sc = lmmse_interpolation(
@@ -340,9 +356,33 @@ class MapAwareReceiver(Block):
                 break
             post = self.soft_decoder(self.layer_demapper(llr))
             mean, var = soft_qpsk(post.reshape(y.shape[0], -1, self.tx._num_bits_per_symbol))
-            h_sc, err_sc = self._data_aided(
+            if refine:
+                cells = self._refine(y, no, h_hat, err_var, mean, var, cells, alpha)
+            if refine or renoise:  # the jamming the map now implies, with the old channel
+                extra = self._detect(
+                    y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
+                )[3]
+            h_new, err_new = self._data_aided(
                 y, no, h_ls, pilot_sc, clean, pilot_var, h_hat, mean, var, extra
             )
+            if renoise:
+                # The data-aided estimate rests on many symbols per subcarrier, so its error is
+                # small; the noise power is estimated around it, and everything that depends on
+                # the noise power is computed again
+                fresh = self._renoise(
+                    y, no, *self._on_grid(h_new, err_new, y), mean, var, cells, mode
+                )
+                no = fresh
+                clean, pilot_var, r, interfered = self._pilots(
+                    h_ls, pilot_sc, pilot_power, no, cells, mode
+                )
+                extra = self._detect(
+                    y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
+                )[3]
+                h_new, err_new = self._data_aided(
+                    y, no, h_ls, pilot_sc, clean, pilot_var, h_hat, mean, var, extra
+                )
+            h_sc, err_sc = h_new, err_new
             h_hat, err_var = self._on_grid(h_sc, err_sc, y)
             x_hat, no_eff, llr, extra = self._detect(
                 y, no, h_hat, err_var, h_sc, err_sc, cells, r, interfered, mode
@@ -378,6 +418,257 @@ class MapAwareReceiver(Block):
         if history:
             out["history"] = passes
         return out
+
+    def decoded_symbols(self, b_hat: torch.Tensor) -> torch.Tensor:
+        """Data symbols ``[B, num_data]`` that the decoded information bits ``b_hat`` map to, in
+        the order of ``data_positions`` (encode, scramble, map again, as the UE did)."""
+        with torch.no_grad():
+            coded = self.tx._tb_encoder(b_hat.reshape(-1, 1, b_hat.shape[-1]))
+            return self.tx._mapper(coded)[:, 0]
+
+    def known_symbol_residuals(self, y, no, x_data) -> torch.Tensor:
+        """Residual ``[B, n, num_symbols]`` of every scheduled PRB on every data OFDM symbol, with
+        the data symbols ``x_data`` ``[B, num_data]`` used as known symbols (NaN on symbols
+        without data).
+
+        Once a block passes its CRC, its data symbols are known exactly. On a data symbol, the
+        LS values ``y / x`` of all subcarriers of the allocation then play the role of the DMRS
+        pilots, and the same delay-subspace projection gives a residual per PRB with twelve known
+        symbols instead of six (``features.residual_per_prb``). Without jamming its law is that
+        of the DMRS residual with the projector of all subcarriers (``theory.weights`` with
+        ``step=1``)."""
+        num_prb = y.shape[-1] // 12
+        out = y.real.new_full((y.shape[0], num_prb, self.cfg.num_symbols), float("nan"))
+        for sym in sorted(set(self.data_sym.tolist())):
+            on = self.data_sym == sym
+            sc = self.data_sc[on]
+            h_ls = y[:, 0, 0, sym, sc] / x_data[:, on.to(x_data.device)]
+            power = float((x_data[:, on.to(x_data.device)].abs() ** 2).mean())
+            out[:, :, sym] = residual_per_prb(h_ls, sc, no, power, self.cfg)
+        return out
+
+    def slot_residuals(self, y, no, x_data, exclude=None, order=1, peaks=False):
+        """Residual ``[B, n, num_symbols]`` of every data and DMRS cell of a decoded slot, and
+        the number of known symbols in each cell (NaN and 0 where a cell has none).
+
+        With the data symbols ``x_data`` ``[B, num_data]`` known, every data and pilot resource
+        element gives an LS value ``y / x = h + w / x``. The channel of a subcarrier changes
+        little within a slot, so it is predicted for resource element ``(k, l)`` by a weighted
+        least-squares fit of a constant (``order=0``) or a straight line in time (``order=1``)
+        to the LS values of subcarrier ``k`` on the other data symbols, leaving out the cells in
+        ``exclude`` ``[B, n, num_symbols]`` (cells known to be jammed, so that their energy does
+        not leak into the prediction). The pilots are tested against the data but never used to
+        predict. The prediction of ``(k, l)`` does not contain ``y_{k,l}``, so without jamming the
+        difference is circular Gaussian with variance ``N0 / |x|^2`` plus the variance of the
+        fit. The residual of a cell is the energy of its differences divided by the sum of these
+        variances, Gamma(m, 1/m) for m known symbols of equal energy (``cell_threshold``). With
+        ``peaks``, also return the largest error of each cell divided by its variance, the maximum
+        of m unit exponentials without jamming, which a jammer on a single subcarrier raises."""
+        num_prb, width = y.shape[-1] // 12, y.shape[-1]
+        num_sym = self.cfg.num_symbols
+        dev, rows = y.device, y.shape[0]
+        h = y.new_zeros(rows, num_sym, width)
+        energy = y.real.new_zeros(rows, num_sym, width)  # |x|^2 of the known symbols
+        sym, sc = self.data_sym.to(dev), self.data_sc.to(dev)
+        x = x_data.to(dev)
+        h[:, sym, sc] = y[:, 0, 0, sym, sc] / x
+        energy[:, sym, sc] = x.abs() ** 2
+        pp = self.tx.resource_grid.pilot_pattern
+        psym, psc = torch.nonzero(pp.mask[0, 0], as_tuple=True)
+        pilots = pp.pilots[0, 0]
+        used = pilots.abs() > 0
+        psym, psc, pilots = psym[used].to(dev), psc[used].to(dev), pilots[used].to(dev)
+        h[:, psym, psc] = y[:, 0, 0, psym, psc] / pilots
+        energy[:, psym, psc] = (pilots.abs() ** 2).to(energy.dtype)
+        known = energy > 0
+        predict = torch.zeros_like(known)
+        predict[:, sym, sc] = True
+        if exclude is not None:
+            predict &= ~exclude.to(dev).transpose(1, 2).repeat_interleave(12, dim=2)
+        w = energy * predict
+        t = torch.arange(num_sym, device=dev, dtype=energy.dtype)[None, :, None]
+
+        def others(v):  # sum over the other symbols of the same subcarrier
+            return v.sum(1, keepdim=True) - v
+
+        s0, sy = others(w), others(w * h)
+        if order == 0:
+            ok = s0 > 0.5
+            pred = sy / s0.clamp_min(1e-12)
+            pvar = 1 / s0.clamp_min(1e-12)
+        else:
+            s1, s2, sty = others(w * t), others(w * t * t), others(w * t * h)
+            det = s0 * s2 - s1**2
+            ok = det > 1e-6
+            det = det.clamp_min(1e-12)
+            pred = ((s2 * sy - s1 * sty) + t * (s0 * sty - s1 * sy)) / det
+            pvar = (s2 - 2 * t * s1 + t * t * s0) / det
+        var = torch.where(known, 1 / energy.clamp_min(1e-12) + pvar, 0.0)
+        err = torch.where(known, (h - pred).abs() ** 2, 0.0)
+        cells = (rows, num_sym, num_prb, 12)
+        count = known.reshape(cells).sum(-1)
+        fine = (ok | ~known).reshape(cells).all(-1) & (count > 0)
+        r = err.reshape(cells).sum(-1) / (no[:, None, None] * var.reshape(cells).sum(-1))
+        r = torch.where(fine, r, torch.nan)
+        # The largest normalized error of a cell, each unit exponential without jamming
+        unit = torch.where(known, err / (no[:, None, None] * var.clamp_min(1e-12)), 0.0)
+        peak = torch.where(fine, unit.reshape(cells).amax(-1), torch.nan)
+        if peaks:
+            return r.transpose(1, 2), count.transpose(1, 2), peak.transpose(1, 2)
+        return r.transpose(1, 2), count.transpose(1, 2)
+
+    def decoded_cell_test(self, y, no, x_data, alpha=0.01, peel=1e-6, exclude=None, order=1):
+        """Jammed cells ``[B, n, num_symbols]`` of a decoded slot (data and DMRS cells), their
+        residuals and their numbers of known symbols (``slot_residuals``).
+
+        A strongly jammed data cell would leak into the prediction of every other cell of its
+        subcarriers. So outliers are peeled off one at a time. In each round, the data cell with
+        the largest residual in each PRB row is left out of the predictions if its residual
+        exceeds the ``peel`` quantile of its null law, until no such cell is left. All cells are
+        then tested at the ``alpha`` quantile. A cell with nothing left to predict it keeps the
+        residual of the last round in which it had a prediction. ``exclude``: data cells left out
+        of the predictions from the start (e.g. a detector's map)."""
+        num_prb = y.shape[-1] // 12
+        data = torch.zeros(num_prb, self.cfg.num_symbols, dtype=torch.bool, device=y.device)
+        data[:, sorted(set(self.data_sym.tolist()))] = True
+        excl = data.new_zeros((y.shape[0], num_prb, self.cfg.num_symbols))
+        if exclude is not None:
+            excl = excl | (exclude.to(excl.device) & data)
+        last, count, top_err = None, None, None
+        for _ in range(self.cfg.num_symbols + 1):
+            r, count, peak = self.slot_residuals(y, no, x_data, excl, order, peaks=True)
+            last = r if last is None else torch.where(torch.isnan(r), last, r)
+            top_err = peak if top_err is None else torch.where(torch.isnan(peak), top_err, peak)
+            high = self._null_quantile(count, peel)
+            score = torch.nan_to_num(r / high, nan=-1.0).masked_fill(excl | ~data, -1.0)
+            top = score.max(dim=2, keepdim=True).values
+            new = (score == top) & (top > 1)
+            if not new.any():
+                break
+            excl = excl | new
+        flags = torch.nan_to_num(last, nan=0.0) > self._null_quantile(count, alpha)
+        self.last_peaks = top_err  # the largest normalized error of each cell (see slot_residuals)
+        return flags, last, count
+
+    @staticmethod
+    def _null_quantile(count: torch.Tensor, alpha: float) -> torch.Tensor:
+        """Threshold of Gamma(m, 1/m) exceeded with probability ``alpha``, for each cell's number
+        of known symbols ``m`` (infinite where a cell has none)."""
+        out = torch.full(count.shape, math.inf, device=count.device)
+        for m in count.unique().tolist():
+            if m > 0:
+                out[count == m] = cell_threshold(int(m), alpha)
+        return out
+
+    def _pilots(self, h_ls, pilot_sc, pilot_power, no, cells, mode):
+        """Which pilots the filter uses (``clean``), their LS noise variances, and the residuals
+        and interference decisions of the DMRS cells (None where the mode has none)."""
+        cfg = self.cfg
+        num_dmrs = len(self.dmrs_symbols)
+        num_prb = int(self.data_sc.max()) // 12 + 1
+        pilot_prb = pilot_sc // 12
+        pilot_dmrs = torch.arange(num_dmrs, device=h_ls.device).repeat_interleave(
+            pilot_sc.numel() // num_dmrs
+        )
+        s2 = no / pilot_power  # LS noise variance per pilot without jamming
+        clean = torch.ones_like(h_ls, dtype=torch.bool)
+        pilot_var, r, interfered = s2, None, None
+        if mode in ("hard", "soft"):
+            flagged = cells[:, :, self.dmrs_symbols].transpose(1, 2)  # [B, num_dmrs, n]
+        if mode == "hard":
+            clean = ~flagged[:, pilot_dmrs, pilot_prb]
+        elif mode != "lmmse":
+            r = dmrs_residuals(h_ls, pilot_sc, no, pilot_power, cfg, num_dmrs).clamp_min(1)
+            if mode == "slot":  # one allocation-wide level per DMRS symbol
+                r = r.mean(dim=-1, keepdim=True).expand_as(r)
+                interfered = torch.ones_like(r, dtype=torch.bool)
+            elif mode in ("dmrs", "cell"):  # interfered: residual above the analytic 1% threshold
+                thr = torch.tensor(
+                    [theory.threshold(num_prb, b, 0.01, cfg) for b in range(num_prb)],
+                    device=r.device,
+                    dtype=r.dtype,
+                )
+                interfered = r > thr
+            else:
+                interfered = flagged
+            inflate = torch.where(interfered, r, torch.ones_like(r))
+            pilot_var = s2[:, None] * inflate[:, pilot_dmrs, pilot_prb]
+        return clean, pilot_var, r, interfered
+
+    def _grid_sums(self, values: torch.Tensor) -> torch.Tensor:
+        """Sums of ``values`` ``[B, num_data]`` over the data resource elements of each PRB and
+        OFDM symbol, ``[B, num_symbols, num_prb]``. Like ``sum_over_symbols``, the values go onto
+        a zero grid that is then summed, which gives the same bits on every device."""
+        sym = self.data_sym.to(values.device)
+        sc = self.data_sc.to(values.device)
+        num_sc = (int(sc.max()) // 12 + 1) * 12
+        grid = values.new_zeros(values.shape[0], self.cfg.num_symbols, num_sc)
+        grid[:, sym, sc] = values
+        return grid.reshape(values.shape[0], self.cfg.num_symbols, num_sc // 12, 12).sum(-1)
+
+    def _cell_sum(self, values: torch.Tensor) -> torch.Tensor:
+        """Sum of ``values`` ``[B, num_data]`` over the data resource elements of each cell
+        (PRB and OFDM symbol), returned on every resource element of that cell."""
+        prb = (self.data_sc // 12).to(values.device)
+        return self._grid_sums(values)[:, self.data_sym.to(values.device), prb]
+
+    def _prb_sum(self, values: torch.Tensor) -> torch.Tensor:
+        """Sum of ``values`` ``[B, num_data]`` over the data resource elements of each PRB,
+        ``[B, num_prb]``."""
+        return self._grid_sums(values).sum(dim=1)
+
+    def _cell_mean(self, values: torch.Tensor) -> torch.Tensor:
+        return self._cell_sum(values) / self._cell_sum(torch.ones_like(values[:1]))
+
+    def _remodulated(self, y, no, h_hat, err_var, mean, var):
+        """Energy of ``y - h_hat x_bar`` on every data resource element, and its expected value
+        without jamming. With ``x = x_bar + d``, ``E|d|^2 = var`` and ``|x_bar|^2 + var = 1``,
+        ``y - h_hat x_bar = (h - h_hat) x_bar + h d + w`` has the expected energy
+        ``err_var + |h_hat|^2 var + no``."""
+        y_d = y[:, 0, 0, self.data_sym, self.data_sc]
+        h_d = h_hat[:, 0, 0, 0, 0, self.data_sym, self.data_sc]
+        e_d = err_var[:, 0, 0, 0, 0, self.data_sym, self.data_sc]
+        energy = (y_d - h_d * mean).abs() ** 2
+        return energy, e_d + h_d.abs() ** 2 * var, no[:, None]
+
+    def _refine(self, y, no, h_hat, err_var, mean, var, cells, alpha):
+        """The map after one decoding attempt: the detector's cells plus every data cell whose
+        remodulated residual energy, normalized by its expected value without jamming, exceeds
+        the ``alpha`` quantile of Gamma(m, 1/m) (``cell_threshold``, m resource elements)."""
+        energy, model, noise = self._remodulated(y, no, h_hat, err_var, mean, var)
+        stat = self._cell_sum(energy) / self._cell_sum(model + noise)
+        num_re = int(self._cell_sum(torch.ones_like(energy[:1])).max())
+        new = stat > cell_threshold(num_re, alpha)
+        cells = cells.clone()
+        prb = (self.data_sc // 12).to(cells.device)
+        sym = self.data_sym.to(cells.device)
+        cells[:, prb, sym] = cells[:, prb, sym] | new
+        return cells
+
+    def _renoise(self, y, no, h_hat, err_var, mean, var, cells, mode):
+        """Noise power ``[B]`` from the remodulated residual of the data symbols that the decoder
+        is sure of (``|x_bar|^2 > 0.5``) in cells the map calls clean, around a data-aided channel
+        estimate ``h_hat``: the value of ``N0`` for which the median of
+        ``|y - h_hat x_bar|^2 / (|h_hat|^2 var + N0)`` equals ln 2, the median of a unit
+        exponential. Bisection on a log scale; slots without such symbols keep ``no``."""
+        energy, _, _ = self._remodulated(y, no, h_hat, err_var, mean, var)
+        # The filter's error variance assumed the old noise power, so it is left out: the
+        # data-aided estimate passed in is accurate enough for its error to be small
+        h_d = h_hat[:, 0, 0, 0, 0, self.data_sym, self.data_sc]
+        model = h_d.abs() ** 2 * var
+        use = mean.abs() ** 2 > 0.5
+        if mode == "soft":
+            prb = (self.data_sc // 12).to(cells.device)
+            use = use & ~cells[:, prb, self.data_sym.to(cells.device)]
+        lo, hi = (no * 1e-3).log(), (no * 1e2).log()
+        for _ in range(40):
+            mid = (lo + hi) / 2
+            ratio = energy / (model + mid.exp()[:, None])
+            med = torch.nanmedian(torch.where(use, ratio, torch.nan), dim=1).values
+            above = med > math.log(2)  # N0 too small
+            lo, hi = torch.where(above, mid, lo), torch.where(above, hi, mid)
+        found = use.sum(dim=1) >= 24
+        return torch.where(found, ((lo + hi) / 2).exp(), no)
 
     def _on_grid(self, h_sc, err_sc, y):
         """One estimate per subcarrier, the same on all symbols, in Sionna's ``h_hat`` layout."""
@@ -477,17 +768,38 @@ class MapAwareReceiver(Block):
             return per_prb[:, data_prb]
 
         excess = self._excess_energy(y, no, h_sc, err_sc)
-        flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]
+        if mode == "cell" and self._cellwise != "shrink":  # no map: each cell's own excess
+            return self._cell_mean(excess).clamp_min(0)
+        if mode == "cell":  # no map, shrinkage over every data cell of a PRB row
+            flagged = torch.ones_like(excess, dtype=torch.bool)
+        else:
+            flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]
+        if self._cellwise is True:  # each flagged cell from its own resource elements
+            return torch.where(flagged, self._cell_mean(excess).clamp_min(0), 0.0)
         # Average over the flagged data REs of each PRB.
-        num_prb = y.shape[-1] // 12
-        total = excess.new_zeros(excess.shape[0], num_prb).index_add_(
-            1, data_prb, torch.where(flagged, excess, torch.zeros_like(excess))
-        )
-        count = excess.new_zeros(excess.shape[0], num_prb).index_add_(
-            1, data_prb, flagged.to(excess.dtype)
-        )
-        per_prb = (total / count.clamp_min(1)).clamp_min(0)
-        return torch.where(flagged, per_prb[:, data_prb], torch.zeros_like(excess))
+        total = self._prb_sum(torch.where(flagged, excess, torch.zeros_like(excess)))
+        count = self._prb_sum(flagged.to(excess.dtype))
+        pooled = (total / count.clamp_min(1))[:, data_prb]
+        if self._cellwise == "shrink":
+            # Random-effects shrinkage: each flagged cell's own estimate is pulled towards the
+            # mean of its PRB row by the share of its sampling variance in the total. The spread
+            # of the true powers across the row's cells (tau2) is the spread of the cell
+            # estimates minus their mean sampling variance. A jammer that fills the row gives
+            # tau2 = 0 and the row mean, cells of a jammer that moves keep about their own power.
+            per_cell = self._cell_sum(torch.ones_like(excess[:1]))
+            own = self._cell_mean(excess)
+            se2 = (self._cell_mean(excess**2) - own**2).clamp_min(0) / (per_cell - 1).clamp_min(1)
+
+            def row_mean(values):
+                sums = self._prb_sum(torch.where(flagged, values, torch.zeros_like(values)))
+                return (sums / count.clamp_min(1))[:, data_prb]
+
+            num_cells = count[:, data_prb] / per_cell
+            spread = row_mean((own - pooled) ** 2) * num_cells / (num_cells - 1).clamp_min(1)
+            tau2 = (spread - row_mean(se2)).clamp_min(0)
+            weight = tau2 / (tau2 + se2).clamp_min(torch.finfo(excess.dtype).tiny)
+            pooled = pooled + weight * (own - pooled)
+        return torch.where(flagged, pooled.clamp_min(0), torch.zeros_like(excess))
 
     def _excess_energy(self, y, no, h_sc, err_sc):
         """``[B, num_data]``: received energy of each data symbol minus what the UE's signal (unit

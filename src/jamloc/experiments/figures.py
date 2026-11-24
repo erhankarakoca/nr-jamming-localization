@@ -1148,7 +1148,111 @@ def data_aided_passes():
     return fig, caption
 
 
+@paper_style()
+def after_decoding(jsr_db: float = 3.0, seed: int = 11):
+    """One slot of a hopping jammer, which the U-Net never saw in training: the true map, the
+    network's map before decoding, the p-values of the exact tests after decoding and the map they
+    give. The first slot of the batch that decodes and whose network map has at least as many
+    errors as the slot's median."""
+    import dataclasses
+
+    from jamloc.experiments.decoded_map import _power_pvalues, _slot_pvalues
+    from jamloc.experiments.recovery import detector_cells, val_threshold
+    from jamloc.recovery import MapAwareReceiver
+
+    _require_models(["fused"])
+    cfg = dataclasses.replace(CFG, jammer_hopping=True)
+    link = JammedPUSCHLink(cfg)
+    a0, n = ALLOC
+    seed_everything(seed)
+    batch = 32
+    sc = Scenario(
+        channel="C",
+        alloc_start=a0,
+        alloc_size=n,
+        attack=torch.full((batch,), ATTACKS.index("data")),
+        jam_start=torch.full((batch,), JAM[0]),
+        jam_size=torch.full((batch,), JAM[1]),
+        jsr_db=torch.full((batch,), float(jsr_db)),
+        snr_db=torch.full((batch,), 15.0),
+    )
+    out = link(sc, decode=False)
+    model = load_model("fused", 0)
+    unet = detector_cells(out, cfg, "fused", model, val_threshold("fused", model)).cpu()
+    rx = MapAwareReceiver(out.tx, cfg)
+    alloc = slice(a0, a0 + n)
+    with torch.no_grad():
+        res = rx(
+            out.y_alloc,
+            out.no,
+            unet[:, alloc].to(out.y.device),
+            mode="soft",
+            iterations=3,
+            cellwise="shrink",
+            refine=True,
+        )
+    crc = res["tb_crc"].reshape(-1).bool().cpu()
+    pv = _power_pvalues(out.y, out.no).cpu()
+    pv[:, alloc] = _slot_pvalues(rx, out, rx.decoded_symbols(res["b_hat"])).cpu()
+    after = pv < FA
+    truth = out.labels.bool().cpu()
+    errors = ((unet != truth).flatten(1).sum(1)).numpy()
+    pick = int(np.flatnonzero(crc.numpy() & (errors >= np.median(errors)))[0])
+    t, u, p, m = truth[pick].numpy(), unet[pick].numpy(), pv[pick].numpy(), after[pick].numpy()
+    sched = np.zeros_like(t)
+    sched[alloc] = True
+
+    width, height = 3.5, 1.55
+    fig = Figure(figsize=(width, height))
+    names = ("(a) Jammer", "(b) U-Net", "(c) $-\\log_{10} p$", "(d) After decoding")
+    lefts = (0.3, 1.1, 1.9, 2.7)
+    axes = [fig.add_axes((x / width, 0.3 / height, 0.62 / width, 1.0 / height)) for x in lefts]
+    codes = {
+        0: np.where(t, 2, np.where(sched, 1, 0)),
+        1: np.where(u, 2, np.where(sched, 1, 0)),
+        3: np.where(m, 2, np.where(sched, 1, 0)),
+    }
+    for k, ax in enumerate(axes):
+        if k == 2:
+            ax.imshow(
+                np.clip(-np.log10(np.maximum(p, 1e-12)), 0, 6),
+                cmap=PARULA,
+                vmin=0,
+                vmax=6,
+                origin="lower",
+                aspect="auto",
+                interpolation="nearest",
+            )
+            ax.set(xticks=[0, CFG.dmrs_symbol, CFG.num_symbols - 1], yticks=[0, 6, 12, 18, 23])
+            ax.tick_params(direction="in", length=2, width=0.5, pad=1.5)
+            ax.grid(False)
+        else:
+            _cell_grid(ax, codes[k], [EMPTY_COLOR, ALLOC_COLOR, JAM_COLOR])
+        if k:
+            _outline(ax, t, color="black", lw=0.6)
+            ax.tick_params(labelleft=False)
+        else:
+            ax.set_ylabel("PRB", labelpad=1)
+        ax.set_xlabel("Symbol", labelpad=1)
+        ax.set_title(names[k], fontsize=6.5, pad=2)
+    fp_u, fn_u = int((u & ~t).sum()), int((~u & t).sum())
+    fp_m, fn_m = int((m & ~t).sum()), int((~m & t).sum())
+    caption = (
+        f"One slot with data jamming at {jsr_db:+g} dB JSR by a jammer that moves its block of "
+        f"{JAM[1]} PRBs on every OFDM symbol (TDL-C, 15 dB SNR, the UE on PRBs {a0}-{a0 + n - 1}). "
+        "(a) Jammed cells. (b) The U-Net's map before decoding, trained only on jammers that fill "
+        f"PRB rows, with {fp_u} false alarms and {fn_u} misses. (c) The p-values of the exact tests "
+        "after the slot has decoded, the decoded-data residual inside the allocation and the "
+        f"received power outside it. (d) The map of the tests at 1%, with {fp_m} false alarms and "
+        f"{fn_m} misses. Outlines mark jammed cells. The slot is the first of a {batch}-slot batch "
+        "that decodes and whose network map has at least the median number of errors, and (c) is "
+        "clipped at 6."
+    )
+    return fig, caption
+
+
 FIGURES = {
+    "after_decoding": after_decoding,
     "system_views": system_views,
     "data_aided_passes": data_aided_passes,
     "attack_patterns": attack_patterns,

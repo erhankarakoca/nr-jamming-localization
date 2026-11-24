@@ -72,7 +72,10 @@ const priority = ["fused", "no_residual", "block_test", "evm_threshold", "residu
 const PLOTTED = ["fused", "no_residual", "power", "evm", "block_test", "evm_threshold", "residual_cfar", "power_threshold"];
 const SHOWN = new Set(["fused", "no_residual", "block_test", "evm_threshold"]);
 // The receivers of the short recovery table; the full table is under "How this was measured".
-const KEY_RECEIVERS = ["standard", "lmmse", "block_soft", "p_r_e_soft", "p_r_e_atk_soft", "true_soft"];
+const KEY_RECEIVERS = [
+  "standard", "lmmse", "block_soft", "p_r_e_soft", "p_r_e_shrink_full", "p_r_e_atk_soft", "cell_shrink_full",
+  "true_soft",
+];
 const SERIF = '"STIX Two Text", "Times New Roman", Times, serif';
 const axis = title => ({
   title: { text: title, standoff: 6 }, showline: true, linecolor: "#000", linewidth: 0.8, mirror: "ticks",
@@ -258,6 +261,45 @@ function recovery(section) {
   }
   picker.addEventListener("change", show);
   show();
+}
+
+// Localization after decoding (experiments.decoded_map): the replayed test grids and the maps
+const GRIDS = {
+  test: "Nominal", sched: "Scheduling-aware", combjam: "Pilot-comb", qpskjam: "QPSK jammer",
+  neighbor: "Neighbor UE", hopjam: "Hopping", pulsejam: "Pulsed", tonejam: "Multi-tone",
+  spoofjam: "Pilot spoofing", spoofpart: "Partial spoofing",
+};
+const MAPS = [
+  ["unet", "U-Net, before decoding", "#0033cc"],
+  ["post", "Exact tests, after decoding", "#cc0000"],
+  ["fused", "Both, U-Net as prior", "#7f3fbf"],
+  ["genie", "Exact tests, perfect decoding", "#b3b3b3"],
+];
+
+function afterDecoding(section) {
+  const host = document.getElementById("after");
+  if (!section) {
+    host.remove();
+    return;
+  }
+  sectionContent("after", section);
+  const grids = Object.keys(GRIDS).filter(grid => section.rows.some(r => r.split === grid));
+  const row = (grid, map) => section.rows.find(r => r.split === grid && r.map === map);
+  const traces = MAPS.map(([key, name, color]) => ({
+    type: "bar", name, marker: { color, line: { color: "#000", width: 0.5 } },
+    x: grids.map(grid => GRIDS[grid]),
+    y: grids.map(grid => row(grid, key)?.f1_mean ?? null),
+    hovertemplate: `%{x}: F1 %{y:.3f}<extra>${name}</extra>`,
+  }));
+  renderPlot("after-chart", traces, "Test grid", "Cell-level F1",
+    { barmode: "group", yaxis: { ...axis("Cell-level F1"), range: [0, 1] } });
+  const f1 = r => r ? `${r.f1_mean.toFixed(3)} (${r.f1_min.toFixed(3)}–${r.f1_max.toFixed(3)})` : "—";
+  document.querySelector("#after-table").replaceChildren(table(
+    "F1 over all cells, mean over the seeds with their range, and false alarms on the grid's benign slots",
+    ["Test grid", ...MAPS.map(m => m[1]), "False alarms, exact tests"],
+    grids.map(grid => [GRIDS[grid], ...MAPS.map(([key]) => f1(row(grid, key))),
+      row(grid, "post")?.benign_fa == null ? "—" : percent(row(grid, "post").benign_fa, 2)]),
+  ));
 }
 
 function matched(section) {
@@ -571,6 +613,7 @@ if (resultsHost) {
     detection(data.pd);
     margins(data.margin);
     recovery(data.recovery);
+    afterDecoding(data.after_decoding);
     dmrs(data.dmrs);
     dataAided(data.data_aided);
     widthSweep(data.width_sweep);

@@ -60,8 +60,9 @@ def paired_difference_interval(both, only_first, only_second, neither, z: float 
     Two receivers decode the same slots. ``both`` slots fail with both, ``only_first`` only with
     the first, ``only_second`` only with the second, ``neither`` with none. The difference of the
     error rates is ``(only_first - only_second) / n``; only the discordant slots carry it. The
-    interval is Newcombe's method 10 (Statistics in Medicine 17, 1998): the Wilson intervals of the
-    two rates, combined with the correlation of the paired outcomes. It stays inside [-1, 1] and
+    interval is Newcombe's method 10 (Statistics in Medicine 17, 1998): the Wilson score intervals of
+    the two rates, combined with the phi correlation of the paired outcomes, whose numerator is
+    corrected for continuity when positive. It stays inside [-1, 1] and
     still gives a useful interval when one or both receivers make no error at all.
 
     Returns ``(difference, low, high)``.
@@ -72,7 +73,12 @@ def paired_difference_interval(both, only_first, only_second, neither, z: float 
     l1, u1 = (float(v) for v in wilson_interval(a + b, n, z))
     l2, u2 = (float(v) for v in wilson_interval(a + c, n, z))
     margins = (a + b) * (c + d) * (a + c) * (b + d)
-    phi = (a * d - b * c) / np.sqrt(margins) if margins > 0 else 0.0
+    # Method 10 corrects the numerator of the phi coefficient for continuity when it is positive
+    # (Newcombe's method 8 uses it as it is and has dips in coverage)
+    numerator = a * d - b * c
+    if numerator > 0:
+        numerator = max(numerator - n / 2, 0.0)
+    phi = numerator / np.sqrt(margins) if margins > 0 else 0.0
     delta = p1 - p2
     low = delta - np.sqrt(max((p1 - l1) ** 2 - 2 * phi * (p1 - l1) * (u2 - p2) + (u2 - p2) ** 2, 0))
     high = delta + np.sqrt(

@@ -1,15 +1,21 @@
-"""Does the DMRS residual behave as the theory says? (``jamloc.theory``)
+"""Do the known-symbol residuals behave as the theory says? (``jamloc.theory``)
 
-(a) **False alarm without jamming, against SNR.** Every scheduled DMRS cell of the benign test
+(a) **Calibration of the null laws.** The fraction of benign cells whose p-value under the analytic
+    law falls below a level, against the level: the DMRS residual of the scheduled DMRS cells of
+    the benign test slots (and of the ``longdelay`` split, whose channels leave the model), and the
+    decoded-data residual of the data and DMRS cells of benign slots that pass their CRC
+    (``MapAwareReceiver.decoded_cell_test``). An exact law lies on the diagonal.
+(b) **False alarm without jamming, against SNR.** Every scheduled DMRS cell of the benign test
     slots is compared with its analytic 1% threshold (from the allocation size and the PRB's
     position, no training data). The theory says the rate is 1% at every SNR and on every channel
     as long as the channel's delays stay below ``tau_max``; the ``longdelay`` split (TDL-C with
     delays up to 8.7 us) shows what happens when they do not.
-(b) **Detection against the jammer-to-noise ratio.** UE on 12 PRBs, pilot jamming of 4 PRBs in the
+    The decoded-data residual of the data cells is shown as well.
+(c) **Detection against the jammer-to-noise ratio.** UE on 12 PRBs, pilot jamming of 4 PRBs in the
     middle of the allocation, SNR 10 dB. Simulated detection rates of the jammed PRBs and the
     false-alarm rate of the unjammed PRB next to the block (leakage) against the formula
     (jammer channel: block Rayleigh fading).
-(c) **K-slot detection.** When available, the saved results from ``multislot`` compare theory
+(d) **K-slot detection.** When available, the saved results from ``multislot`` compare theory
     and pilot-level Monte Carlo for the average residual of a jammed PRB over K slots.
 
     python -m jamloc.experiments.residual_theory
@@ -18,6 +24,7 @@
 
 import argparse
 import csv
+import dataclasses
 import itertools
 
 import numpy as np
@@ -26,7 +33,7 @@ from matplotlib.ticker import PercentFormatter
 
 from jamloc import theory
 from jamloc.config import SimConfig
-from jamloc.dataset import CHANNELS, load
+from jamloc.dataset import CHANNELS, draw_scenario, load
 from jamloc.experiments.multislot import plot_on_axis, read_results
 from jamloc.features import FEATURE_NAMES, residual_map
 from jamloc.jammer import ATTACKS
@@ -34,6 +41,7 @@ from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
 from jamloc.metrics import wilson_interval
 from jamloc.paths import data_dir, results_dir
 from jamloc.plotting import BLACK, BLUE, RED, new_figure, paper_style, save
+from jamloc.recovery import MapAwareReceiver
 
 FA = 0.01
 ALLOC = (6, 12)  # UE on PRBs 6-17
@@ -69,6 +77,108 @@ def false_alarm_vs_snr(split: str) -> list[dict]:
                 }
             )
     return rows
+
+
+LEVELS = np.logspace(-3, 0, 25)
+# Channel variants of the decoded-data check: long delays (beyond tau_max) and high speed
+VARIANTS = {
+    "": {},
+    "_longdelay": {"delay_spread": {"A": 100e-9, "C": 1000e-9}},
+    "_fast": {"max_speed": 30.0},
+}
+
+
+def _calibration(kind: str, channel: str, log10_p: np.ndarray) -> list[dict]:
+    return [
+        {
+            "kind": kind,
+            "channel": channel,
+            "level": float(a),
+            "below": int((log10_p < np.log10(a)).sum()),
+            "cells": int(log10_p.size),
+        }
+        for a in LEVELS
+    ]
+
+
+def dmrs_calibration(split: str) -> list[dict]:
+    """Calibration of the DMRS residual law on the scheduled DMRS cells of benign slots."""
+    d = load(split)
+    benign = d["attack"] == 0
+    dmrs = SimConfig().dmrs_symbol
+    r_all = 10 ** (d["features"][:, FEATURE_NAMES.index("residual_db"), :, dmrs] / 10)
+    rows = []
+    for ch in np.unique(d["channel"][benign]):
+        logp = []
+        for i in np.flatnonzero(benign & (d["channel"] == ch)):
+            n, start = int(d["alloc_size"][i]), int(d["alloc_start"][i])
+            r = r_all[i, start : start + n]
+            logp += [theory.log10_pvalue(r[pos], n, pos) for pos in range(n)]
+        kind = "dmrs" if split == "test" else f"dmrs_{split}"
+        rows += _calibration(kind, CHANNELS[ch], np.asarray(logp, float))
+    return rows
+
+
+def decoded_null(
+    slots: int, batch_size: int, variant: str = "", channels=CHANNELS
+) -> tuple[list[dict], list[dict]]:
+    """Calibration and false alarms against SNR of the decoded-data residual on benign slots
+    (TDL-A and TDL-C, SNR uniform in 5-25 dB), decoded by the standard receiver; only slots that
+    pass their CRC are kept, as a receiver would."""
+    cfg = dataclasses.replace(SimConfig(), **VARIANTS[variant])
+    link = JammedPUSCHLink(cfg)
+    cal, fa = [], []
+    data_syms = [s for s in range(cfg.num_symbols) if s not in cfg.dmrs_symbols]
+    for channel in channels:
+        logp = {"decoded_data": [], "decoded_dmrs": []}
+        flags, snrs = [], []
+        for b in range(int(np.ceil(slots / batch_size))):
+            rng = seed_everything(9_000_000 + 1000 * CHANNELS.index(channel) + b)
+            sc = draw_scenario(
+                rng,
+                batch_size,
+                cfg,
+                channel,
+                attacks=(0,),
+                jsr_db=0.0,
+                snr_db=(5.0, 25.0),
+                scheduling_aware=False,
+            )
+            out = link(sc, decode=True)
+            ok = out.rx["tb_crc"].reshape(-1).bool()
+            rx = MapAwareReceiver(out.tx, cfg)
+            with torch.no_grad():
+                flag, r, count = rx.decoded_cell_test(
+                    out.y_alloc, out.no, rx.decoded_symbols(out.rx["b_hat"]), FA
+                )
+            m = count.double()
+            logp_all = torch.log10(
+                torch.special.gammaincc(m.clamp_min(1), m * r.double()).clamp_min(1e-300)
+            )
+            for kind, syms in (
+                ("decoded_data", data_syms),
+                ("decoded_dmrs", list(cfg.dmrs_symbols)),
+            ):
+                logp[kind].append(logp_all[ok][:, :, syms].flatten().cpu().numpy())
+            f = flag[ok][:, :, data_syms].flatten(1).cpu().numpy()
+            flags.append(f.reshape(-1))
+            snrs.append(np.repeat(sc.snr_db[ok.cpu()].numpy(), f.shape[1]))
+        for kind, values in logp.items():
+            cal += _calibration(kind + variant, channel, np.concatenate(values))
+        flags, snrs = np.concatenate(flags), np.concatenate(snrs)
+        for lo, hi in itertools.pairwise(SNR_BINS):
+            sel = (snrs >= lo) & (snrs < hi)
+            fa.append(
+                {
+                    "split": "decoded" + variant,
+                    "channel": channel,
+                    "snr_db": (lo + hi) / 2,
+                    "false_alarms": int(flags[sel].sum()),
+                    "cells": int(sel.sum()),
+                }
+            )
+        print(f"decoded residual, TDL-{channel}: done", flush=True)
+    return cal, fa
 
 
 def simulate_detection(jnr_dbs, snr_db: float, slots: int, batch_size: int) -> list[dict]:
@@ -138,6 +248,16 @@ CHANNEL_STYLE = {
     ("test", "A"): (BLUE, "o", "-", "TDL-A (100 ns)"),
     ("test", "C"): (RED, "s", "--", "TDL-C (300 ns)"),
     ("longdelay", "C"): (BLACK, "D", "-.", "TDL-C (1000 ns)"),
+    ("decoded", "C"): ("#2CA02C", "^", ":", "Decoded data"),
+}
+CALIBRATION_STYLE = {
+    ("dmrs", "A"): (BLUE, "o", "-", "DMRS, TDL-A"),
+    ("dmrs", "C"): (RED, "s", "--", "DMRS, TDL-C"),
+    ("decoded_data", "C"): ("#2CA02C", "^", ":", "Decoded, data"),
+    ("decoded_dmrs", "C"): ("#9467BD", "v", ":", "Decoded, DMRS"),
+    ("dmrs_longdelay", "C"): (BLACK, "D", "-.", "DMRS, 1000 ns"),
+    ("decoded_data_longdelay", "C"): ("#8C564B", "P", "--", "Decoded, 1000 ns"),
+    ("decoded_data_fast", "C"): ("#FF7F0E", "X", "-.", "Decoded, 30 m/s"),
 }
 GROUP_STYLE = {
     "next to the block": (BLACK, "s", "-.", "Next to the block"),
@@ -146,8 +266,52 @@ GROUP_STYLE = {
 }
 
 
-def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None):
-    fig, axes = new_figure(7.16, 2.3, ncols=3 if multislot_results is not None else 2)
+def plot_calibration(ax, cal_rows):
+    for (kind, ch), (color, marker, line, label) in CALIBRATION_STYLE.items():
+        sel = [r for r in cal_rows if r["kind"] == kind and r["channel"] == ch and r["cells"]]
+        if not sel:
+            continue
+        x = np.array([r["level"] for r in sel])
+        y = np.array([r["below"] / r["cells"] for r in sel])
+        ax.plot(
+            x,
+            y,
+            color=color,
+            ls=line,
+            lw=0.9,
+            marker=marker,
+            ms=2.5,
+            mfc="none",
+            markevery=4,
+            label=label,
+        )
+    ax.plot([1e-3, 1], [1e-3, 1], color="black", lw=0.6, ls=(0, (1, 2)))
+    ax.set(
+        xscale="log",
+        yscale="log",
+        xlim=(1e-3, 1),
+        ylim=(5e-4, 1.2),
+        xlabel="Level of the analytic law",
+        ylabel="False-alarm rate",
+    )
+    ax.set_title("(a)", loc="left")
+    ax.legend(
+        loc="lower right",
+        bbox_to_anchor=(1.02, -0.02),
+        frameon=False,
+        labelspacing=0.25,
+        handlelength=1.5,
+        handletextpad=0.4,
+        fontsize=6,
+    )
+
+
+def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None, cal_rows=None):
+    ncols = 2 + (multislot_results is not None) + (cal_rows is not None)
+    fig, axes = new_figure(7.16, 2.1, ncols=ncols)
+    if cal_rows is not None:
+        plot_calibration(axes[0], cal_rows)
+        axes = axes[1:]
     ax_fa, ax_pd = axes[:2]
     for (split, ch), (color, marker, line, label) in CHANNEL_STYLE.items():
         sel = [r for r in fa_rows if r["split"] == split and r["channel"] == ch and r["cells"]]
@@ -180,7 +344,7 @@ def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None):
         ylabel="False-alarm rate",
     )
     ax_fa.yaxis.set_major_formatter(PercentFormatter(xmax=1, decimals=0))
-    ax_fa.set_title("(a)", loc="left")
+    ax_fa.set_title("(b)" if cal_rows is not None else "(a)", loc="left")
     ax_fa.legend(loc="center left", bbox_to_anchor=(0, 0.46), frameon=False)
 
     for group, (color, marker, line, label) in GROUP_STYLE.items():
@@ -205,14 +369,14 @@ def plot(fa_rows, pd_rows, curves, jnr_grid, multislot_results=None):
         ylabel="Exceedance probability",
         ylim=(-0.03, 1.08),
     )
-    ax_pd.set_title("(b)", loc="left")
+    ax_pd.set_title("(c)" if cal_rows is not None else "(b)", loc="left")
     ax_pd.legend(
         loc="upper left", frameon=False, labelspacing=0.35, handlelength=1.6, handletextpad=0.5
     )
     if multislot_results is not None:
         plot_on_axis(axes[2], *multislot_results)
-        axes[2].set_title("(c)", loc="left")
-    for ax in axes:
+        axes[2].set_title("(d)" if cal_rows is not None else "(c)", loc="left")
+    for ax in fig.axes:
         ax.tick_params(length=2.5, width=0.6, pad=2)
     return fig
 
@@ -227,7 +391,10 @@ def _write(rows, path):
 def _read(path):
     with open(path, encoding="utf-8", newline="") as f:
         return [
-            {k: (v if k in ("split", "channel", "group") else float(v)) for k, v in r.items()}
+            {
+                k: (v if k in ("split", "channel", "group", "kind") else float(v))
+                for k, v in r.items()
+            }
             for r in csv.DictReader(f)
         ]
 
@@ -239,11 +406,24 @@ def main(argv=None):
     p.add_argument("--slots", type=int, default=512, help="slots per JNR point and channel")
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--plot-only", action="store_true")
+    p.add_argument("--decoded-slots", type=int, default=2048, help="benign slots per channel")
+    p.add_argument("--only-decoded", action="store_true", help="redo only the new panels' data")
     args = p.parse_args(argv)
 
     out = results_dir() / "theory"
     out.mkdir(parents=True, exist_ok=True)
-    if not args.plot_only:
+    if args.only_decoded:
+        cal = []
+        for split in ("test", "longdelay"):
+            if (data_dir() / f"{split}.npz").is_file():
+                cal += dmrs_calibration(split)
+        dcal, dfa = decoded_null(args.decoded_slots, args.batch_size)
+        for variant in ("_longdelay", "_fast"):
+            vcal, _ = decoded_null(args.decoded_slots // 2, args.batch_size, variant, ("C",))
+            dcal += vcal
+        _write(cal + dcal, out / "residual_calibration.csv")
+        _write(dfa, out / "decoded_false_alarm.csv")
+    if not args.plot_only and not args.only_decoded:
         fa_rows = []
         for split in ("test", "longdelay"):
             if (data_dir() / f"{split}.npz").is_file():
@@ -252,6 +432,11 @@ def main(argv=None):
         pd_rows = simulate_detection(args.jnr_db, args.snr_db, args.slots, args.batch_size)
         _write(pd_rows, out / "residual_detection.csv")
     fa_rows = _read(out / "residual_false_alarm.csv")
+    if (out / "decoded_false_alarm.csv").is_file():
+        fa_rows += _read(out / "decoded_false_alarm.csv")
+    cal_rows = None
+    if (out / "residual_calibration.csv").is_file():
+        cal_rows = _read(out / "residual_calibration.csv")
     pd_rows = _read(out / "residual_detection.csv")
     jnr_grid = np.linspace(min(r["jnr_db"] for r in pd_rows), max(r["jnr_db"] for r in pd_rows), 41)
     try:
@@ -260,7 +445,7 @@ def main(argv=None):
         print(f"Skipping the K-slot panel: {missing.filename} is missing")
         multislot_results = None
     with paper_style():
-        fig = plot(fa_rows, pd_rows, theory_curves(jnr_grid), jnr_grid, multislot_results)
+        fig = plot(fa_rows, pd_rows, theory_curves(jnr_grid), jnr_grid, multislot_results, cal_rows)
     save(fig, out / "residual_theory")
     total = {}
     for r in fa_rows:

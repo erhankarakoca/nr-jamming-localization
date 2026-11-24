@@ -23,23 +23,27 @@ the map.</sub>
    of the equalized symbols. With no jamming, the channel inside that subspace and white noise
    of known power, the residual has a known distribution, which gives an analytic threshold.
 2. **A small U-Net** (66,553 parameters) turns the clues into a 24 PRB × 14 symbol jamming map.
-3. **Decoding with the map**: the receiver estimates the channel from the clean pilots and gives
-   the bits of jammed cells little weight. Optional data-aided passes reuse decoded data as
-   extra pilots, which helps when every pilot is jammed.
+3. **Decoding with the map**: the receiver estimates the jamming power of each flagged cell,
+   shrinks the estimate towards the mean of its PRB where the two agree (empirical Bayes), gives
+   the cell's bits less weight, and weights jammed pilots down. When a block fails its CRC,
+   data-aided passes use the decoder's output to refine the map, the noise power and the channel.
+4. **Localization after decoding**: once a block decodes, every data symbol is known, and the same
+   residual law tests every scheduled cell, whatever the shape of the attack.
 
 ## Results
 
 | | Result | Conditions |
 | --- | --- | --- |
 | Detection | Cell-level F1 0.952 at 1.15% per-cell false alarms; a training-free block test reaches 0.868 | Test split (TDL-A and TDL-C, JSR −15 to +9 dB, SNR 5–25 dB), three seeds |
-| Decoding | Block error rate 87.8% with the standard receiver, 0.02% with the map | Partial-band jamming at +9 dB JSR on 4 of 12 PRBs, TDL-C, 15 dB SNR |
+| Decoding | Block error rate 91% with the standard receiver, no error in 4,800 slots with the map and refining passes | Partial-band jamming at +9 dB JSR on 4 of 12 PRBs, TDL-C, 15 dB SNR |
+| Unseen jammer | Hopping data jamming: 21% block errors with a per-PRB estimate, none in 4,800 slots with shrinkage estimates and refining passes; localization F1 0.60 before decoding, 0.88 after | +9 dB JSR (decoding), test grid (localization), TDL-C, 15 dB SNR |
 | Jammer width | 0.06%, 2.1% and 38% with the map when 4, 6 and 8 of 12 PRBs are jammed (standard receiver: 53%, 79%, 92%) | Partial-band jamming at +3 dB JSR, TDL-C, 15 dB SNR |
 | Speed | 0.68 ms per slot to compute the features and run the U-Net | One core of an Apple M1 Pro, 24-PRB allocation; channel estimation, equalization and decoding not included |
 
 These come from a synchronized, single-antenna simulation with known noise power.
 [docs/results.md](docs/results.md) gives the operating point of each result and the cases where
-the method does less well: hopping jammers, estimated noise power, and jammers that cover most of
-the allocation.
+the method does less well: multi-tone jammers, 16-QAM without a map, low link margin, and jammers
+that cover most of the allocation.
 
 ## Quick start
 

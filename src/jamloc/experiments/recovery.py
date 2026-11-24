@@ -114,9 +114,65 @@ RECEIVERS = {
     "lmmse_da": (None, "lmmse"),
     "p_r_e_soft_da": ("fused", "soft"),
     "true_soft_da": ("true", "soft"),
+    "cell_soft": (None, "cell"),
+    "p_r_e_cell": ("fused", "soft"),
+    "p_r_e_refine": ("fused", "soft"),
+    "p_r_e_renoise": ("fused", "soft"),
+    "true_renoise": ("true", "soft"),
+    "cell_da": (None, "cell"),
+    "true_cell": ("true", "soft"),
+    "p_r_e_full": ("fused", "soft"),
+    "true_full": ("true", "soft"),
+    "cell_full": (None, "cell"),
+    "p_r_e_cell_da": ("fused", "soft"),
+    "p_r_e_refine_prb": ("fused", "soft"),
+    "p_r_e_shrink": ("fused", "soft"),
+    "p_r_e_shrink_da": ("fused", "soft"),
+    "p_r_e_shrink_full": ("fused", "soft"),
+    "true_shrink": ("true", "soft"),
+    "true_shrink_full": ("true", "soft"),
+    "cell_shrink": (None, "cell"),
+    "cell_shrink_full": (None, "cell"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
-DATA_AIDED = {"lmmse_da": 3, "p_r_e_soft_da": 3, "true_soft_da": 3}
+DATA_AIDED = {
+    "lmmse_da": 3,
+    "p_r_e_soft_da": 3,
+    "true_soft_da": 3,
+    "p_r_e_refine": 3,
+    "p_r_e_renoise": 3,
+    "true_renoise": 3,
+    "cell_da": 3,
+    "p_r_e_full": 3,
+    "true_full": 3,
+    "cell_full": 3,
+    "p_r_e_cell_da": 3,
+    "p_r_e_refine_prb": 3,
+    "p_r_e_shrink_da": 3,
+    "p_r_e_shrink_full": 3,
+    "cell_shrink_full": 3,
+    "true_shrink_full": 3,
+}
+# Options of the map-aware receiver (jamloc.recovery.MapAwareReceiver.call)
+OPTIONS = {
+    "p_r_e_cell": {"cellwise": True},
+    "true_cell": {"cellwise": True},
+    "p_r_e_full": {"cellwise": True, "refine": True, "renoise": True},
+    "true_full": {"cellwise": True, "refine": True, "renoise": True},
+    "cell_full": {"renoise": True},
+    "p_r_e_cell_da": {"cellwise": True},
+    "p_r_e_refine_prb": {"refine": True},
+    "p_r_e_shrink": {"cellwise": "shrink"},
+    "p_r_e_shrink_da": {"cellwise": "shrink"},
+    "p_r_e_shrink_full": {"cellwise": "shrink", "refine": True, "renoise": "auto"},
+    "true_shrink": {"cellwise": "shrink"},
+    "true_shrink_full": {"cellwise": "shrink", "refine": True, "renoise": "auto"},
+    "cell_shrink": {"cellwise": "shrink"},
+    "cell_shrink_full": {"cellwise": "shrink", "renoise": "auto"},
+    "p_r_e_refine": {"cellwise": True, "refine": True},
+    "p_r_e_renoise": {"renoise": True},
+    "true_renoise": {"renoise": True},
+}
 DETECTORS = ("power_threshold", "block_test", "no_residual", "fused", "fused_atk")
 # Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
 TRAINED_ON = {"fused_atk": ({"data": "atk"}, "val_atk")}
@@ -189,6 +245,120 @@ STYLE = {
         "color": "#117733",
         "marker": "v",
         "linestyle": "--",
+    },
+    "cell_soft": {
+        "label": "Per-cell estimate, no map",
+        "color": "#44AA99",
+        "marker": "h",
+        "linestyle": "--",
+    },
+    "p_r_e_cell": {
+        "label": "Map P+R+E, soft, per cell",
+        "color": "#1F78B4",
+        "marker": "o",
+        "linestyle": "--",
+    },
+    "p_r_e_refine": {
+        "label": "P+R+E map, passes refine map",
+        "color": "#E31A1C",
+        "marker": "*",
+        "linestyle": "-",
+    },
+    "p_r_e_renoise": {
+        "label": "P+R+E map, passes re-estimate N0",
+        "color": "#FF7F00",
+        "marker": "*",
+        "linestyle": "-",
+    },
+    "true_renoise": {
+        "label": "True map, passes re-estimate N0",
+        "color": "#6A3D9A",
+        "marker": "*",
+        "linestyle": "-.",
+    },
+    "true_cell": {
+        "label": "True map, soft, per cell",
+        "color": "#00A087",
+        "marker": "^",
+        "linestyle": "--",
+    },
+    "p_r_e_full": {
+        "label": "P+R+E map, per cell, refining passes",
+        "color": "#B2182B",
+        "marker": "*",
+        "linestyle": "-",
+    },
+    "true_full": {
+        "label": "True map, per cell, refining passes",
+        "color": "#1A1A1A",
+        "marker": "P",
+        "linestyle": "-",
+    },
+    "cell_full": {
+        "label": "Per-cell estimate, no map, passes",
+        "color": "#35978F",
+        "marker": "h",
+        "linestyle": "-.",
+    },
+    "p_r_e_cell_da": {
+        "label": "P+R+E map, per cell, channel passes",
+        "color": "#4393C3",
+        "marker": "o",
+        "linestyle": "-.",
+    },
+    "p_r_e_refine_prb": {
+        "label": "P+R+E map, per PRB, map-refining passes",
+        "color": "#D6604D",
+        "marker": "s",
+        "linestyle": "-.",
+    },
+    "p_r_e_shrink": {
+        "label": "P+R+E map, shrinkage",
+        "color": "#762A83",
+        "marker": "v",
+        "linestyle": ":",
+    },
+    "p_r_e_shrink_da": {
+        "label": "P+R+E map, shrinkage, data-aided",
+        "color": "#762A83",
+        "marker": "v",
+        "linestyle": "--",
+    },
+    "p_r_e_shrink_full": {
+        "label": "P+R+E map, shrinkage, refining passes",
+        "color": "#762A83",
+        "marker": "v",
+        "linestyle": "-",
+    },
+    "true_shrink": {
+        "label": "True map, shrinkage",
+        "color": "#9970AB",
+        "marker": "^",
+        "linestyle": ":",
+    },
+    "true_shrink_full": {
+        "label": "True map, shrinkage, refining passes",
+        "color": "#9970AB",
+        "marker": "^",
+        "linestyle": "-",
+    },
+    "cell_shrink": {
+        "label": "No map, shrinkage over each PRB row",
+        "color": "#C2A5CF",
+        "marker": "h",
+        "linestyle": ":",
+    },
+    "cell_shrink_full": {
+        "label": "No map, shrinkage, gated noise passes",
+        "color": "#C2A5CF",
+        "marker": "h",
+        "linestyle": "-",
+    },
+    "cell_da": {
+        "label": "Per-cell estimate, no map, data-aided",
+        "color": "#44AA99",
+        "marker": "h",
+        "linestyle": "-",
     },
     "p_r_e_atk_soft": {
         "label": "Map P+R+E (mixed attacks), soft",
@@ -333,7 +503,9 @@ def simulate_point(
             else:
                 cells = maps[source] if source else None
                 passes = DATA_AIDED.get(rx, 0)
-                b_hat = map_aware(out.y_alloc, out.no, cells, mode=mode, iterations=passes)["b_hat"]
+                b_hat = map_aware(
+                    out.y_alloc, out.no, cells, mode=mode, iterations=passes, **OPTIONS.get(rx, {})
+                )["b_hat"]
             errors = out.b != b_hat
             block_errors = errors.any(-1).reshape(-1)
             counts[rx] += [
@@ -362,6 +534,7 @@ def simulate(
     replay=None,
     attacks=None,
     jam_size=JAM_SIZE,
+    mcs_index=None,
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
     ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
@@ -369,6 +542,8 @@ def simulate(
     (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``).
     ``jam_size``: PRBs of the pilot, data and partial-band attacks (inside the allocation)."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
+    if mcs_index is not None:  # another MCS: the detectors were trained on the default one
+        cfg = dataclasses.replace(cfg, mcs_index=mcs_index)
     link = JammedPUSCHLink(cfg)
     nest = noise_estimate != "true"
     detectors = {}
@@ -400,7 +575,9 @@ def simulate(
         cases = [("none", False, tuple(RECEIVERS))]
         cases += [(attack, False, tuple(RECEIVERS)) for attack in ("pilot", "data", "partial")]
         # limit case: no clean pilot left
-        whole = ("standard", "lmmse", "p_r_e_soft", "true_hard", "true_soft", *DATA_AIDED)
+        whole = ("standard", "lmmse", "p_r_e_soft", "true_hard", "true_soft", "cell_soft")
+        whole += ("p_r_e_cell", "true_cell", "p_r_e_shrink", "true_shrink", "cell_shrink")
+        whole += tuple(DATA_AIDED)
         cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]
@@ -748,6 +925,9 @@ def main(argv=None):
         choices=list(RECEIVERS),
         help="simulate only these receivers and replace their rows in the saved CSV",
     )
+    p.add_argument(
+        "--mcs", type=int, default=None, help="MCS index (table 1) instead of the default"
+    )
     args = p.parse_args(argv)
 
     out = results_dir() / "recovery"
@@ -761,6 +941,8 @@ def main(argv=None):
         stem = stem.with_name(f"{stem.name}_nest")
     if args.jam_prb is not None:
         stem = stem.with_name(f"{stem.name}_jam{args.jam_prb}")
+    if args.mcs is not None:
+        stem = stem.with_name(f"{stem.name}_mcs{args.mcs}")
     original = stem  # the name of the run a replay repeats
     if args.replay:
         stem = stem.with_name(f"{stem.name}_replay")
@@ -800,6 +982,7 @@ def main(argv=None):
                 replay,
                 args.attacks,
                 JAM_SIZE if args.jam_prb is None else args.jam_prb,
+                args.mcs,
             )
             if args.replay:
                 bad = check_replay(rows, before)
@@ -822,8 +1005,10 @@ def main(argv=None):
     slot_files = sorted(stem.parent.glob(f"{stem.name}_seed*_slots.npz"))
     if slot_files:
         _write_rows(paired_rows(slot_files), stem.with_name(f"{stem.name}_paired.csv"))
-    if args.jam_prb is not None or not any(
-        r["attack"] in ("pilot", "data", "partial") for r in pooled
+    if (
+        args.jam_prb is not None
+        or args.mcs is not None
+        or not any(r["attack"] in ("pilot", "data", "partial") for r in pooled)
     ):
         # e.g. --attacks pilot_whole_allocation: the figures plot the nominal attacks only; a
         # jammer width other than the nominal one is plotted against width by width_sweep

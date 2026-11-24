@@ -53,13 +53,26 @@
   <section class="panel" id="recovery">
     <h2>Block error rate at +9 dB JSR</h2>
     <p>Against the nominal jammer the U-Net map leaves at most 0.06% BLER (TDL-C, 15 dB SNR, known
-      noise power). Against a hopping jammer the nominally trained map leaves 21.2% (data) and 31.3%
-      (partial-band); the map trained on mixed attacks leaves 0% and 0.25%.</p>
+      noise power). Against a hopping jammer, which it was never trained on, it leaves 21% (data) and
+      31% (partial-band) when the receiver averages the jamming power over a PRB. When each cell keeps
+      its own estimate where it differs from the rest of its PRB, and passes refine the map from the
+      decoder's output, it leaves none in 4,800 slots and 0.25%, close to the true map and to a
+      network retrained on mixed attacks.</p>
     <div class="controls"><label>Jammer <select id="recovery-jammer" disabled></select></label></div>
     <div id="recovery-table"></div>
     <details class="more"><summary>How this was measured</summary><p class="population"></p>
       <div id="recovery-all"></div><div id="recovery-paired"></div>
       <div class="downloads" aria-label="Recovery CSV downloads"></div></details>
+  </section>
+  <section class="panel" id="after">
+    <h2>Localization after decoding</h2>
+    <p id="after-lede">Once a slot decodes, every data symbol is known, and each scheduled cell gets a
+      test whose threshold comes from the law of the residual, whatever the shape of the attack. On
+      benign slots these tests flag about 1% of the cells. They beat the U-Net on jammers it never
+      saw and lose to it on the block jammers it was trained on.</p>
+    <div id="after-chart" class="plot" role="group" aria-label="F1 before and after decoding by test grid"></div>
+    <details class="more"><summary>How this was measured</summary><p class="population"></p>
+      <div id="after-table"></div><div class="downloads" aria-label="After-decoding CSV downloads"></div></details>
   </section>
   <section class="panel" id="width">
     <h2>How wide can the jammer be?</h2>

@@ -157,7 +157,7 @@ def plot_on_axis(ax, curves, checks, *, show_mc_key=False):
     )
     if show_mc_key:
         ax.plot([], [], ls="none", marker="o", mfc="none", color="#555555", label="Monte Carlo")
-    ax.legend(loc="lower right", ncols=2, frameon=False, columnspacing=0.9)
+    ax.legend(loc="upper left", frameon=False, labelspacing=0.3, handlelength=1.6)
 
 
 def plot(curves, checks):
