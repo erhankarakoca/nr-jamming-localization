@@ -1704,3 +1704,204 @@ Conclusions for the paper: shrinkage is the proposed estimator (no tuning, match
 block jamming and per-cell under hopping, best of all rules in 16-QAM). The map-free receiver with
 shrinkage is a strong baseline for QPSK. The map matters with every pilot jammed at high JSR and
 with 16-QAM.
+
+## 25. Resolution of the jamming estimate and the value of a map
+
+Round of 24-25 Nov 2026 (branch `resolution-study`). After the review of the v7 drafts, the
+question became which part of the receiver needs cell resolution. Two kill rules were fixed before
+the runs: drop the resolution claim if the best per-PRB estimate (any of the scales 1, 2, 4) came
+within 1 BLER point of shrinkage everywhere, and drop the map claim if no map beat the receiver
+without one.
+
+**Design.** The soft receiver is crossed over maps and estimates of the data cells' jamming power.
+Maps: none (`nomap_*`, every data cell estimated, every pilot weighted by its residual with no
+threshold, `pilot_weights="all"`), the EVM threshold (`evm_*`), the U-Net (`p_r_e_*`), the true
+map coarsened to PRB rows (`true_prb_*`) and the true map (`true_*`). Estimates: per PRB (average
+over the row's flagged data cells), per PRB times 2 or 4 (`*_prb2`, `*_prb4`, `scale`), per cell,
+and shrinkage. Every run decodes the slots of `results/receiver_v7` (same seeds, cases, JSR grid),
+so the new receivers pair with the earlier ones. Runs in `results/res_study/{nom,whole,hop,pulse}`,
+merged into `results/res_study/merged/recovery` (`python -m jamloc.experiments.resolution merge`).
+Canaries: `lmmse` reproduced every count and every per-slot outcome of the earlier runs in every
+case and seed. `p_r_e_shrink` reproduced nominal, every-pilot and pulsed exactly and differed on 3
+of about 8,000 hopping slots (one per seed and attack at most), which comes from the summation
+order of the GPU-deterministic sums (42450a5). The merged files keep the earlier rows.
+
+**Table** (BLER %, QPSK, TDL-C, 15 dB SNR, known noise power, one attempt, +9 dB JSR on 4 PRBs,
+three seeds, `python -m jamloc.experiments.resolution table results/res_study/merged/recovery`):
+
+| Map | Estimate | pilot | data | partial | pulsed data | pulsed partial | hop data | hop partial | all pilots +3 | all pilots +9 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no protection | - | 30.1 | 79.5 | 90.9 | 19.1 | 45.2 | 26.2 | 60.6 | 39.8 | 95.6 |
+| none | per PRB | 0.04 | 0.02 | 0.06 | 0.08 | 0.08 | 50.0 | 58.5 | 4.50 | 44.0 |
+| none | per cell | 0.04 | 0.02 | 0.08 | 0 | 0.02 | 0 | 0.35 | 4.56 | 43.9 |
+| none | shrinkage | 0.04 | 0.02 | 0.06 | 0 | 0.02 | 0 | 0.42 | 4.52 | 43.9 |
+| EVM | per PRB | 16.0 | 2.19 | 9.71 | 0.10 | 6.06 | 0.10 | 16.3 | 11.3 | 71.7 |
+| EVM | shrinkage | 16.0 | 2.21 | 9.59 | 0.10 | 6.47 | 0.12 | 16.2 | 11.3 | 71.7 |
+| U-Net | per PRB | 0.06 | 0 | 0.04 | 0.06 | 0.38 | 21.1 | 30.9 | 3.62 | 39.3 |
+| U-Net | per cell | 0.06 | 0 | 0.06 | 0 | 0.33 | 1.56 | 10.4 | 3.62 | 39.3 |
+| U-Net | shrinkage | 0.06 | 0 | 0.04 | 0 | 0.33 | 1.52 | 10.1 | 3.62 | 39.3 |
+| true per PRB | per PRB | 0.02 | 0 | 0.02 | 0.06 | 0.08 | 50.0 | 58.3 | - | - |
+| true per PRB | shrinkage | 0.02 | 0 | 0.02 | 0 | 0 | 0 | 0.15 | - | - |
+| true | per PRB | 0.02 | 0 | 0.02 | 0 | 0 | 0 | 0.12 | 3.65 | 38.7 |
+| true | shrinkage | 0.02 | 0 | 0.02 | 0 | 0 | 0 | 0.12 | 3.65 | 38.7 |
+
+Every arm decoded all 4,800 benign slots. Scaling the per-PRB estimate by 2 or 4 never lowered
+its BLER (the best-scale row equals the per-PRB row for both maps). The DMRS-only per-PRB receiver
+(`dmrs_ie`) fails on 79.9% under data jamming, so the data-cell average is the strongest per-PRB
+choice. A receiver stops after 100 block errors, so high BLERs rest on fewer slots (for example
+576 slots for no-map per PRB under hopping partial).
+
+**Paired differences** (points, 95% Newcombe interval, common slots, `*_paired.csv`):
+
+- Resolution without a map, hopping: per PRB minus shrinkage 50.0 (46.4 to 53.5) data and 58.3
+  (54.2 to 62.3) partial. With the U-Net map 19.8 (17.9 to 21.8) and 19.8 (17.4 to 22.3). With the
+  true map coarsened to PRBs 50.0 and 58.2. Pulsed 0.04 to 0.08, intervals including zero. Block
+  jamming 0.00.
+- Per cell minus shrinkage at 15 dB: within -0.06 to +0.17 everywhere, intervals including zero.
+- No map against the true map, hopping partial: shrinkage without a map is 0.29 (0.14 to 0.49)
+  points worse. Every pilot jammed: 0.88 (0.55 to 1.23) and 5.08 (3.35 to 6.80) worse.
+- U-Net map minus no map (shrinkage): hopping 1.52 (1.20 to 1.91) and 9.77 (8.74 to 10.90), pulsed
+  partial 0.31 (0.16 to 0.52), every pilot jammed -0.90 (-1.25 to -0.56) and -4.43 (-6.25 to
+  -2.59), nominal blocks within 0.04.
+- EVM map minus no map (shrinkage): pilot 15.9 (14.4 to 17.6), data 2.19 (1.80 to 2.64), partial
+  9.53 (8.56 to 10.58), pulsed partial 6.45, hopping partial 15.8, every pilot 6.58 and 27.4 (23.6
+  to 31.1). Pulsed and hopping data 0.10 and 0.12. The EVM threshold (1% of clean validation data
+  cells over 5-25 dB SNR) detects 84.7% of the jammed data cells under data jamming at +9 dB and
+  15 dB SNR (768 slots), with no false alarm, and the missed cells keep zero jamming power.
+- Pilot weighting: the no-map receiver with the analytic 1% residual test on the pilots
+  (`cell_shrink`) and with every pilot weighted by its residual (`nomap_shrink`) have no discordant
+  slot with every pilot jammed.
+
+Kill rules: resolution holds (per PRB 20 to 58 points worse under hopping for every map short of
+the exact one). The map claim holds in a narrower form: with QPSK and clean pilots no map beats
+none, and the U-Net map helps only with every pilot jammed (QPSK at 15 dB, see 16-QAM and 8 dB below).
+
+Conclusion: the resolution has to come from the map or from the estimate. A per-PRB average over
+the flagged cells of the exact map is as good as shrinkage, but no detector is exact for a jammer
+it has not seen, so the estimate should carry the resolution.
+
+**16-QAM** (MCS 13, 18 dB SNR, seeds 0 and 1, Colab `results/res_study/qam16` on the slots of
+`colab_qam16`, merged into `results/res_study/merged/recovery`; canaries `lmmse` and
+`true_shrink` reproduced their counts). BLER (%) at +3 / +9 dB:
+
+| Map | Estimate | pilot | data | partial |
+| --- | --- | --- | --- | --- |
+| none | per PRB | 1.06 / 4.03 | 5.78 / 10.4 | 9.03 / 16.5 |
+| none | per cell | 1.62 / 5.41 | 19.7 / 19.9 | 20.5 / 28.2 |
+| none | shrinkage | 1.25 / 4.03 | 6.47 / 10.8 | 9.78 / 16.8 |
+| U-Net | per PRB | 0.75 / 1.53 | 5.25 / 9.34 | 8.09 / 12.4 |
+| U-Net | shrinkage | 0.75 / 1.53 | 5.97 / 9.59 | 8.59 / 12.7 |
+| true | per PRB | 0.53 / 1.00 | 4.00 / 7.78 | 5.59 / 7.84 |
+| true | per cell | 0.53 / 1.00 | 7.38 / 8.91 | 7.47 / 8.84 |
+| true | shrinkage | 0.53 / 1.00 | 4.25 / 7.94 | 5.66 / 7.94 |
+
+Scaling never helped (best scale = per PRB). The EVM threshold, calibrated on QPSK, fails on 19 to
+75% and is not a meaningful 16-QAM baseline (the EVM feature also slices to QPSK points). Paired
+differences (points, common slots):
+
+- Without a map, per cell minus shrinkage 0.38 (0.15 to 0.65) to 12.8 (11.4 to 14.3), largest
+  under data jamming at +3 dB. Per PRB minus shrinkage -0.19 to -0.75 (partial +3 dB: -0.75, -1.10
+  to -0.42), so on a jammer that fills its block shrinkage gives up at most 0.75 points to the row
+  average.
+- With the true map, per cell minus shrinkage 0.9 to 3.1, per PRB minus shrinkage -0.25 to 0.
+- U-Net map minus no map (shrinkage): -0.50 (-0.82 to -0.24) to -4.32 (-5.18 to -3.49), every
+  point significant. True map minus no map -0.72 to -9.29. U-Net minus true map 0.22 to 4.78.
+- Analytic pilot test minus weighting every pilot (no map, shrinkage): -0.19 to 0.06, significant
+  only at pilot and data +3 dB (-0.19 and -0.25).
+
+In 16-QAM the learned map pays off at every point, and shrinkage removes nearly all of the noise
+cost of the cell's own estimate.
+
+**JSR sweeps** (new slots, QPSK, TDL-C, 15 dB, three seeds, -9 to +9 dB in 3 dB steps,
+`results/res_study/sweep_{hop,nom}`, figure `results/res_study/resolution_sweep.pdf` from
+`python -m jamloc.experiments.resolution sweep`). Receivers: no protection, LMMSE, no map per PRB,
+U-Net per PRB, EVM + shrinkage, U-Net + shrinkage, no map + shrinkage, true map + shrinkage.
+
+- Hopping data: shrinkage without a map and the true map decode all 4,800 slots at every JSR.
+  Per PRB without a map 0.54% at 0 dB, 4.7% at +3, 19.6% at +6 and 53.0% at +9, worse than no
+  protection (15.4% and 27.7%) from +6 dB. U-Net + shrinkage up to 1.44%, EVM + shrinkage up to
+  0.75%.
+- Hopping partial: shrinkage without a map 0.02, 0.06, 0.25, 0.52% from 0 to +9 dB, the true map
+  0.02, 0.04, 0.08, 0.21% (largest gap 0.31 points, unpaired). U-Net + shrinkage 0.42 to 9.66%,
+  per PRB without a map up to 62%.
+- Pilot: every receiver that estimates the jamming power at or below 0.06%. EVM + shrinkage 16.8%
+  at +9 dB, the same as LMMSE without weights (17.2%), since the EVM map never flags a pilot.
+- Partial-band block: every estimating receiver at or below 0.19%, EVM + shrinkage up to 13.5%.
+
+**16-QAM under hopping** (MCS 13, 18 dB SNR, new slots, three seeds, target 200 block errors,
+`results/res_study/qamhop`). BLER (%) at +3 / +9 dB.
+
+| Map | Estimate | hop data | hop partial |
+| --- | --- | --- | --- |
+| no protection | - | 75.7 / 92.8 | 85.4 / 97.7 |
+| none | per PRB | 82.9 / 97.8 | 86.1 / 99.0 |
+| none | per cell | 1.33 / 1.52 | 9.50 / 19.3 |
+| none | shrinkage | 1.77 / 1.65 | 11.4 / 21.3 |
+| U-Net | per PRB | 81.6 / 95.6 | 83.6 / 97.9 |
+| U-Net | shrinkage | 8.32 / 9.77 | 24.3 / 40.3 |
+| true per PRB | shrinkage | 1.62 / 1.60 | 9.71 / 15.0 |
+| true | per PRB | 0.21 / 0.31 | 2.98 / 7.23 |
+| true | per cell | 0.23 / 0.40 | 3.48 / 7.60 |
+| true | shrinkage | 0.21 / 0.35 | 3.08 / 7.52 |
+
+Paired differences in points on common slots, at +3 / +9 dB.
+
+- Resolution. Per PRB minus shrinkage without a map is 80.7 / 95.6 (data) and 74.5 / 75.9 (partial),
+  on 768 slots each. Per PRB fails more often than no protection.
+- Per cell minus shrinkage without a map is -0.44 (-0.75 to -0.15) / -0.12 (-0.33 to 0.07) data and
+  -1.85 (-2.43 to -1.29) / -1.84 (-2.41 to -1.28) partial. Where the jammer moves, the cell's own
+  estimate is up to 1.9 points better than shrinkage (on the 16-QAM blocks shrinkage is up to 12.8
+  points better).
+- U-Net map minus no map, both with shrinkage, is +6.57 (5.86 to 7.32) / +8.02 (7.22 to 8.88) data and +13.1
+  (11.8 to 14.5) / +19.3 (17.3 to 21.4) partial. The U-Net was not trained on hopping jammers.
+- True map minus no map, both with shrinkage, is -1.56 / -1.29 data and -8.27 (-9.08 to -7.51) / -13.5 (-14.8
+  to -12.3) partial. The true map coarsened to PRB rows minus no map is -0.15 / -0.04 data and -1.65 /
+  -6.49 partial.
+
+With 16-QAM the "no map is as good as the true map" result of QPSK does not hold under hopping
+partial-band jamming. An exact cell map is worth up to 13.5 points there, a PRB-resolution map at
+most 6.5, and the U-Net map costs up to 19.3. The resolution claim holds in every case.
+
+**8 dB SNR** (QPSK, +3 dB JSR, three seeds). Partial-band block and every pilot jammed on the
+slots of `results/receiver_v7/ablation8` (canaries `true_soft` and `true_shrink` reproduced their
+counts, merged into `results/res_study/merged8`), hopping on new slots (`results/res_study/hop8`).
+BLER (%) below.
+
+| Map | Estimate | partial | all pilots | hop data | hop partial |
+| --- | --- | --- | --- | --- | --- |
+| no protection | - | - | - | 20.3 | 32.0 |
+| none | per PRB | 6.08 | 13.9 | 12.3 | 17.7 |
+| none | per cell | 7.40 | 14.0 | 1.46 | 2.94 |
+| none | shrinkage | 6.27 | 13.8 | 1.56 | 3.29 |
+| U-Net | per PRB | 5.54 | 11.5 | 12.2 | 18.0 |
+| U-Net | per cell | 6.46 | 11.5 | 3.92 | 8.94 |
+| U-Net | shrinkage | 5.73 | 11.5 | 3.98 | 8.90 |
+| true per PRB | shrinkage | - | - | 1.58 | 3.21 |
+| true | per PRB | 5.35 | 11.3 | 1.04 | 2.23 |
+| true | per cell | 6.23 | 11.3 | 1.12 | 2.38 |
+| true | shrinkage | 5.54 | 11.3 | 1.08 | 2.27 |
+
+Paired differences in points on common slots.
+
+- Per PRB minus shrinkage without a map is +11.0 (9.81 to 12.2) under hopping data and +14.3 (12.7 to
+  16.0) under hopping partial, -0.17 (-0.34 to -0.01) on a partial-band block and +0.04 with every pilot jammed.
+- Per cell minus shrinkage without a map is +1.05 (0.74 to 1.39) on a partial-band block, +0.18
+  (-0.11 to 0.49) with every pilot jammed, and under hopping -0.10 (-0.26 to 0.04) data and -0.35 (-0.55 to -0.18) partial.
+- True map minus no map, both with shrinkage, is -0.72 (-0.99 to -0.46) on a partial-band block, -2.77
+  (-3.51 to -2.07) with every pilot jammed, and under hopping -0.48 (-0.71 to -0.28) and -1.02 (-1.34 to -0.74).
+- U-Net minus no map, both with shrinkage, is -0.53 (-0.82 to -0.25) on a partial-band block, -2.37 (-3.12
+  to -1.65) with every pilot jammed, and under hopping +2.42 (2.00 to 2.89) and +5.69 (4.94 to 6.51).
+- The data-aided U-Net receiver of §21 (`p_r_e_soft_da`) reaches 3.90% (partial) and 4.77% (every
+  pilot) on the same slots.
+
+At 8 dB the cell's own estimate is noisier and shrinkage beats it on a jammed block, while under
+hopping it gives up at most 0.35 points to it. Maps help a little more than at 15 dB (up to 0.7
+points on a partial-band block and 2.8 with every pilot jammed).
+
+**Overall.** One estimate per PRB fails against a hopping jammer unless the map is
+exact, in every setting tested (QPSK at 8 and 15 dB, 16-QAM at 18 dB). Shrinkage without a map is
+the safe estimate. It gives up at most 1.9 points to the cell's own estimate where the jammer
+moves and gains up to 12.8 where it fills its rows. With QPSK the true map is worth at most
+1 point over shrinkage without a map except with every pilot jammed (0.9 to 5.1). With 16-QAM it
+is worth up to 9.3 points on a block and 13.5 under hopping. The U-Net delivers part of this on
+the attacks it was trained on and costs up to 19 points on the hopping jammer it never saw.

@@ -188,4 +188,70 @@ uv run python -m jamloc.experiments.recovery --channel C --snr-db 18 --mcs 13 --
     --receivers true_soft true_cell true_shrink cell_soft cell_shrink
 ```
 
+**Resolution of the jamming estimate (§25).** Each run adds the study's receivers to the slots
+of the §24 runs (same seed, cases and JSR grid), with `lmmse` and `p_r_e_shrink` as canaries. One
+results folder per case, three seeds per folder, then merge and pool. Each folder reads the
+checkpoints through a `models` link (`results/res_study/<case>/models` pointing to `results/models`).
+
+```bash
+NEW="nomap_prb nomap_prb2 nomap_prb4 nomap_cell nomap_shrink evm_prb evm_cell evm_shrink p_r_e_prb2 p_r_e_prb4"
+run() { JAMLOC_RESULTS_DIR=results/res_study/$1 uv run python -m jamloc.experiments.recovery \
+    --channel C --seeds $2 --max-mc-iter 25 "${@:3}"; }
+for s in 0 1 2; do
+  run nom $s --attacks none pilot data partial --jsr-db -15 9 \
+      --receivers $NEW true_prb_shrink true_shrink lmmse p_r_e_shrink
+  run whole $s --attacks pilot_whole_allocation --jsr-db 3 9 --receivers $NEW lmmse p_r_e_shrink
+  run hop $s --jammer hopping --jsr-db 9 --receivers $NEW true_prb_shrink lmmse p_r_e_shrink
+  run pulse $s --jammer pulsed --jsr-db 9 \
+      --receivers $NEW true_prb_shrink true_shrink lmmse p_r_e_shrink
+done
+# 16-QAM on the slots of the §24 16-QAM run (seeds 0 and 1)
+for s in 0 1; do
+  run qam16 $s --snr-db 18 --mcs 13 --attacks none pilot data partial --jsr-db 3 9 \
+      --target-block-errors 200 --receivers nomap_prb nomap_prb2 nomap_prb4 nomap_cell \
+      nomap_shrink true_prb_soft true_prb_shrink p_r_e_soft p_r_e_shrink evm_shrink lmmse true_shrink
+done
+# Merge with the §24 runs (every shared receiver must have the same counts), then pool and pair
+M=results/res_study/merged/recovery
+uv run python -m jamloc.experiments.resolution merge $M results/receiver_v7/recovery \
+    results/res_study/{nom,whole,hop,pulse,qam16}/recovery
+for j in nominal hopping pulsed; do
+  JAMLOC_RESULTS_DIR=results/res_study/merged uv run python -m jamloc.experiments.recovery \
+      --channel C --jammer $j --plot-only
+done
+JAMLOC_RESULTS_DIR=results/res_study/merged uv run python -m jamloc.experiments.recovery \
+    --channel C --snr-db 18 --mcs 13 --plot-only
+uv run python -m jamloc.experiments.resolution table $M
+uv run python -m jamloc.experiments.resolution table $M --qam
+# JSR sweeps (new slots) and their figure
+SW="standard lmmse nomap_prb nomap_shrink p_r_e_soft p_r_e_shrink evm_shrink true_shrink"
+for s in 0 1 2; do
+  run sweep_hop $s --jammer hopping --jsr-db -9 -6 -3 0 3 6 9 --receivers $SW
+  run sweep_nom $s --attacks pilot partial --jsr-db -9 -6 -3 0 3 6 9 --receivers $SW
+done
+uv run python -m jamloc.experiments.resolution sweep results/res_study/sweep_nom/recovery \
+    results/res_study/sweep_hop/recovery --out results/res_study/resolution_sweep
+# 16-QAM under hopping and QPSK at 8 dB SNR (three seeds each)
+for s in 0 1 2; do
+  run qamhop $s --snr-db 18 --mcs 13 --jammer hopping --jsr-db 3 9 --target-block-errors 200 \
+      --receivers standard nomap_prb nomap_cell nomap_shrink p_r_e_soft p_r_e_shrink true_soft \
+      true_cell true_shrink true_prb_shrink
+  run abl8 $s --snr-db 8 --attacks partial pilot_whole_allocation --jsr-db 3 --receivers \
+      nomap_prb nomap_cell nomap_shrink p_r_e_soft p_r_e_cell p_r_e_shrink true_cell true_soft true_shrink
+  run hop8 $s --snr-db 8 --jammer hopping --jsr-db 3 --receivers standard nomap_prb nomap_cell \
+      nomap_shrink p_r_e_soft p_r_e_cell p_r_e_shrink true_soft true_cell true_shrink true_prb_shrink
+done
+# abl8 decodes the slots of the §24 8 dB ablation (canaries true_soft and true_shrink)
+uv run python -m jamloc.experiments.resolution merge results/res_study/merged8/recovery \
+    results/receiver_v7/ablation8/recovery results/res_study/abl8/recovery
+JAMLOC_RESULTS_DIR=results/res_study/merged8 uv run python -m jamloc.experiments.recovery \
+    --channel C --snr-db 8 --plot-only
+JAMLOC_RESULTS_DIR=results/res_study/hop8 uv run python -m jamloc.experiments.recovery \
+    --channel C --snr-db 8 --jammer hopping --plot-only
+JAMLOC_RESULTS_DIR=results/res_study/qamhop uv run python -m jamloc.experiments.recovery \
+    --channel C --snr-db 18 --mcs 13 --jammer hopping --plot-only
+# The estimates on one hopping slot
+uv run python -m jamloc.experiments.figures --only jamming_estimates
+```
+
 The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`.
