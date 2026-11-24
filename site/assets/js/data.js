@@ -82,6 +82,13 @@ const receiverNames = {
   true_full: "True map, per cell, refining passes",
   cell_soft: "No map, per cell",
   cell_full: "No map, per cell, refining passes",
+  p_r_e_shrink: "U-Net, shrinkage",
+  p_r_e_shrink_da: "U-Net, shrinkage, channel passes",
+  p_r_e_shrink_full: "U-Net, shrinkage, refining passes",
+  true_shrink: "True map, shrinkage",
+  true_shrink_full: "True map, shrinkage, refining passes",
+  cell_shrink: "No map, shrinkage",
+  cell_shrink_full: "No map, shrinkage, passes",
 };
 
 export function receiverName(name) {

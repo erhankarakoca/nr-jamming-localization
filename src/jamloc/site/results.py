@@ -72,7 +72,7 @@ POPULATIONS = {
     ),
     "after_decoding": (
         "The slots of each test grid are replayed exactly (the first 8 batches of 16 slots per grid "
-        "point, the seeds of the data set) and decoded by the soft receiver with per-cell jamming "
+        "point, the seeds of the data set) and decoded by the soft receiver with shrinkage jamming "
         "estimates and refining passes. The U-Net map is the one before decoding (1% of clean "
         "validation cells). The exact tests are taken after decoding: the decoded-data residual on "
         "the data and DMRS cells of slots whose CRC passed and the received power on unscheduled "

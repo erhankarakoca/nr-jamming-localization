@@ -73,7 +73,8 @@ const PLOTTED = ["fused", "no_residual", "power", "evm", "block_test", "evm_thre
 const SHOWN = new Set(["fused", "no_residual", "block_test", "evm_threshold"]);
 // The receivers of the short recovery table; the full table is under "How this was measured".
 const KEY_RECEIVERS = [
-  "standard", "lmmse", "block_soft", "p_r_e_soft", "p_r_e_full", "p_r_e_atk_soft", "cell_full", "true_soft",
+  "standard", "lmmse", "block_soft", "p_r_e_soft", "p_r_e_shrink_full", "p_r_e_atk_soft", "cell_shrink_full",
+  "true_soft",
 ];
 const SERIF = '"STIX Two Text", "Times New Roman", Times, serif';
 const axis = title => ({

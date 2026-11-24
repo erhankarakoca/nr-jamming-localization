@@ -54,9 +54,10 @@
     <h2>Block error rate at +9 dB JSR</h2>
     <p>Against the nominal jammer the U-Net map leaves at most 0.06% BLER (TDL-C, 15 dB SNR, known
       noise power). Against a hopping jammer, which it was never trained on, it leaves 21% (data) and
-      31% (partial-band) when the receiver averages the jamming power over a PRB. Estimated per cell,
-      with passes that refine the map from the decoder's output, it leaves none in 4,800 slots and
-      0.25%, the same as the true map and as a network retrained on mixed attacks.</p>
+      31% (partial-band) when the receiver averages the jamming power over a PRB. When each cell keeps
+      its own estimate where it differs from the rest of its PRB, and passes refine the map from the
+      decoder's output, it leaves none in 4,800 slots and 0.25%, close to the true map and to a
+      network retrained on mixed attacks.</p>
     <div class="controls"><label>Jammer <select id="recovery-jammer" disabled></select></label></div>
     <div id="recovery-table"></div>
     <details class="more"><summary>How this was measured</summary><p class="population"></p>

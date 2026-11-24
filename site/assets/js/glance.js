@@ -404,7 +404,7 @@ function noCleanPilot(section) {
 // refining passes and the true map, and the F1 of the map before and after decoding.
 function unseenJammer(recovery, after) {
   const rows = recovery.rows.filter(r => r.jammer === "hopping" && r.jsr_db === 9);
-  const bars = [["p_r_e_soft", "U-Net map, per PRB", RED, false], ["p_r_e_full", "U-Net map, refining passes", RED, true], ["true_soft", "True map", INK, false]];
+  const bars = [["p_r_e_soft", "U-Net map, per PRB", RED, false], ["p_r_e_shrink_full", "U-Net map, refining passes", RED, true], ["true_soft", "True map", INK, false]];
   const attacks = [["data", "Data"], ["partial", "Partial-band"]];
   const f = frame({ width: 320, height: 200 });
   const y = v => f.bottom - Math.min(v / 0.4, 1) * (f.bottom - f.top);
@@ -442,7 +442,7 @@ function unseenJammer(recovery, after) {
   const located = f1("hopjam", "unet") != null && f1("hopjam", "post") != null
     ? ` Once the slot decodes, tests on the decoded data raise the map's F1 score from ${f1("hopjam", "unet").toFixed(2)} to ${f1("hopjam", "post").toFixed(2)}.` : "";
   return card("And a jammer the detector never saw?",
-    at("data", "p_r_e_soft") && at("data", "p_r_e_full") ? `A jammer that hops between PRBs from symbol to symbol. Estimating its power cell by cell and letting the decoder refine the map cuts the loss from ${percent(at("data", "p_r_e_soft").bler, 0)} to ${percent(at("data", "p_r_e_full").bler, 0)}, as with the true map.${located}` : "",
+    at("data", "p_r_e_soft") && at("data", "p_r_e_shrink_full") ? `A jammer that hops between PRBs from symbol to symbol. Keeping the power of each cell where it differs from its PRB and letting the decoder refine the map cuts the loss from ${percent(at("data", "p_r_e_soft").bler, 0)} to ${percent(at("data", "p_r_e_shrink_full").bler, 0)}, as with the true map.${located}` : "",
     wrap, "+9 dB jammer power, 4 PRBs that hop over the carrier, TDL-C, 15 dB SNR, three detector seeds pooled. The U-Net was trained only on jammers that fill PRB rows.",
     ["Recovery results", "results.html#recovery"]);
 }
@@ -455,7 +455,7 @@ async function glance(host) {
   if (data.width_sweep) cards.push(howWide(data.width_sweep));
   cards.push(warnsEarly(data.margin));
   if (data.data_aided) cards.push(noCleanPilot(data.data_aided));
-  if (data.recovery.rows.some(r => r.receiver === "p_r_e_full")) cards.push(unseenJammer(data.recovery, data.after_decoding));
+  if (data.recovery.rows.some(r => r.receiver === "p_r_e_shrink_full")) cards.push(unseenJammer(data.recovery, data.after_decoding));
   host.replaceChildren(...cards);
   host.setAttribute("aria-busy", "false");
   if (reduceMotion) return;
