@@ -370,3 +370,24 @@ pool block errors and blocks over detector seeds 0-2 unless stated.
 | K22 | Noise re-estimation runs only when the noise power was estimated in the slot (comb), never when it is known | `jamloc/recovery.py` `call` (renoise="auto"), commit 45d6c0f | CORRECT |
 | K23 | All receivers of a table column decode the same slots | Canary receiver in every new run matched its earlier counts exactly; Colab and local runs of the nominal grid agree in all 28 counts (`results/da_study/colab_nom_check`) | CORRECT |
 | K24 | Post-decoding table with the shrinkage receiver differs from the per-cell run by at most 0.001 in F1 | `results/da_study/loc4/decoded_map/table.csv` vs the earlier `results/decoded_map/table.csv` | CORRECT |
+
+## Resolution study and the six-page draft v8 — added 25 Nov
+
+The six-page draft "How Finely Should a 5G NR Receiver Estimate Jamming?" (Overleaf
+`conference-v8.tex`) rests on `docs/results.md` §25. An independent review checked all 122 entries
+of its QPSK table and the paired intervals against the files. The 16-QAM hopping and 8 dB numbers
+were added afterwards and checked against the pooled counts and `*_paired.csv`. `M` is
+`results/res_study/merged/recovery`, `RS` is `results/res_study`.
+
+| ID | Claim | Evidence | Verdict |
+|---|---|---|---|
+| K25 | Hopping, QPSK, +9 dB, no map: per PRB 50.0/58.5%, shrinkage 0/0.42%. per PRB minus shrinkage 50.0 (46.4-53.5) and 58.3 (54.2-62.3). with the U-Net map 21.1/30.9%, difference 19.8 (17.9-21.8) and 19.8 (17.4-22.3) | `M/recovery_C_hopping_seed*.csv`, `M/recovery_C_hopping_paired.csv` | CORRECT |
+| K26 | Scaling the per-PRB estimate by 2 or 4 never lowered its BLER. the DMRS-only per-PRB estimate fails on 79.9% under data jamming | `resolution table M` (best-scale rows equal per PRB). `dmrs_ie` in `M/recovery_C*.csv` | CORRECT |
+| K27 | QPSK hopping partial: shrinkage without a map is 0.29 (0.14-0.49) points worse than the true map. in the sweep within 0.31 points at every JSR | `M/recovery_C_hopping_paired.csv`. `RS/sweep_hop` (unpaired) | CORRECT |
+| K28 | QPSK map costs: U-Net minus no map 1.52 (1.20-1.91) and 9.77 (8.74-10.90) under hopping. EVM minus no map 15.9 (14.4-17.6) pilot, 2.19 (1.80-2.64) data, 27.4 (23.6-31.1) every pilot +9 dB. EVM detects 84.7% of jammed data cells at 15 dB | `M/recovery_C{,_hopping}_paired.csv`. 768-slot check in `docs/results.md` §25 | CORRECT |
+| K29 | QPSK, every pilot jammed: U-Net minus no map -0.90 (-1.25 to -0.56) and -4.43 (-6.25 to -2.59) | `M/recovery_C_paired.csv` | CORRECT |
+| K30 | 16-QAM block (2 seeds): per cell minus shrinkage without a map 0.38-12.8. U-Net minus no map -0.50 (-0.82 to -0.24) to -4.32 (-5.18 to -3.49). true map up to -9.3 | `M/recovery_C_snr18_mcs13_paired.csv` | CORRECT |
+| K31 | 16-QAM hopping +9 dB (3 seeds): no protection 92.8/97.7%, per PRB 97.8/99.0%, shrinkage 1.65/21.3%, per cell better by 0.12 (-0.07 to 0.33) and 1.84 (1.28-2.41). true map minus no map -1.29 (-1.65 to -0.99) and -13.5 (-14.8 to -12.3). U-Net minus no map +8.02 (7.22-8.88) and +19.3 (17.3-21.4) | `RS/qamhop/recovery/recovery_C_hopping_snr18_mcs13{_seed*,_paired}.csv` | CORRECT |
+| K32 | QPSK 8 dB, +3 dB: shrinkage beats the cell's own estimate by 1.05 (0.74-1.39) on a partial-band block. hopping per PRB 12.3/17.7%, shrinkage 1.56/3.29%, true map better by 0.48 and 1.02 (0.74-1.34) | `RS/merged8/recovery/recovery_C_snr8_paired.csv`, `RS/hop8/recovery/recovery_C_hopping_snr8{_seed*,_paired}.csv` | CORRECT |
+| K33 | "With QPSK, no map is as good as the true map" | K27, K32. with 16-QAM under hopping partial-band jamming the true map is 13.5 points better (K31), and with every pilot jammed 0.9-5.1 points better | NEEDS QUALIFIER (QPSK and clean pilots only, stated so in the draft) |
+| K34 | Three refining passes with the U-Net map and shrinkage: hopping partial +9 dB 10.1% to 0.25%, every pilot +9 dB 39% to 20% | K11, K12 (`R7`) | CORRECT |
