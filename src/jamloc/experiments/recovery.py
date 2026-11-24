@@ -576,7 +576,8 @@ def simulate(
         cases += [(attack, False, tuple(RECEIVERS)) for attack in ("pilot", "data", "partial")]
         # limit case: no clean pilot left
         whole = ("standard", "lmmse", "p_r_e_soft", "true_hard", "true_soft", "cell_soft")
-        whole += ("p_r_e_cell", "true_cell", *DATA_AIDED)
+        whole += ("p_r_e_cell", "true_cell", "p_r_e_shrink", "true_shrink", "cell_shrink")
+        whole += tuple(DATA_AIDED)
         cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]
