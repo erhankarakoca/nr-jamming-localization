@@ -1494,31 +1494,32 @@ the line (transmitted symbols, 192 slots per point).
 DMRS cells of slots whose CRC passed, Gamma(12) power test on unscheduled cells, all at 1%; the
 allocation of a slot that failed keeps the U-Net map), `fused` (U-Net as prior: level 10% on cells
 the U-Net flags, 1% elsewhere), `genie` (as `post` with the transmitted symbols on every slot).
-Decoding by the soft receiver with per-cell estimates and refining passes.
+Decoding by the soft receiver with shrinkage estimates and refining passes (section 24; rerun on
+24 Nov in `results/da_study/loc4`, every F1 within 0.001 of the earlier per-cell run).
 
 F1 over all cells, mean over the U-Net's training seeds 0, 1 and 2 (`results/decoded_map/table.csv`,
 from `--table results/decoded_map/*_refine.csv`; the range over seeds is at most 0.03):
 
 | Grid | U-Net | Exact tests | Fused | Genie | Benign FA, exact tests |
 | --- | --- | --- | --- | --- | --- |
-| test (nominal) | 0.951 | 0.887 | 0.913 | 0.886 | 1.01% |
-| sched | 0.936 | 0.898 | 0.920 | 0.897 | - |
+| test (nominal) | 0.951 | 0.887 | 0.912 | 0.886 | 1.01% |
+| sched | 0.936 | 0.897 | 0.920 | 0.897 | - |
 | combjam | 0.953 | 0.886 | 0.913 | 0.885 | 0.98% |
 | qpskjam | 0.956 | 0.890 | 0.917 | 0.889 | 1.03% |
 | neighbor | 0.961 | 0.907 | 0.933 | 0.906 | 0.99% |
 | hopjam | 0.597 | 0.877 | 0.865 | 0.884 | 1.00% |
 | pulsejam | 0.638 | 0.878 | 0.860 | 0.879 | 0.96% |
 | tonejam | 0.768 | 0.585 | 0.657 | 0.583 | 0.96% |
-| spoofjam | 0.027 | 0.255 | 0.227 | 0.773 | 1.00% |
-| spoofpart | 0.138 | 0.510 | 0.432 | 0.683 | 1.02% |
+| spoofjam | 0.027 | 0.255 | 0.228 | 0.773 | 1.00% |
+| spoofpart | 0.138 | 0.510 | 0.433 | 0.683 | 1.02% |
 
 - The exact tests stay at their 1% design rate on every grid's benign slots (0.96-1.03% over all
   cells); the U-Net varies between 0.59% and 1.40%, the fusion 1.04-1.20%.
 - The network wins on the attacks it was trained on (it pools weak evidence across a PRB row);
   the exact tests win on every support it never saw, without training.
 - Spoofing: the scheduled-cell F1 of the exact tests is 0.46-0.79 between -15 and -6 dB JSR
-  (U-Net 0.02-0.03). From 0 dB on most spoofed slots no longer decode (182/256 at 0 dB, 61/256 at
-  +9 dB), and the network's map is kept there.
+  (U-Net 0.02-0.03). From 0 dB on most spoofed slots no longer decode (547/768 decoded at 0 dB, 319 at +3 dB and
+  182 at +9 dB, over the three seeds), and the network's map is kept there.
 - Multi-tone: the sum over a cell dilutes a single tone. With `--peaks` (sum and largest error
   each at half the level, both laws exact) F1 rose from 0.594 to 0.640 on 2 batches per point and
   fell by 0.004 on the nominal grid; the sum stays the default.
@@ -1597,5 +1598,109 @@ data 4.0 / 7.4 / 19.7% and 7.8 / 8.9 / 19.7%; partial-band 5.6 / 7.5 / 21.1% and
 has the variance (2|h|^2 N0 + N0^2 + |h|^4 kappa) per resource element, kappa = Var|x|^2 = 0 for
 QPSK and 0.32 for 16-QAM, so without a map 16-QAM cells get false jamming power.
 
-Not finished: an 8 dB SNR run of the same receivers on Colab (benign point only: every receiver at
-or below 0.3% BLER).
+The 8 dB SNR run of the same receivers (Colab, `recovery_C_snr8*`, all nominal cases) is in
+`results/receiver_v7/recovery`. Its findings are superseded by the ablation of section 24.
+
+
+## 24. Shrinkage of the per-cell jamming estimate
+
+Round of 24 Nov 2026 (branch `decoder-aided-passes`). At 8 dB SNR the per-cell receiver of
+section 23 lost 0.4-1.3 points against the per-PRB receiver with channel passes. The question was
+how to keep the per-cell power of a jammer that hops between symbols without paying the noise of a
+12-element estimate when the jammer fills the PRB row.
+
+**Ablation at 8 dB** (`results/da_study/abl8`, U-Net map, TDL-C, +3 dB JSR, three seeds of 1,600
+slots). Partial-band jamming: per-PRB with channel passes 3.90%, per-PRB with refining passes
+3.85%, per-cell with channel passes 4.48%, per-cell with refining passes and noise re-estimation
+4.52%. Every pilot jammed: 4.77%, 4.69%, 4.77% and 5.83%. The per-cell estimate costs about half a
+point under block jamming, and re-estimating the noise power when it is known costs another point
+with every pilot jammed. The map refinement itself costs nothing.
+
+**Pooling rules tried.**
+
+- z-threshold (commit 24d0b5e, since removed): a cell keeps the PRB mean when its own estimate is
+  within z standard errors of it. With z = 2.5 the 8 dB cost was 0.27 points (4.17% against
+  3.90%). A sweep with the true map (one attempt, 1,280 slots, seed 4242, partial +3 dB at 8 dB)
+  gave per-PRB 5.47%, per-cell 6.17%, z = 2.5 5.78%, z = 4 5.55%, z = 8 and 16 5.47%. z = 8
+  recovered the per-PRB result (8 dB, U-Net map: 3.90% with channel passes, 3.85% refining) and kept
+  hopping close (one attempt 1.58% / 10.7%, refining 0 / 0.35%), but it is a tuned constant.
+- Random-effects shrinkage (`cellwise="shrink"`, commit a34c4c6): each flagged cell's raw estimate
+  is pulled towards the row mean with the weight tau2 / (tau2 + s2), where s2 is the sampling
+  variance of the cell's estimate (spread of its 12 terms over 12) and tau2 the spread of the raw
+  estimates over the row minus their mean sampling variance, floored at zero (Morris 1983,
+  DerSimonian and Laird 1986). No parameter. Unit test: a row the jammer fills stays within 13% of
+  the row mean's deviation that per-cell estimates show, and in a row the map flags whole but the
+  jammer hits every other symbol, the jammed cells get 3.3 (true 4) and the clean ones 0.03, where
+  the row mean gives both 2.2.
+
+**Final runs** (`results/da_study/final/{nom,whole,whole1,whole2,hop,pulse,nest2}`, merged with the
+earlier runs by `merge_runs.py` into `results/receiver_v7/recovery`; every run carried one receiver
+of the earlier runs, and its counts matched them exactly, so all receivers share their slots; the
+Colab and local runs of seeds 0 and 1 of the nominal grid agree in all 28 counts). BLER (%), TDL-C,
+15 dB SNR, known noise power, +9 dB JSR on 4 of 12 PRBs or every DMRS cell of the allocation:
+
+| Receiver | nom. pilot | nom. data | nom. partial | pulsed data | pulsed partial | hop data | hop partial | all pilots +3 | all pilots +9 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| U-Net, soft per PRB | 0.06 | 0 | 0.04 | 0.06 | 0.38 | 21 | 31 | 3.6 | 39 |
+| U-Net, shrinkage (`p_r_e_shrink`) | 0.06 | 0 | 0.04 | 0 | 0.33 | 1.5 | 10 | 3.6 | 39 |
+| ... with channel passes | - | - | - | - | - | 1.2 | 6.0 | 1.3 | 24 |
+| ... with refining passes (`p_r_e_shrink_full`) | 0 | 0 | 0 | 0 | 0 | 0 | 0.25 | 0.90 | 20 |
+| No map, shrinkage, passes (`cell_shrink_full`) | 0.02 | 0 | 0.04 | 0 | 0 | 0 | 0.12 | 1.0 | 24 |
+| True map, shrinkage, refining (`true_shrink_full`) | 0 | 0 | 0 | 0 | 0 | 0 | 0.08 | 0.85 | 19 |
+
+The channel-pass hopping entries are from `results/da_study/shrink_hop` (same slots, the hopping
+run has no other cases). Paired differences (points, 95% Newcombe interval, common slots):
+
+- Hopping: per-PRB minus shrinkage-refining 21.1 (19.1 to 23.1) data and 30.7 (27.9 to 33.6)
+  partial; shrinkage one attempt minus refining 1.52 (1.20 to 1.91) and 9.84 (8.82 to 11.0); per
+  cell minus shrinkage, one attempt, 0.04 (-0.08 to 0.16) and 0.17 (-0.08 to 0.43); refining minus
+  true map refining 0.00 and 0.17 (0.03 to 0.34); minus the map-free receiver 0.00 and 0.12
+  (-0.03 to 0.30); the old per-cell refining receiver and the mixed-attack U-Net within 0.02.
+- Every pilot jammed: channel passes minus refining 0.40 (0.18 to 0.64) at +3 dB and 4.76 (3.52
+  to 6.04) at +9 dB; refining minus true map 0.04 (-0.06 to 0.15) and 0.44 (-0.04 to 0.92); map
+  minus no map -0.15 (-0.33 to 0.03) and -3.67 (-4.94 to -2.43); the old per-cell refining receiver
+  (ungated noise re-estimation) minus refining 0.08 (-0.06 to 0.23) and 2.17 (1.27 to 3.10). In one
+  attempt the map-free shrinkage receiver loses 0.90 (0.56 to 1.25) and 4.43 (2.59 to 6.25) points
+  more than the U-Net map.
+- Nominal and pulsed: all differences among the soft receivers within 0.4 points; pulsed partial
+  per-PRB minus refining 0.38 (0.22 to 0.59).
+
+**8 dB with shrinkage** (`results/receiver_v7/ablation8`, slots of `abl8`): partial-band 4.02%
+with channel passes and 4.00% refining, every pilot 4.77% and 4.67%. Refining minus per-PRB channel
+passes +0.10 (-0.04 to 0.26) and -0.10 (-0.29 to 0.07): the low-SNR cost is gone. Per-cell minus
+shrinkage, channel passes, partial: 0.46 (0.24 to 0.70). True map one attempt: per-PRB 5.35%,
+shrinkage 5.54% (difference 0.19, 0.02 to 0.36).
+
+**16-QAM** (MCS 13, 18 dB SNR, seeds 0 and 1, Colab, `colab_qam16b` on the slots of
+`colab_qam16`). BLER (%) at +3 / +9 dB JSR:
+
+| Receiver | pilot | data | partial |
+| --- | --- | --- | --- |
+| True map, per PRB | 0.53 / 1.0 | 4.0 / 7.8 | 5.6 / 7.8 |
+| True map, shrinkage | 0.53 / 1.0 | 4.3 / 7.9 | 5.7 / 7.9 |
+| True map, per cell | 0.53 / 1.0 | 7.4 / 8.9 | 7.5 / 8.8 |
+| No map, shrinkage | 1.1 / 4.0 | 6.2 / 11 | 9.6 / 17 |
+| No map, per cell | 1.8 / 5.4 | 20 / 20 | 21 / 28 |
+
+Shrinkage minus per-PRB with the true map: 0.25 (0.05 to 0.47) data +3 dB, the other points
+within -0.4 to 0.3; per cell minus shrinkage 0.9 to 3.1 points (all intervals above zero). Without
+a map, shrinkage removes 9-13 points of the per-cell loss, and the map still saves 0.5 to 9.2
+points (partial +9 dB: 7.9% against 17%).
+
+**Noise re-estimation gate** (commit 45d6c0f). The automatic gate first ran the re-estimation only
+when the map flagged a DMRS cell. The map-free receiver flags DMRS cells with the residual test,
+whose normalization is the very noise estimate a jammed comb inflates, so its gate stayed shut
+(estimated noise, every pilot +3 dB: 8.2% against 4.2% with the U-Net map). The gate now opens
+whenever the noise power was estimated in the slot and stays shut when it is known.
+Estimated noise power (`--noise-estimate comb`, every pilot jammed, `final/nest2` on the slots of
+`colab_nest`): refining passes 4.21% (+3 dB) and 67.9% (+9 dB), true map 4.08% and 67.9%, no map
+4.04% and 69.3%, channel passes 15.3% and 84.4%, one attempt 52% and 98%. Channel passes minus
+refining 11.2 (9.9 to 12.6) and 18.0 (14.1 to 21.9); refining minus true map 0.13 (-0.01 to 0.27)
+and 0.00 (-0.63 to 0.63); map minus no map 0.17 (-0.13 to 0.46) and -1.39 (-2.64 to -0.15). With
+the old gate the map-free receiver had 8.19% at +3 dB; the map receivers are unchanged by the new
+gate. Partial-band on 4 PRBs: every soft receiver at or below 0.23%.
+
+Conclusions for the paper: shrinkage is the proposed estimator (no tuning, matches per-PRB under
+block jamming and per-cell under hopping, best of all rules in 16-QAM). The map-free receiver with
+shrinkage is a strong baseline for QPSK. The map matters with every pilot jammed at high JSR and
+with 16-QAM.
