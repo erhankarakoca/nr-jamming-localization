@@ -419,3 +419,51 @@ def test_shrinkage_pools_a_filled_row_and_separates_a_moving_jammer():
     to_row = (shrink[:, filled] - estimates[False][:, filled]).abs().mean()
     per_cell = (estimates[True][:, filled] - estimates[False][:, filled]).abs().mean()
     assert to_row < 0.3 * per_cell
+
+
+def test_options_for_a_receiver_without_a_map():
+    import pytest
+
+    out = link(_scenario(DATA, 6.0, 15.0, n=16), decode=False)
+    rx = MapAwareReceiver(out.tx)
+    h_ls, pilot_sc, pilot_power = dmrs_ls(out.y_alloc, out.tx)
+    h_sc, err_sc = lmmse_interpolation(
+        h_ls,
+        pilot_sc,
+        torch.ones_like(h_ls, dtype=torch.bool),
+        out.no / pilot_power,
+        out.y_alloc.shape[-1],
+        cfg.scs,
+        cfg.tau_max,
+    )
+    args = (out.y_alloc, out.no, h_sc, err_sc)
+    # Without a map, the per-PRB average treats every data cell as flagged, as a map that flags
+    # everything does
+    rx._cellwise = "prb"
+    no_map = rx._jamming_variance(*args, None, None, None, "cell")
+    rx._cellwise = False
+    everything = torch.ones_like(_cells(out))
+    assert torch.allclose(no_map, rx._jamming_variance(*args, everything, None, None, "soft"))
+
+    # The scale multiplies the jamming power, so a larger one gives every LLR less weight
+    def llr(scale):
+        options = {"cellwise": "prb", "scale": scale}
+        out_rx = rx(out.y_alloc, out.no, None, decode=False, mode="cell", history=True, **options)
+        return out_rx["history"][0]["llr"].abs()
+
+    one, two = llr(1.0), llr(2.0)
+    assert torch.all(two <= one + 1e-4) and (two < one - 1e-3).any()
+
+    # Every pilot weighted by its residual, or only those above the analytic threshold
+    rx._pilot_weights = "all"
+    _, pilot_var, _, interfered = rx._pilots(h_ls, pilot_sc, pilot_power, out.no, None, "cell")
+    assert interfered.all()
+    assert torch.all(pilot_var >= (out.no / pilot_power)[:, None] * (1 - 1e-6))
+    rx._pilot_weights = "test"
+    _, _, _, tested = rx._pilots(h_ls, pilot_sc, pilot_power, out.no, None, "cell")
+    assert tested.float().mean() < interfered.float().mean()
+
+    with pytest.raises(ValueError, match="cellwise"):
+        rx(out.y_alloc, out.no, None, decode=False, mode="cell", cellwise="row")
+    with pytest.raises(ValueError, match="pilot_weights"):
+        rx(out.y_alloc, out.no, None, decode=False, mode="cell", pilot_weights="some")
