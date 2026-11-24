@@ -193,6 +193,21 @@ def soft_qpsk(llr: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     return mean, (1 - mean.abs() ** 2).clamp_min(0)
 
 
+def sum_over_symbols(
+    values: torch.Tensor, sym: torch.Tensor, sc: torch.Tensor, num_symbols: int, num_sc: int
+) -> torch.Tensor:
+    """Sum ``values`` ``[B, N]`` over the OFDM symbols of each subcarrier, giving ``[B, num_sc]``.
+
+    ``values[:, j]`` sits at grid position ``(sym[j], sc[j])``, and every position must appear
+    once. The values go onto a zero grid, which is then summed along its symbols. Unlike
+    ``index_add_`` with repeated subcarriers, which adds with atomics in a varying order on CUDA,
+    this gives the same bits in every run on any device.
+    """
+    grid = values.new_zeros(values.shape[0], num_symbols, num_sc)
+    grid[:, sym, sc] = values
+    return grid.sum(dim=1)
+
+
 class MapAwareReceiver(Block):
     """Receiver for one allocation size that uses a jamming map ``cells`` ``[B, n, 14]`` (bool).
 
@@ -417,11 +432,20 @@ class MapAwareReceiver(Block):
         w_p = torch.where(ok, 1 / pilot_var, 0.0)
         obs_p = torch.where(ok, h_ls, 0)
 
-        rows = y.shape[0]
-        num = y_d.new_zeros(rows, num_sc).index_add_(1, pilot_sc, (w_p * obs_p).to(y_d.dtype))
-        num = num.index_add_(1, self.data_sc, (w_d * obs_d).to(y_d.dtype))
-        den = w_d.new_zeros(rows, num_sc).index_add_(1, pilot_sc, w_p.to(w_d.dtype))
-        den = den.index_add_(1, self.data_sc, w_d)
+        # Sum the weighted observations of each subcarrier over the DMRS symbols (the pilots are
+        # stacked in symbol order, the same number on each) and over the data symbols
+        num_dmrs = len(self.dmrs_symbols)
+        pilot_dmrs = torch.arange(num_dmrs, device=y.device).repeat_interleave(
+            pilot_sc.numel() // num_dmrs
+        )
+
+        def combine(on_pilots, on_data):
+            return sum_over_symbols(on_pilots, pilot_dmrs, pilot_sc, num_dmrs, num_sc) + (
+                sum_over_symbols(on_data, self.data_sym, self.data_sc, y.shape[-2], num_sc)
+            )
+
+        num = combine((w_p * obs_p).to(y_d.dtype), (w_d * obs_d).to(y_d.dtype))
+        den = combine(w_p.to(w_d.dtype), w_d)
         h_obs = num / den.clamp_min(1e-12)
         every = torch.arange(num_sc, device=y.device)
         return lmmse_interpolation(
