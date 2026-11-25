@@ -10,9 +10,13 @@ machine.
   `figures/figures/` and `figures/v9/` there.
 - The code is on `main`. Sections 26 and 27 of [results.md](results.md) record the general U-Net and
   the v9 runs, and the end of [reproducing.md](reproducing.md) lists their commands.
-- The trained models (`results/models`, 3.4 MB) and the v9 run outputs (`results/v9`, 5.5 MB) are
-  git-ignored. They exist only on the machine that made them. Copy both folders to a new machine to
-  redraw the figures without training and decoding again.
+- The trained models and the run outputs behind v9 are committed even though `results/` and `data/`
+  are git-ignored. They are `results/models`, `results/v9`, `results/general_training`,
+  `results/gen_recovery` and `results/figures`, with the validation splits `data/val.npz` and
+  `data/val_gen.npz` that the map thresholds come from. A new machine can redraw every figure from
+  them without training or decoding again. Use `git add -f` for any new file there that should be
+  kept. The `models` links inside the run folders are not committed, so a new run folder needs its
+  own link as in `reproducing.md`.
 
 ## What v9 is missing
 

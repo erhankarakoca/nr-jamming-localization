@@ -1,0 +1,8 @@
+[C nominal true seed 0] none                   JSR  +3.0 dB: standard 0.000  p_r_e_soft 0.000  true_soft 0.000  true_cell 0.000  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_cell 0.000  nomap_shrink 0.000
+[C nominal true seed 0] pilot                  JSR  +3.0 dB: standard 0.505  p_r_e_soft 0.005  true_soft 0.004  true_cell 0.004  p_r_e_shrink 0.005  true_shrink 0.004  nomap_prb 0.009  nomap_cell 0.015  nomap_shrink 0.009
+[C nominal true seed 0] pilot                  JSR  +9.0 dB: standard 0.891  p_r_e_soft 0.013  true_soft 0.010  true_cell 0.010  p_r_e_shrink 0.013  true_shrink 0.010  nomap_prb 0.034  nomap_cell 0.046  nomap_shrink 0.034
+[C nominal true seed 0] data                   JSR  +3.0 dB: standard 0.898  p_r_e_soft 0.042  true_soft 0.042  true_cell 0.066  p_r_e_shrink 0.045  true_shrink 0.045  nomap_prb 0.062  nomap_cell 0.190  nomap_shrink 0.065
+[C nominal true seed 0] data                   JSR  +9.0 dB: standard 0.984  p_r_e_soft 0.066  true_soft 0.065  true_cell 0.078  p_r_e_shrink 0.070  true_shrink 0.069  nomap_prb 0.099  nomap_cell 0.203  nomap_shrink 0.101
+[C nominal true seed 0] partial                JSR  +3.0 dB: standard 0.984  p_r_e_soft 0.062  true_soft 0.057  true_cell 0.079  p_r_e_shrink 0.064  true_shrink 0.059  nomap_prb 0.096  nomap_cell 0.219  nomap_shrink 0.099
+[C nominal true seed 0] partial                JSR  +9.0 dB: standard 1.000  p_r_e_soft 0.069  true_soft 0.069  true_cell 0.074  p_r_e_shrink 0.068  true_shrink 0.068  nomap_prb 0.139  nomap_cell 0.250  nomap_shrink 0.143
+Wrote results/v9/qam16/recovery/recovery_C_snr18_mcs13.csv and recovery_C_snr18_mcs13_paired.csv (no figure)

@@ -1,0 +1,15 @@
+[C nominal true seed 2] pilot                  JSR  -9.0 dB: standard 0.000  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.000
+[C nominal true seed 2] pilot                  JSR  -6.0 dB: standard 0.000  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.000
+[C nominal true seed 2] pilot                  JSR  -3.0 dB: standard 0.001  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.000
+[C nominal true seed 2] pilot                  JSR  +0.0 dB: standard 0.009  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.001
+[C nominal true seed 2] pilot                  JSR  +3.0 dB: standard 0.039  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.013
+[C nominal true seed 2] pilot                  JSR  +6.0 dB: standard 0.145  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.061
+[C nominal true seed 2] pilot                  JSR  +9.0 dB: standard 0.340  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.001  nomap_shrink 0.001  evm_shrink 0.195
+[C nominal true seed 2] partial                JSR  -9.0 dB: standard 0.003  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.001
+[C nominal true seed 2] partial                JSR  -6.0 dB: standard 0.023  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.014
+[C nominal true seed 2] partial                JSR  -3.0 dB: standard 0.114  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.052
+[C nominal true seed 2] partial                JSR  +0.0 dB: standard 0.250  p_r_e_shrink 0.000  true_shrink 0.000  nomap_prb 0.000  nomap_shrink 0.000  evm_shrink 0.101
+[C nominal true seed 2] partial                JSR  +3.0 dB: standard 0.557  p_r_e_shrink 0.001  true_shrink 0.001  nomap_prb 0.001  nomap_shrink 0.001  evm_shrink 0.111
+[C nominal true seed 2] partial                JSR  +6.0 dB: standard 0.766  p_r_e_shrink 0.001  true_shrink 0.001  nomap_prb 0.001  nomap_shrink 0.001  evm_shrink 0.099
+[C nominal true seed 2] partial                JSR  +9.0 dB: standard 0.922  p_r_e_shrink 0.001  true_shrink 0.001  nomap_prb 0.002  nomap_shrink 0.002  evm_shrink 0.087
+Wrote results/v9/sweep_nom/recovery/recovery_C.csv and the main, ablation and map-source figures (.pdf/.png)

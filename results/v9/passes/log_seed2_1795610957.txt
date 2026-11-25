@@ -1,0 +1,2 @@
+[C nominal true seed 2] pilot_whole_allocation JSR  +9.0 dB: p_r_e_shrink 0.396  p_r_e_shrink_full 0.158
+Wrote results/v9/passes/recovery/recovery_C.csv and recovery_C_paired.csv (no figure)
