@@ -72,7 +72,10 @@ def main(argv=None):
     # 4. What the map is good for: recovery with the detectors' maps
     small = ["--batch-size", "8", "--max-mc-iter", "1", "--jsr-db", "0"] if args.small else []
     for channel in ("A", "C"):
-        recovery.main(["--channel", channel, "--seeds", str(args.seeds[0]), *small])
+        # This pipeline trains the U-Net on the nominal splits only
+        recovery.main(
+            ["--channel", channel, "--seeds", str(args.seeds[0]), "--unet", "nominal", *small]
+        )
     print(f"[recovery] done after {_elapsed(start)}")
 
     # 5. Explanatory figures and the gallery page

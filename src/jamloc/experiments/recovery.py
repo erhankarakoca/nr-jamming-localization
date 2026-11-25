@@ -219,6 +219,21 @@ TRAINED_ON = {
     "fused_atk": ({"data": "atk"}, "val_atk"),
     "fused_gen": ({"data": "gen"}, "val_gen"),
 }
+# Which training the U-Net of the p_r_e_* receivers ("fused") comes from: (load_model options,
+# validation split of its threshold). The general one (experiments/general_training) is the
+# default; the nominal one reproduces the results before section 26 of docs/results.md.
+UNETS = {"general": ({"data": "gen"}, "val_gen"), "nominal": ({}, "val")}
+TRAIN_COMMANDS = {
+    "general": "python -m jamloc.experiments.general_training",
+    "nominal": "python -m jamloc.train --variant fused",
+}
+
+
+def unet_source(unet: str) -> tuple[dict, str]:
+    """``load_model`` options and validation split of the U-Net trained as ``unet``."""
+    return UNETS[unet]
+
+
 # With the estimated noise power: the detectors that were trained or calibrated on it, with the
 # validation split their thresholds (and the block test's nulls) come from
 NEST_DETECTORS = {"power_threshold": "val_nest", "block_test": "val_nest", "fused": "val_nest"}
@@ -649,12 +664,14 @@ def simulate(
     attacks=None,
     jam_size=JAM_SIZE,
     mcs_index=None,
+    unet="general",
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
     ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
     batches, decoding only the receivers ``decode[point]``. ``attacks``: simulate only these cases
     (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``).
-    ``jam_size``: PRBs of the pilot, data and partial-band attacks (inside the allocation)."""
+    ``jam_size``: PRBs of the pilot, data and partial-band attacks (inside the allocation).
+    ``unet``: the training of the ``p_r_e_*`` receivers' U-Net (``UNETS``)."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
     if mcs_index is not None:  # another MCS: the detectors were trained on the default one
         cfg = dataclasses.replace(cfg, mcs_index=mcs_index)
@@ -671,6 +688,13 @@ def simulate(
             model = load(val_split or "val")  # its empirical nulls
         elif nest:
             model = load_model(det, seed, data="nest")
+        elif det == "fused":
+            options, val_split = unet_source(unet)
+            if not checkpoint_path("fused", seed, **options).is_file():
+                raise FileNotFoundError(
+                    f"no {unet} U-Net for seed {seed}; train it with {TRAIN_COMMANDS[unet]}"
+                )
+            model = load_model("fused", seed, **options)
         elif det in TRAINED_ON:
             options, val_split = TRAINED_ON[det]
             if not checkpoint_path("fused", seed, **options).is_file():
@@ -1031,6 +1055,12 @@ def main(argv=None):
     )
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     p.add_argument(
+        "--unet",
+        choices=list(UNETS),
+        default="general",
+        help="training of the U-Net of the p_r_e_* receivers",
+    )
+    p.add_argument(
         "--replay",
         metavar="DIR",
         help="repeat the run whose per-seed CSVs are in DIR, decoding only the quoted points",
@@ -1099,6 +1129,7 @@ def main(argv=None):
                 args.attacks,
                 JAM_SIZE if args.jam_prb is None else args.jam_prb,
                 args.mcs,
+                args.unet,
             )
             if args.replay:
                 bad = check_replay(rows, before)

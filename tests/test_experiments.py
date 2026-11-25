@@ -1,5 +1,7 @@
 import csv
 
+import pytest
+
 from jamloc.experiments import ber_bler
 
 
@@ -95,6 +97,10 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
         train(variant, epochs=1, batch_size=32)
 
     args = ["--channel", "A", "--batch-size", "8", "--max-mc-iter", "1", "--jsr-db", "-3", "3"]
+    # The general U-Net is the default, and none is trained here: the error names its command
+    with pytest.raises(FileNotFoundError, match="general_training"):
+        recovery.main(args)
+    args = ["--unet", "nominal", *args]  # first, so that args[-2:] stay the JSR values
     recovery.main(args)
     out = tmp_path / "results" / "recovery"
     with open(out / "recovery_A.csv", encoding="utf-8", newline="") as f:
@@ -232,3 +238,32 @@ def test_paper_run_plans_every_split_and_model(tmp_path, monkeypatch):
         "fused_pixel_seed0.pt",
     ):
         assert name in names
+
+
+def test_unet_source_picks_training_and_validation_split():
+    from jamloc.experiments import recovery
+
+    assert recovery.unet_source("general") == ({"data": "gen"}, "val_gen")
+    assert recovery.unet_source("nominal") == ({}, "val")
+
+
+def test_estimated_noise_keeps_the_unet_trained_on_it(monkeypatch):
+    # With the noise power estimated from the empty comb, the U-Net trained on that estimate is
+    # used whatever --unet says
+    from jamloc.experiments import recovery
+
+    class Loaded(Exception):
+        pass
+
+    calls = []
+
+    def fake_load_model(variant, seed=0, **options):
+        calls.append((variant, options.get("data", "")))
+        raise Loaded
+
+    monkeypatch.setattr(recovery, "load_model", fake_load_model)
+    monkeypatch.setattr(recovery, "load", lambda split: {})
+    monkeypatch.setattr(recovery, "val_threshold", lambda *args, **kwargs: 0.0)
+    with pytest.raises(Loaded):
+        recovery.simulate("C", 15.0, [9.0], 8, 1, 10, seed=0, noise_estimate="comb", unet="general")
+    assert calls == [("fused", "nest")]
