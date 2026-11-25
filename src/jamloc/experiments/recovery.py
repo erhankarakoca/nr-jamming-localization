@@ -227,6 +227,8 @@ TRAINED_ON = {
 # validation split of its threshold). The general one (experiments/general_training) is the
 # default; the nominal one reproduces the results before section 26 of docs/results.md.
 UNETS = {"general": ({"data": "gen"}, "val_gen"), "nominal": ({}, "val")}
+# Receivers of the general U-Net under its own name, which repeat p_r_e_* with --unet general
+GEN_RECEIVERS = {"gen_soft", "gen_shrink"}
 TRAIN_COMMANDS = {
     "general": "python -m jamloc.experiments.general_training",
     "nominal": "python -m jamloc.train --variant fused",
@@ -685,6 +687,8 @@ def simulate(
     for det in DETECTORS:
         if nest and det not in NEST_DETECTORS:
             continue  # never trained or calibrated on the estimated noise power
+        if det == "fused_gen" and unet == "general" and not set(only or ()) & GEN_RECEIVERS:
+            continue  # the p_r_e_* receivers already use the general U-Net
         val_split = NEST_DETECTORS[det] if nest else None
         if det in NO_MODEL:
             model = None
@@ -699,6 +703,11 @@ def simulate(
                 raise FileNotFoundError(
                     f"no {unet} U-Net for seed {seed}. Train it with {TRAIN_COMMANDS[unet]}"
                     + (other if unet == "general" else "")
+                )
+            if not (data_dir() / f"{val_split}.npz").is_file():
+                raise FileNotFoundError(
+                    f"the {unet} U-Net takes its threshold from the {val_split} split, which is "
+                    f"missing. Generate it with python -m jamloc.dataset --split {val_split}"
                 )
             model = load_model("fused", seed, **options)
         elif det in TRAINED_ON:
