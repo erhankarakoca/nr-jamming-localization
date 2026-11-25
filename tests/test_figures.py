@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 from jamloc.experiments import figures
 from jamloc.paths import REPO_ROOT
 
-MODEL_FREE = ["attack_patterns", "residual_explained", "constellations"]
+MODEL_FREE = ["attack_patterns", "residual_explained", "constellations", "shrinkage_example"]
 
 
 def test_drawio_sources_are_xml():
@@ -213,3 +213,21 @@ def test_gallery_only_keeps_existing_figures(tmp_path, monkeypatch):
     page = (out / "index.html").read_text(encoding="utf-8")
     assert 'src="system_diagram.png"' in page
     assert "second pass through the same slot" in page
+
+
+def test_shrinkage_lies_between_the_cell_and_its_row_mean():
+    from jamloc.experiments.figures import CFG, _estimates_without_map, shrinkage_example
+
+    # Block data jammer: the rows it does not touch shrink to their (near zero) row mean
+    est = _estimates_without_map(CFG, "data", 9.0, seed=7)
+    cell, row, shrink = est["cell"], est["prb"], est["shrink"]
+    ok = ~np.isnan(cell)
+    lo, hi = np.minimum(cell, row), np.maximum(cell, row)
+    assert np.all(shrink[ok] >= np.maximum(lo[ok], 0) - 1e-6)
+    assert np.all(shrink[ok] <= np.maximum(hi[ok], 0) + 1e-6)
+    clean = ~est["truth"].any(axis=1)[:, None] & ok  # data cells of rows without any jammed cell
+    assert clean.any()
+    assert np.allclose(shrink[clean], row[clean], atol=0.05)
+
+    fig, caption = shrinkage_example()
+    assert isinstance(fig, Figure) and len(fig.axes) >= 2 and "shrinkage" in caption

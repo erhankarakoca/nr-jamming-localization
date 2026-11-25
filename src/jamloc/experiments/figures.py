@@ -33,7 +33,7 @@ from jamloc.link import JammedPUSCHLink, Scenario, seed_everything
 from jamloc.metrics import threshold_at_fa
 from jamloc.model import VARIANTS, select_inputs
 from jamloc.paths import data_dir, results_dir
-from jamloc.plotting import PARULA, new_figure, paper_style, save
+from jamloc.plotting import COLUMN_WIDTH, PARULA, new_figure, paper_style, save
 from jamloc.receiver import data_positions
 from jamloc.theory import threshold
 from jamloc.train import checkpoint_path, load_model
@@ -1251,15 +1251,16 @@ def after_decoding(jsr_db: float = 3.0, seed: int = 11):
     return fig, caption
 
 
-def jamming_estimates(jsr_db: float = 9.0, seed: int = 7, slot: int = 0):
-    """One slot of a hopping data jammer and three estimates of the jamming power of every cell,
-    all without a map: one value per PRB row, each cell on its own, and shrinkage of each cell
-    towards its row. The estimates are in units of the jammer's power per resource element."""
-    import dataclasses
+def _estimates_without_map(cfg, attack: str, jsr_db: float, seed: int, slot: int = 0) -> dict:
+    """Jamming power that each estimate gives every cell of one simulated slot without a map.
 
+    ``"prb"`` is one value per PRB row, ``"cell"`` each cell on its own and ``"shrink"`` each
+    cell shrunk towards its row, every one ``[n, 14]`` over the allocation, in units of the
+    jammer's power per resource element and nan on the DMRS symbols. ``"truth"`` marks the
+    jammed cells. The jammer hits PRBs ``JAM`` of the allocation ``ALLOC`` (TDL-C, 15 dB SNR).
+    """
     from jamloc.recovery import MapAwareReceiver, lmmse_interpolation
 
-    cfg = dataclasses.replace(CFG, jammer_hopping=True)
     a0, n = ALLOC
     seed_everything(seed)
     batch = 4
@@ -1267,13 +1268,15 @@ def jamming_estimates(jsr_db: float = 9.0, seed: int = 7, slot: int = 0):
         channel="C",
         alloc_start=a0,
         alloc_size=n,
-        attack=torch.full((batch,), ATTACKS.index("data")),
+        attack=torch.full((batch,), ATTACKS.index(attack)),
         jam_start=torch.full((batch,), JAM[0]),
         jam_size=torch.full((batch,), JAM[1]),
         jsr_db=torch.full((batch,), float(jsr_db)),
         snr_db=torch.full((batch,), 15.0),
     )
     out = JammedPUSCHLink(cfg)(sc, decode=False)
+
+    # Channel estimate with every pilot weighted by its residual, as the receiver without a map
     rx = MapAwareReceiver(out.tx, cfg)
     y, no = out.y_alloc, out.no
     h_ls, pilot_sc, pilot_power = dmrs_ls(y, out.tx)
@@ -1282,17 +1285,33 @@ def jamming_estimates(jsr_db: float = 9.0, seed: int = 7, slot: int = 0):
     h_sc, err_sc = lmmse_interpolation(
         h_ls, pilot_sc, clean, pilot_var, y.shape[-1], cfg.scs, cfg.tau_max
     )
+
+    # The three estimates of every data cell, averaged over its 12 subcarriers
     power = 10 ** (jsr_db / 10)
-    names = ("(b) Per PRB", "(c) Per cell", "(d) Shrinkage")
-    estimates = []
-    for option in ("prb", True, "shrink"):
+    estimates = {}
+    for key, option in (("prb", "prb"), ("cell", True), ("shrink", "shrink")):
         rx._cellwise = option
         with torch.no_grad():
             v = rx._jamming_variance(y, no, h_sc, err_sc, None, r, interfered, "cell")
         grid = torch.full((cfg.num_symbols, y.shape[-1]), float("nan"), device=v.device)
         grid[rx.data_sym, rx.data_sc] = v[slot]
-        estimates.append((grid.reshape(cfg.num_symbols, n, 12).mean(-1).T / power).cpu().numpy())
-    truth = out.labels[slot, a0 : a0 + n].bool().cpu().numpy()
+        estimates[key] = (grid.reshape(cfg.num_symbols, n, 12).mean(-1).T / power).cpu().numpy()
+    estimates["truth"] = out.labels[slot, a0 : a0 + n].bool().cpu().numpy()
+    return estimates
+
+
+def jamming_estimates(jsr_db: float = 9.0, seed: int = 7, slot: int = 0):
+    """One slot of a hopping data jammer and three estimates of the jamming power of every cell,
+    all without a map: one value per PRB row, each cell on its own, and shrinkage of each cell
+    towards its row. The estimates are in units of the jammer's power per resource element."""
+    import dataclasses
+
+    cfg = dataclasses.replace(CFG, jammer_hopping=True)
+    a0, n = ALLOC
+    est = _estimates_without_map(cfg, "data", jsr_db, seed, slot)
+    names = ("(b) Per PRB", "(c) Per cell", "(d) Shrinkage")
+    estimates = [est["prb"], est["cell"], est["shrink"]]
+    truth = est["truth"]
     data = np.ones_like(truth)
     data[:, list(cfg.dmrs_symbols)] = False
 
@@ -1353,8 +1372,61 @@ def jamming_estimates(jsr_db: float = 9.0, seed: int = 7, slot: int = 0):
     return fig, caption
 
 
+def shrinkage_example(jsr_db: float = 9.0, seed: int = 7):
+    """The data cells of one PRB row under a block jammer and under a hopping jammer: each cell's
+    own estimate of the jamming power, the row mean, and the value after shrinkage."""
+    import dataclasses
+
+    # (a) A row of the jammed block, every data symbol jammed
+    block = _estimates_without_map(CFG, "data", jsr_db, seed)
+    rows = [(block, JAM[0] - ALLOC[0], "(a) Block jammer")]
+    # (b) Of the rows that the hopping jammer hits on 2 to 5 of their 13 data symbols, the one
+    # where it is strongest
+    hop = _estimates_without_map(
+        dataclasses.replace(CFG, jammer_hopping=True), "data", jsr_db, seed
+    )
+    hits = (hop["truth"] & ~np.isnan(hop["cell"])).sum(axis=1)
+    candidates = np.flatnonzero((hits >= 2) & (hits <= 5))
+    strength = [np.nanmean(hop["cell"][r][hop["truth"][r]]) for r in candidates]
+    row = int(candidates[int(np.argmax(strength))])
+    rows.append((hop, row, "(b) Hopping jammer"))
+
+    with paper_style():
+        fig, axes = new_figure(COLUMN_WIDTH, 1.75, ncols=2, sharey=True)
+        for ax, (est, r, title) in zip(axes, rows, strict=True):
+            sym = np.flatnonzero(~np.isnan(est["cell"][r]))  # the data symbols
+            for s in sym[est["truth"][r, sym]]:
+                ax.axvspan(s - 0.5, s + 0.5, color=JAM_COLOR, alpha=0.15, lw=0)
+            ax.plot(
+                sym,
+                est["cell"][r, sym],
+                "o",
+                ms=3,
+                mfc="none",
+                mew=0.7,
+                color="0.4",
+                label="Own estimate",
+            )
+            ax.axhline(est["prb"][r, sym[0]], color="0.2", ls="--", lw=0.8, label="Row mean")
+            ax.plot(sym, est["shrink"][r, sym], "s", ms=2.6, color=CLEAN_COLOR, label="Shrinkage")
+            ax.set(title=title, xlabel="OFDM symbol", xticks=[0, 4, 8, 13])
+            ax.grid(False)
+        axes[0].set_ylabel("Jamming power")
+        fig.legend(*axes[1].get_legend_handles_labels(), loc="outside lower center", ncols=3)
+
+    caption = (
+        "The estimated jamming power of the data cells of one PRB row, (a) under a block jammer "
+        f"that hits every data symbol and (b) under a hopping jammer that hits {hits[row]} of "
+        f"them ({jsr_db:+g} dB JSR, TDL-C, 15 dB SNR). The circles show each cell's own estimate, "
+        "the dashed line the row mean and the squares the values after shrinkage, all in units of "
+        "the jammer's power per resource element, and the jammed symbols are shaded."
+    )
+    return fig, caption
+
+
 FIGURES = {
     "jamming_estimates": jamming_estimates,
+    "shrinkage_example": shrinkage_example,
     "after_decoding": after_decoding,
     "system_views": system_views,
     "data_aided_passes": data_aided_passes,
