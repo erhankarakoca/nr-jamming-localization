@@ -23,10 +23,12 @@ the map.</sub>
    of the equalized symbols. With no jamming, the channel inside that subspace and white noise
    of known power, the residual has a known distribution, which gives an analytic threshold.
 2. **A small U-Net** (66,553 parameters) turns the clues into a 24 PRB × 14 symbol jamming map.
-3. **Decoding with the map**: the receiver estimates the jamming power of each flagged cell,
-   shrinks the estimate towards the mean of its PRB where the two agree (empirical Bayes), gives
-   the cell's bits less weight, and weights jammed pilots down. When a block fails its CRC,
-   data-aided passes use the decoder's output to refine the map, the noise power and the channel.
+3. **Decoding through the attack**: the receiver estimates the jamming power of every cell from
+   the energy that the user's signal and the noise do not explain, shrinks it towards the mean of
+   its PRB (empirical Bayes, nothing to tune), gives the cell's bits less weight, and weights
+   jammed pilots down by their residual. A map, when there is one, restricts the estimate to the
+   flagged cells. When a block fails its CRC, data-aided passes use the decoder's output to refine
+   the map, the noise power and the channel.
 4. **Localization after decoding**: once a block decodes, every data symbol is known, and the same
    residual law tests every scheduled cell, whatever the shape of the attack.
 
@@ -36,6 +38,7 @@ the map.</sub>
 | --- | --- | --- |
 | Detection | Cell-level F1 0.952 at 1.15% per-cell false alarms; a training-free block test reaches 0.868 | Test split (TDL-A and TDL-C, JSR −15 to +9 dB, SNR 5–25 dB), three seeds |
 | Decoding | Block error rate 91% with the standard receiver, no error in 4,800 slots with the map and refining passes | Partial-band jamming at +9 dB JSR on 4 of 12 PRBs, TDL-C, 15 dB SNR |
+| Resolution | Hopping data jamming: one jamming estimate per PRB fails on 50% of the slots, shrinkage without any map on none of 4,800. With QPSK and clean pilots no map beats none, and an EVM map costs up to 27 points. With 16-QAM a true map is worth up to 14 points under hopping, while the U-Net map, never trained on hopping, costs up to 19 | +9 dB JSR, TDL-C, 15 dB SNR (QPSK) and 18 dB (16-QAM), one decoding attempt (§25) |
 | Unseen jammer | Hopping data jamming: 21% block errors with a per-PRB estimate, none in 4,800 slots with shrinkage estimates and refining passes; localization F1 0.60 before decoding, 0.88 after | +9 dB JSR (decoding), test grid (localization), TDL-C, 15 dB SNR |
 | Jammer width | 0.06%, 2.1% and 38% with the map when 4, 6 and 8 of 12 PRBs are jammed (standard receiver: 53%, 79%, 92%) | Partial-band jamming at +3 dB JSR, TDL-C, 15 dB SNR |
 | Speed | 0.68 ms per slot to compute the features and run the U-Net | One core of an Apple M1 Pro, 24-PRB allocation; channel estimation, equalization and decoding not included |

@@ -1251,7 +1251,110 @@ def after_decoding(jsr_db: float = 3.0, seed: int = 11):
     return fig, caption
 
 
+def jamming_estimates(jsr_db: float = 9.0, seed: int = 7, slot: int = 0):
+    """One slot of a hopping data jammer and three estimates of the jamming power of every cell,
+    all without a map: one value per PRB row, each cell on its own, and shrinkage of each cell
+    towards its row. The estimates are in units of the jammer's power per resource element."""
+    import dataclasses
+
+    from jamloc.recovery import MapAwareReceiver, lmmse_interpolation
+
+    cfg = dataclasses.replace(CFG, jammer_hopping=True)
+    a0, n = ALLOC
+    seed_everything(seed)
+    batch = 4
+    sc = Scenario(
+        channel="C",
+        alloc_start=a0,
+        alloc_size=n,
+        attack=torch.full((batch,), ATTACKS.index("data")),
+        jam_start=torch.full((batch,), JAM[0]),
+        jam_size=torch.full((batch,), JAM[1]),
+        jsr_db=torch.full((batch,), float(jsr_db)),
+        snr_db=torch.full((batch,), 15.0),
+    )
+    out = JammedPUSCHLink(cfg)(sc, decode=False)
+    rx = MapAwareReceiver(out.tx, cfg)
+    y, no = out.y_alloc, out.no
+    h_ls, pilot_sc, pilot_power = dmrs_ls(y, out.tx)
+    rx._pilot_weights = "all"
+    clean, pilot_var, r, interfered = rx._pilots(h_ls, pilot_sc, pilot_power, no, None, "cell")
+    h_sc, err_sc = lmmse_interpolation(
+        h_ls, pilot_sc, clean, pilot_var, y.shape[-1], cfg.scs, cfg.tau_max
+    )
+    power = 10 ** (jsr_db / 10)
+    names = ("(b) Per PRB", "(c) Per cell", "(d) Shrinkage")
+    estimates = []
+    for option in ("prb", True, "shrink"):
+        rx._cellwise = option
+        with torch.no_grad():
+            v = rx._jamming_variance(y, no, h_sc, err_sc, None, r, interfered, "cell")
+        grid = torch.full((cfg.num_symbols, y.shape[-1]), float("nan"), device=v.device)
+        grid[rx.data_sym, rx.data_sc] = v[slot]
+        estimates.append((grid.reshape(cfg.num_symbols, n, 12).mean(-1).T / power).cpu().numpy())
+    truth = out.labels[slot, a0 : a0 + n].bool().cpu().numpy()
+    data = np.ones_like(truth)
+    data[:, list(cfg.dmrs_symbols)] = False
+
+    width, height = 3.5, 1.62
+    fig = Figure(figsize=(width, height))
+    lefts = (0.3, 1.04, 1.78, 2.52)
+    axes = [fig.add_axes((x / width, 0.3 / height, 0.66 / width, 1.05 / height)) for x in lefts]
+    x_edges, y_edges = np.arange(cfg.num_symbols + 1) - 0.5, np.arange(n + 1) - 0.5
+    codes = np.where(~data, 1, np.where(truth, 2, 0))
+    axes[0].pcolormesh(
+        x_edges,
+        y_edges,
+        codes,
+        cmap=ListedColormap([ALLOC_COLOR, DMRS_COLOR, JAM_COLOR]),
+        vmin=-0.5,
+        vmax=2.5,
+        edgecolors="#B3B3B3",
+        linewidth=0.2,
+    )
+    axes[0].set_title("(a) Jammer", fontsize=6.5, pad=2)
+    for ax, name, img in zip(axes[1:], names, estimates, strict=True):
+        mesh = ax.pcolormesh(
+            x_edges, y_edges, np.ma.masked_invalid(img), cmap=PARULA, vmin=0, vmax=1.5
+        )
+        _outline(ax, truth, color="black", lw=0.6)
+        ax.set_title(name, fontsize=6.5, pad=2)
+    for k, ax in enumerate(axes):
+        ax.set(
+            xlim=(-0.5, cfg.num_symbols - 0.5),
+            ylim=(-0.5, n - 0.5),
+            xticks=[0, cfg.dmrs_symbol, cfg.num_symbols - 1],
+            yticks=[0, n // 2, n - 1],
+        )
+        ax.grid(False)
+        ax.tick_params(direction="in", length=2, width=0.5, pad=1.5, labelleft=k == 0)
+        ax.set_xlabel("Symbol", labelpad=1)
+    axes[0].set_ylabel("PRB", labelpad=1)
+    cax = fig.add_axes(((lefts[-1] + 0.7) / width, 0.3 / height, 0.05 / width, 1.05 / height))
+    fig.colorbar(mesh, cax=cax).ax.tick_params(labelsize=5, length=1.5, pad=1)
+
+    hit, miss = truth & data, ~truth & data
+    stats = [(np.nanmean(img[hit]), np.nanmean(img[miss])) for img in estimates]
+    caption = (
+        f"One slot of a data jammer that moves its block of {JAM[1]} PRBs on every OFDM symbol "
+        f"({jsr_db:+g} dB JSR, TDL-C, 15 dB SNR, the UE on PRBs {a0}-{a0 + n - 1}, shown inside "
+        "the allocation). (a) Jammed cells, with the DMRS symbol in blue. (b)-(d) The jamming "
+        "power each estimate gives every data cell without a map, in units of the jammer's power "
+        "per resource element, with the jammed cells outlined. The mean on jammed and on clean "
+        "cells is "
+        + ", ".join(
+            f"{j:.2f} and {c:.2f} {label}"
+            for label, (j, c) in zip(("per PRB", "per cell", "with shrinkage"), stats, strict=True)
+        )
+        + ". One value per PRB spreads the jammer over the clean cells of its rows, the cell's "
+        "own estimate is noisy, and shrinkage keeps the jammed cells and leaves the clean ones "
+        "near zero."
+    )
+    return fig, caption
+
+
 FIGURES = {
+    "jamming_estimates": jamming_estimates,
     "after_decoding": after_decoding,
     "system_views": system_views,
     "data_aided_passes": data_aided_passes,

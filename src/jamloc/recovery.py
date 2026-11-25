@@ -245,7 +245,8 @@ class MapAwareReceiver(Block):
         self.decoder = TBDecoder(tx._tb_encoder)
         self.soft_decoder = SoftTBDecoder(self.decoder)
         self.data_sym, self.data_sc = data_positions(tx)
-        self._cellwise = False  # set per call (see ``call``)
+        # set per call (see ``call``)
+        self._cellwise, self._scale, self._pilot_weights = False, 1.0, "test"
 
     def call(
         self,
@@ -256,10 +257,12 @@ class MapAwareReceiver(Block):
         mode: str = "hard",
         iterations: int = 0,
         history: bool = False,
-        cellwise: bool = False,
+        cellwise: bool | str = False,
         refine: bool = False,
         renoise: bool = False,
         alpha: float = 0.01,
+        scale: float = 1.0,
+        pilot_weights: str = "test",
     ):
         """``mode``: ``"hard"``, ``"soft"`` (both use ``cells``), or ``"dmrs"``, ``"lmmse"``,
         ``"slot"``, ``"cell"`` (no map, ``cells`` is ignored). ``iterations``: data-aided passes
@@ -276,8 +279,15 @@ class MapAwareReceiver(Block):
           ``tau2 / (tau2 + s2)`` of random-effects (empirical Bayes) estimation, with ``s2`` the
           sampling variance of the cell's estimate and ``tau2`` the spread of the true powers
           over the row. A jammer that fills the row gives the average, the cells of a jammer that
-          moves keep about their own power. In the cell mode (no map), ``"shrink"`` treats every
-          data cell as flagged.
+          moves keep about their own power. ``"prb"`` is the average of ``False`` in every mode.
+          In the cell mode (no map), ``"shrink"`` and ``"prb"`` treat every data cell as flagged,
+          and ``False`` gives each cell its own estimate, as ``True`` does.
+        * ``scale``: multiplies the estimated jamming power of every data cell. A per-PRB average
+          with a scale chosen on the test points is the strongest coarse estimate to compare with.
+        * ``pilot_weights``: in the dmrs and cell modes, ``"test"`` scales the variance of the
+          pilots of a DMRS cell by its residual where the residual exceeds its analytic 1%
+          threshold, and ``"all"`` scales every pilot by its cell's residual (floored at one),
+          with no threshold.
         * ``refine``: after each failed decoding, test every data cell on its remodulated residual
           ``y - h_hat x_bar`` (``_refine``) and add the cells that fail it to the map. The
           detector's map is the starting point, and decoding adds what it missed.
@@ -300,7 +310,11 @@ class MapAwareReceiver(Block):
                     f"cells must cover the allocation, [B, {num_prb}, {cfg.num_symbols}]; got "
                     f"{tuple(cells.shape)} (cut a carrier map to the scheduled PRBs first)"
                 )
-        if mode == "cell" and cellwise != "shrink":  # no map: every data cell its own estimate
+        if cellwise not in (False, True, "shrink", "prb"):
+            raise ValueError(f"unknown cellwise {cellwise!r}")
+        if pilot_weights not in ("test", "all"):
+            raise ValueError(f"unknown pilot_weights {pilot_weights!r}")
+        if mode == "cell" and cellwise is False:  # no map: every data cell its own estimate
             cellwise = True
         if refine and mode != "soft":
             raise ValueError("refine needs the soft mode")
@@ -309,6 +323,8 @@ class MapAwareReceiver(Block):
         if renoise == "auto":
             renoise = cfg.noise_estimate != "true"
         self._cellwise = cellwise
+        self._scale = scale
+        self._pilot_weights = pilot_weights
 
         # 1. Stack the LS observations in symbol order. The frequency indices repeat, so
         # indexing the prior by them gives the same frequency correlation within and between
@@ -582,6 +598,8 @@ class MapAwareReceiver(Block):
             if mode == "slot":  # one allocation-wide level per DMRS symbol
                 r = r.mean(dim=-1, keepdim=True).expand_as(r)
                 interfered = torch.ones_like(r, dtype=torch.bool)
+            elif mode in ("dmrs", "cell") and self._pilot_weights == "all":
+                interfered = torch.ones_like(r, dtype=torch.bool)  # every pilot by its residual
             elif mode in ("dmrs", "cell"):  # interfered: residual above the analytic 1% threshold
                 thr = torch.tensor(
                     [theory.threshold(num_prb, b, 0.01, cfg) for b in range(num_prb)],
@@ -693,6 +711,8 @@ class MapAwareReceiver(Block):
             extra = torch.zeros_like(x_hat[:, 0, 0].real)
         else:
             extra = self._jamming_variance(y, no, h_sc, err_sc, cells, r, interfered, mode)
+            if self._scale != 1:
+                extra = extra * self._scale
             # For one antenna the unbiased LMMSE output is y / h_hat and its effective noise is
             # (err_var + no) / |h_hat|^2; extra noise of variance v adds v / |h_hat|^2
             h2 = (h_hat[:, 0, 0, 0, 0, self.data_sym, self.data_sc].abs() ** 2).clamp_min(1e-12)
@@ -768,9 +788,9 @@ class MapAwareReceiver(Block):
             return per_prb[:, data_prb]
 
         excess = self._excess_energy(y, no, h_sc, err_sc)
-        if mode == "cell" and self._cellwise != "shrink":  # no map: each cell's own excess
+        if mode == "cell" and self._cellwise is True:  # no map: each cell's own excess
             return self._cell_mean(excess).clamp_min(0)
-        if mode == "cell":  # no map, shrinkage over every data cell of a PRB row
+        if mode == "cell":  # no map, average or shrinkage over every data cell of a PRB row
             flagged = torch.ones_like(excess, dtype=torch.bool)
         else:
             flagged = cells[:, data_prb, self.data_sym]  # [B, num_data]

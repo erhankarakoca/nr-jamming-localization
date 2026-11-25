@@ -133,6 +133,18 @@ RECEIVERS = {
     "true_shrink_full": ("true", "soft"),
     "cell_shrink": (None, "cell"),
     "cell_shrink_full": (None, "cell"),
+    # Resolution study: how finely to estimate the jamming power, and with which map
+    "nomap_prb": (None, "cell"),
+    "nomap_prb2": (None, "cell"),
+    "nomap_prb4": (None, "cell"),
+    "nomap_cell": (None, "cell"),
+    "nomap_shrink": (None, "cell"),
+    "evm_prb": ("evm_threshold", "soft"),
+    "evm_cell": ("evm_threshold", "soft"),
+    "evm_shrink": ("evm_threshold", "soft"),
+    "p_r_e_prb2": ("fused", "soft"),
+    "p_r_e_prb4": ("fused", "soft"),
+    "true_prb_shrink": ("true_prb", "soft"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
 DATA_AIDED = {
@@ -172,13 +184,29 @@ OPTIONS = {
     "p_r_e_refine": {"cellwise": True, "refine": True},
     "p_r_e_renoise": {"renoise": True},
     "true_renoise": {"renoise": True},
+    # No map: every pilot weighted by its residual and every data cell treated as flagged, with no
+    # threshold or test
+    "nomap_prb": {"cellwise": "prb", "pilot_weights": "all"},
+    "nomap_prb2": {"cellwise": "prb", "pilot_weights": "all", "scale": 2.0},
+    "nomap_prb4": {"cellwise": "prb", "pilot_weights": "all", "scale": 4.0},
+    "nomap_cell": {"cellwise": True, "pilot_weights": "all"},
+    "nomap_shrink": {"cellwise": "shrink", "pilot_weights": "all"},
+    "evm_cell": {"cellwise": True},
+    "evm_shrink": {"cellwise": "shrink"},
+    "p_r_e_prb2": {"scale": 2.0},
+    "p_r_e_prb4": {"scale": 4.0},
+    "true_prb_shrink": {"cellwise": "shrink"},
 }
-DETECTORS = ("power_threshold", "block_test", "no_residual", "fused", "fused_atk")
+DETECTORS = ("power_threshold", "evm_threshold", "block_test", "no_residual", "fused", "fused_atk")
+NO_MODEL = ("power_threshold", "evm_threshold")  # thresholds of a score, nothing trained
 # Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
 TRAINED_ON = {"fused_atk": ({"data": "atk"}, "val_atk")}
 # With the estimated noise power: the detectors that were trained or calibrated on it, with the
 # validation split their thresholds (and the block test's nulls) come from
 NEST_DETECTORS = {"power_threshold": "val_nest", "block_test": "val_nest", "fused": "val_nest"}
+# The arms of the resolution study added to the whole-allocation case
+RESOLUTION = tuple(rx for rx in RECEIVERS if rx.startswith(("nomap_", "evm_")))
+RESOLUTION += ("p_r_e_prb2", "p_r_e_prb4", "true_prb_shrink")
 # Jammers: the nominal one, or one whose support is not a block of whole PRB rows
 JAMMERS = {
     "nominal": {},
@@ -358,6 +386,62 @@ STYLE = {
         "label": "Per-cell estimate, no map, data-aided",
         "color": "#44AA99",
         "marker": "h",
+        "linestyle": "-",
+    },
+    "nomap_prb": {"label": "No map, per PRB", "color": "#B8B8B8", "marker": "s", "linestyle": ":"},
+    "nomap_prb2": {
+        "label": "No map, per PRB x2",
+        "color": "#A0A0A0",
+        "marker": "s",
+        "linestyle": "--",
+    },
+    "nomap_prb4": {
+        "label": "No map, per PRB x4",
+        "color": "#888888",
+        "marker": "s",
+        "linestyle": "-.",
+    },
+    "nomap_cell": {
+        "label": "No map, per cell",
+        "color": "#5AAE61",
+        "marker": "h",
+        "linestyle": "--",
+    },
+    "nomap_shrink": {
+        "label": "No map, shrinkage",
+        "color": "#1B7837",
+        "marker": "h",
+        "linestyle": "-",
+    },
+    "evm_prb": {"label": "EVM map, per PRB", "color": "#FDB863", "marker": "D", "linestyle": ":"},
+    "evm_cell": {
+        "label": "EVM map, per cell",
+        "color": "#E08214",
+        "marker": "D",
+        "linestyle": "--",
+    },
+    "evm_shrink": {
+        "label": "EVM map, shrinkage",
+        "color": "#B35806",
+        "marker": "D",
+        "linestyle": "-",
+    },
+    "p_r_e_prb2": {
+        "label": "P+R+E map, per PRB x2",
+        "color": "#6BAED6",
+        "marker": "o",
+        "linestyle": "--",
+    },
+    "p_r_e_prb4": {
+        "label": "P+R+E map, per PRB x4",
+        "color": "#3182BD",
+        "marker": "o",
+        "linestyle": "-.",
+    },
+    "true_prb_shrink": {
+        "label": "True map per PRB, shrinkage",
+        "color": "#117733",
+        "marker": "v",
         "linestyle": "-",
     },
     "p_r_e_atk_soft": {
@@ -551,7 +635,7 @@ def simulate(
         if nest and det not in NEST_DETECTORS:
             continue  # never trained or calibrated on the estimated noise power
         val_split = NEST_DETECTORS[det] if nest else None
-        if det == "power_threshold":
+        if det in NO_MODEL:
             model = None
         elif det == "block_test":
             model = load(val_split or "val")  # its empirical nulls
@@ -577,6 +661,7 @@ def simulate(
         # limit case: no clean pilot left
         whole = ("standard", "lmmse", "p_r_e_soft", "true_hard", "true_soft", "cell_soft")
         whole += ("p_r_e_cell", "true_cell", "p_r_e_shrink", "true_shrink", "cell_shrink")
+        whole += RESOLUTION
         whole += tuple(DATA_AIDED)
         cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)

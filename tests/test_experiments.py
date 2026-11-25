@@ -127,6 +127,7 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
         "true_shrink",
         "cell_shrink",
         *recovery.DATA_AIDED,
+        *recovery.RESOLUTION,
     }
     assert (out / "recovery_A.png").is_file() and (out / "recovery_A.pdf").is_file()
     assert (out / "recovery_A_ablation.png").is_file()
