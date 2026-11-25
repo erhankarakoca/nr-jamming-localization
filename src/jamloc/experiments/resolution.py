@@ -62,9 +62,10 @@ QAM_CASES = [
     for a in ("pilot", "data", "partial")
     for j in ("3.0", "9.0")
 ]
+# Names as in the paper: (label, color, marker, line style)
 SWEEP_RECEIVERS = {
-    "standard": ("No protection", "#000000", "x", ":"),
-    "nomap_prb": ("No map, per PRB", "#999999", "s", "--"),
+    "standard": ("Baseline receiver", "#000000", "x", ":"),
+    "nomap_prb": ("No map, PRB average", "#999999", "s", "--"),
     "evm_shrink": ("EVM map, shrinkage", "#E69F00", "D", "-."),
     "p_r_e_shrink": ("U-Net map, shrinkage", "#0072B2", "o", "-"),
     "nomap_shrink": ("No map, shrinkage", "#009E73", "h", "-"),
@@ -172,14 +173,18 @@ def markdown(rows, cases=CASES) -> str:
     return "\n".join(lines)
 
 
+# Panels of the sweep figure: (file stem, attack, title)
+SWEEP_PANELS = [
+    ("recovery_C", "pilot", "(a) Pilot only"),
+    ("recovery_C", "partial", "(b) Pilot + data"),
+    ("recovery_C_hopping", "data", "(c) Hopping, data only"),
+    ("recovery_C_hopping", "partial", "(d) Hopping, pilot + data"),
+]
+
+
 def sweep(folders: list[Path], out: Path) -> None:
     """BLER against JSR, one panel per case, for ``SWEEP_RECEIVERS``."""
-    panels = [
-        ("recovery_C", "pilot", "(a) Pilot"),
-        ("recovery_C", "partial", "(b) Partial-band"),
-        ("recovery_C_hopping", "data", "(c) Hopping data"),
-        ("recovery_C_hopping", "partial", "(d) Hopping partial-band"),
-    ]
+    panels = SWEEP_PANELS
     data = {}
     for folder in folders:
         for stem in {p[0] for p in panels}:

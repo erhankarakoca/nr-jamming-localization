@@ -73,3 +73,16 @@ def test_table_takes_the_best_scale_and_keeps_ties_unscaled(tmp_path):
     assert rows[("true", "shrinkage")] is None  # not run
     text = resolution.markdown(resolution.table(tmp_path, cases), cases)
     assert "40.00 (x2)" in text and "| U-Net | per PRB, best scale | 0.00 |" in text
+
+
+def test_sweep_uses_the_names_of_the_paper():
+    from jamloc.experiments.resolution import SWEEP_PANELS, SWEEP_RECEIVERS
+
+    labels = [style[0] for style in SWEEP_RECEIVERS.values()]
+    assert labels[0] == "Baseline receiver" and "No map, PRB average" in labels
+    assert [panel[2] for panel in SWEEP_PANELS] == [
+        "(a) Pilot only",
+        "(b) Pilot + data",
+        "(c) Hopping, data only",
+        "(d) Hopping, pilot + data",
+    ]

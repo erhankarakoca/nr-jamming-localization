@@ -278,4 +278,39 @@ done
 uv run python -m jamloc.experiments.general_training --decoding results/gen_recovery
 ```
 
+**Paper v9 (section 27).** Every result of `conference-v9.tex` comes from these runs with the general
+U-Net, which is the default of the recovery experiment. Each seed runs until 70 block errors or
+160 batches of 64 slots, so a point pooled over three seeds has 210 block errors or 30 720 slots.
+
+```bash
+V9="--channel C --target-block-errors 70 --max-mc-iter 160"
+run() { mkdir -p results/v9/$1 && ln -sfn "$PWD/results/models" results/v9/$1/models
+  JAMLOC_RESULTS_DIR=results/v9/$1 uv run python -m jamloc.experiments.recovery $V9 --seeds $2 "${@:3}"; }
+QPSK="standard lmmse nomap_prb nomap_cell nomap_shrink evm_prb evm_cell evm_shrink p_r_e_soft p_r_e_cell p_r_e_shrink true_prb_soft true_prb_shrink true_soft true_cell true_shrink"
+QAM="standard nomap_prb nomap_cell nomap_shrink p_r_e_soft p_r_e_shrink true_soft true_cell true_shrink"
+SW="standard nomap_prb evm_shrink p_r_e_shrink nomap_shrink true_shrink"
+for s in 0 1 2; do
+  run nom $s --attacks none pilot data partial --jsr-db 9 --receivers $QPSK
+  run whole $s --attacks pilot_whole_allocation --jsr-db 3 9 --receivers $QPSK
+  run pulse $s --jammer pulsed --jsr-db 9 --receivers $QPSK
+  run hop $s --jammer hopping --jsr-db 9 --receivers $QPSK
+  run qam16 $s --snr-db 18 --mcs 13 --attacks none pilot data partial --jsr-db 3 9 --receivers $QAM
+  run qamhop $s --snr-db 18 --mcs 13 --jammer hopping --jsr-db 3 9 --receivers $QAM
+  run sweep_hop $s --jammer hopping --jsr-db -9 -6 -3 0 3 6 9 --receivers $SW
+  run sweep_nom $s --attacks pilot partial --jsr-db -9 -6 -3 0 3 6 9 --receivers $SW
+  run passes $s --jammer hopping --jsr-db 9 --receivers p_r_e_shrink p_r_e_shrink_full
+  run passes $s --attacks pilot_whole_allocation --jsr-db 9 --receivers p_r_e_shrink p_r_e_shrink_full
+done
+# Tables and curves
+M=results/v9/merged/recovery
+uv run python -m jamloc.experiments.resolution merge $M results/v9/{nom,whole,pulse,hop,qam16,qamhop}/recovery
+for j in nominal hopping pulsed; do
+  JAMLOC_RESULTS_DIR=results/v9/merged uv run python -m jamloc.experiments.recovery --channel C --jammer $j --plot-only
+done
+JAMLOC_RESULTS_DIR=results/v9/merged uv run python -m jamloc.experiments.recovery --channel C --snr-db 18 --mcs 13 --plot-only
+uv run python -m jamloc.experiments.resolution table $M
+uv run python -m jamloc.experiments.resolution table $M --qam
+uv run python -m jamloc.experiments.resolution sweep results/v9/sweep_hop/recovery results/v9/sweep_nom/recovery --out results/v9/resolution_sweep
+```
+
 The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`.
