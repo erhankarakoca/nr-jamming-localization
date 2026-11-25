@@ -130,6 +130,7 @@ class SlotBatch:
     tx: PUSCHTransmitter  # transmitter used for this batch
     no_true: torch.Tensor | None = None  # true noise variance [B]
     h_ue: torch.Tensor | None = None  # UE frequency response on the allocation [B, 14, 12 n]
+    y_jam: torch.Tensor | None = None  # jamming signal at the gNB, before the noise [B, 14, 288]
 
 
 class JammedPUSCHLink:
@@ -242,6 +243,7 @@ class JammedPUSCHLink:
             tx=tx,
             no_true=no,
             h_ue=h_ue,
+            y_jam=y_jam[:, 0, 0],
         )
 
 

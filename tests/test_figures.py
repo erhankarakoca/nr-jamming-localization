@@ -250,3 +250,21 @@ def test_shrinkage_lies_between_the_cell_and_its_row_mean():
 
     fig, caption = shrinkage_example()
     assert isinstance(fig, Figure) and len(fig.axes) >= 2 and "shrinkage" in caption
+
+
+def test_true_and_soft_jamming_power_of_a_slot():
+    from jamloc.experiments.figures import CFG, _estimates_without_map
+
+    est = _estimates_without_map(CFG, "partial", 9.0, seed=7)
+    power, truth, soft = est["power"], est["truth"], est["pilot"]
+    # The jamming power that reached a cell is zero where the jammer did not transmit, and its
+    # mean over the jammed cells is of the order of the jammer's power (unit-power channel)
+    assert np.all(power[~truth] == 0)
+    assert 0.2 < power[truth].mean() < 5
+    # The soft map fills the DMRS cells from the pilot residual and keeps shrinkage elsewhere
+    dmrs = list(CFG.dmrs_symbols)
+    assert not np.isnan(soft).any()
+    data = ~np.isnan(est["shrink"])
+    assert np.array_equal(soft[data], est["shrink"][data])
+    jammed_pilots, clean_pilots = truth[:, dmrs], ~truth[:, dmrs]
+    assert soft[:, dmrs][jammed_pilots].mean() > 5 * soft[:, dmrs][clean_pilots].mean()
