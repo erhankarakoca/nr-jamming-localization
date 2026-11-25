@@ -2013,3 +2013,81 @@ shrinkage minus:
   BLER within 0.5 points. Shrinkage is what protects a receiver whose map is wrong.
 - The general U-Net's lower weak-pilot Pd does not show in decoding, because jamming that weak
   barely hurts the link.
+
+## 27. Paper v9: one U-Net and more Monte Carlo
+
+Round of 25 Nov 2026 (branch `mixed-training`), run on an RTX 4070 laptop GPU. Every result of
+`conference-v9.tex` comes from these runs. The U-Net behind the `p_r_e_*` receivers is the general
+one of section 26, which is now the default of the recovery experiment (`--unet general`, threshold
+from `val_gen`). Each seed decodes until 70 block errors or 160 batches of 64 slots, so a point
+pooled over three seeds rests on at least 210 block errors or 30 720 slots. All 431 receiver points
+meet this rule. The commands are under "Paper v9" in `reproducing.md`.
+
+**QPSK** (TDL-C, 15 dB SNR, +9 dB JSR unless stated, BLER %, pooled over three seeds, a zero means
+no block error in 30 720 slots):
+
+| Map | Estimate | no jammer | pilot only | data only | pilot + data | pulsed data | pulsed pilot + data | hopping data | hopping pilot + data | every pilot +3 | every pilot +9 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline receiver | - | 0 | 31.3 | 82.8 | 89.8 | 19.4 | 43.1 | 25.6 | 59.1 | 37.4 | 94.8 |
+| none | PRB average | 0 | 0.08 | 0.10 | 0.17 | 0.04 | 0.07 | 51.0 | 57.8 | 4.87 | 43.4 |
+| none | cell estimate | 0 | 0.09 | 0.12 | 0.18 | 0 | 0.04 | 0 | 0.51 | 4.89 | 43.6 |
+| none | shrinkage | 0 | 0.08 | 0.10 | 0.17 | 0 | 0.04 | 0 | 0.53 | 4.87 | 43.4 |
+| EVM | shrinkage | 0 | 17.0 | 1.88 | 7.85 | 0.09 | 6.31 | 0.08 | 14.9 | 10.7 | 71.1 |
+| U-Net | PRB average | 0 | 0.02 | 0.08 | 0.11 | 0 | 0.02 | 0 | 0.31 | 4.48 | 39.6 |
+| U-Net | shrinkage | 0 | 0.02 | 0.08 | 0.12 | 0 | 0.01 | 0 | 0.32 | 4.48 | 39.6 |
+| true, PRB resolution | PRB average | 0 | 0.02 | 0.08 | 0.11 | 0.03 | 0.05 | 51.0 | 57.4 | - | - |
+| true | PRB average | 0 | 0.02 | 0.08 | 0.11 | 0 | 0.01 | 0 | 0.24 | 3.92 | 38.7 |
+| true | shrinkage | 0 | 0.02 | 0.08 | 0.12 | 0 | 0.01 | 0 | 0.24 | 3.92 | 38.7 |
+
+**16-QAM** (MCS 13, 18 dB SNR, BLER % at +3 / +9 dB JSR):
+
+| Map | Estimate | pilot only | data only | pilot + data | hopping data | hopping pilot + data |
+| --- | --- | --- | --- | --- | --- | --- |
+| baseline receiver | - | 51.6 / 89.8 | 93.2 / 99.5 | 97.4 / 100 | 75.5 / 90.9 | 87.5 / 98.7 |
+| none | PRB average | 1.01 / 4.19 | 6.08 / 9.64 | 8.65 / 16.0 | 84.9 / 97.9 | 88.8 / 99.2 |
+| none | cell estimate | 1.56 / 5.61 | 20.0 / 19.9 | 19.9 / 27.2 | 1.86 / 1.53 | 10.7 / 16.7 |
+| none | shrinkage | 1.05 / 4.18 | 6.75 / 9.97 | 9.04 / 16.4 | 2.08 / 1.76 | 12.4 / 18.4 |
+| U-Net | PRB average | 0.50 / 1.36 | 4.23 / 7.03 | 5.09 / 7.78 | 0.37 / 0.46 | 3.76 / 7.06 |
+| U-Net | shrinkage | 0.50 / 1.36 | 4.46 / 7.25 | 5.25 / 7.78 | 0.43 / 0.49 | 3.79 / 7.18 |
+| true | PRB average | 0.44 / 1.11 | 4.22 / 7.00 | 4.94 / 7.74 | 0.32 / 0.42 | 2.98 / 6.28 |
+| true | cell estimate | 0.44 / 1.11 | 7.23 / 7.81 | 7.19 / 8.49 | 0.53 / 0.49 | 3.79 / 6.49 |
+| true | shrinkage | 0.44 / 1.11 | 4.44 / 7.21 | 5.07 / 7.67 | 0.36 / 0.44 | 3.40 / 6.28 |
+
+**Paired differences** (percentage points, 95% Newcombe interval, common slots):
+- No map, PRB average minus shrinkage under hopping, 51.0 (46.6 to 55.3) data only and 57.6 (52.9
+  to 62.1) pilot + data. The PRB average is 24.4 (19.8 to 28.8) worse than the baseline receiver
+  under data-only hopping.
+- PRB-resolution true map minus true map, both with the PRB average, under hopping, 51.0 (46.6 to
+  55.3) and 57.1 (52.4 to 61.6).
+- No map minus true map, both with shrinkage, under hopping pilot + data, 0.29 (0.23 to 0.36).
+- U-Net map minus no map, both with shrinkage. With QPSK and some clean pilots between -0.22 (-0.29
+  to -0.15) and 0.00. With every pilot jammed -0.54 (-0.93 to -0.15) at +3 dB and -3.82 (-5.80 to
+  -1.83) at +9 dB. With 16-QAM -0.51 to -8.41 (-9.98 to -6.94) on a block and -1.31 to -12.58
+  (-14.54 to -10.75) under hopping.
+- U-Net map minus true map, both with shrinkage. At most +0.07 with QPSK and some clean pilots,
+  +0.44 (0.23 to 0.67) and +0.87 (-0.10 to 1.84) with every pilot jammed, at most +0.73 (0.42 to
+  1.08) with 16-QAM.
+- EVM map minus no map, both with shrinkage, +16.8 (14.9 to 18.9) under pilot-only jamming and
+  +28.7 (23.8 to 33.2) with every pilot jammed at +9 dB.
+- With 16-QAM, the cell estimate minus shrinkage without a map is +9.81 (8.12 to 11.60) under
+  data-only jamming of a block at +9 dB and -1.48 (-2.38 to -0.61) under hopping pilot + data.
+
+**BLER against JSR** (-9 to +9 dB, `results/v9/resolution_sweep.pdf`). Under data-only hopping,
+shrinkage with or without a map failed on at most 2 of 30 720 slots at every JSR, while the PRB
+average without a map was worse than the baseline receiver from +6 dB on (48.4% against 29.2% at
++9 dB). Under hopping pilot + data jamming, shrinkage stayed at or below 0.51% without a map and
+0.29% with the U-Net map. With a block jammer, every receiver that estimates the jamming power stayed
+at or below 0.17% at every JSR, except the one with the EVM map (up to 17.8% under pilot-only
+jamming).
+
+**Data-aided passes** (`p_r_e_shrink_full`, three passes after a failed CRC). With every pilot
+jammed at +9 dB, the BLER of the U-Net receiver falls from 39.8% to 17.8%, by 21.7 percentage points
+(18.3 to 25.1). Under hopping pilot + data jamming it falls from 0.32% to 0.09%.
+
+**Reading.**
+- The resolution of the jamming estimate must come from the map or from the estimate. With an exact
+  map the PRB average works, with a PRB-resolution map or without a map it fails under hopping, and
+  shrinkage without a map comes within 0.3 points of the true map.
+- Trained on the conditions it meets, the U-Net map is close to the true map everywhere tested and
+  pays off where the cell's own energy is ambiguous, with 16-QAM and when every pilot is jammed.
+- The EVM map raises the BLER because it marks the damaged data symbols and never the jammed pilots.
