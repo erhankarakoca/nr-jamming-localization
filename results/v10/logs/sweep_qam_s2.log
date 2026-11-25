@@ -1,0 +1,8 @@
+[C nominal true seed 2] partial                JSR  -9.0 dB: standard 0.198  p_r_e_shrink 0.010  true_shrink 0.010  nomap_prb 0.017  nomap_shrink 0.019  evm_shrink 0.132
+[C nominal true seed 2] partial                JSR  -6.0 dB: standard 0.474  p_r_e_shrink 0.021  true_shrink 0.020  nomap_prb 0.030  nomap_shrink 0.036  evm_shrink 0.458
+[C nominal true seed 2] partial                JSR  -3.0 dB: standard 0.742  p_r_e_shrink 0.028  true_shrink 0.028  nomap_prb 0.046  nomap_shrink 0.054  evm_shrink 0.695
+[C nominal true seed 2] partial                JSR  +0.0 dB: standard 0.797  p_r_e_shrink 0.044  true_shrink 0.044  nomap_prb 0.058  nomap_shrink 0.061  evm_shrink 0.773
+[C nominal true seed 2] partial                JSR  +3.0 dB: standard 0.984  p_r_e_shrink 0.064  true_shrink 0.062  nomap_prb 0.088  nomap_shrink 0.094  evm_shrink 0.875
+[C nominal true seed 2] partial                JSR  +6.0 dB: standard 0.977  p_r_e_shrink 0.069  true_shrink 0.066  nomap_prb 0.113  nomap_shrink 0.116  evm_shrink 0.781
+[C nominal true seed 2] partial                JSR  +9.0 dB: standard 0.992  p_r_e_shrink 0.078  true_shrink 0.075  nomap_prb 0.185  nomap_shrink 0.190  evm_shrink 0.695
+Wrote results/v10/sweep_qam/recovery/recovery_C_snr18_mcs13.csv and recovery_C_snr18_mcs13_paired.csv (no figure)

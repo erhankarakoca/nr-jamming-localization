@@ -49,12 +49,19 @@ CLEAN_COLOR = "#0033CC"
 
 
 def _example_batch(
-    attack: str, jsr_db: float, snr_db: float, channel: str, seed: int = 7, decode: bool = False
+    attack: str,
+    jsr_db: float,
+    snr_db: float,
+    channel: str,
+    seed: int = 7,
+    decode: bool = False,
+    cfg: SimConfig = CFG,
 ):
     """One slot with the example allocation and jammer block.
 
     Re-seeding before every call gives the same UE channel and noise for every attack, so the
-    figures compare attacks on otherwise identical slots.
+    figures compare attacks on otherwise identical slots. ``cfg`` sets the jammer's kind (for
+    example ``jammer_hopping``).
     """
     seed_everything(seed)
     sc = Scenario(
@@ -67,7 +74,15 @@ def _example_batch(
         jsr_db=torch.tensor([jsr_db]),
         snr_db=torch.tensor([snr_db]),
     )
-    return JammedPUSCHLink(CFG)(sc, decode=decode)
+    return JammedPUSCHLink(cfg)(sc, decode=decode)
+
+
+def _jamming_power(out, cfg: SimConfig, jsr_db: float) -> np.ndarray:
+    """The jamming energy that reached each cell, averaged over its 12 subcarriers and given in
+    units of the jammer's power per resource element, ``[B, num_prb, num_symbols]``."""
+    energy = out.y_jam.abs() ** 2
+    cells = energy.reshape(len(energy), cfg.num_symbols, cfg.num_prb, 12).mean(-1).transpose(1, 2)
+    return (cells / 10 ** (jsr_db / 10)).cpu().numpy()
 
 
 def _fmt_db(x: float) -> str:
@@ -1257,10 +1272,9 @@ def _estimates_without_map(cfg, attack: str, jsr_db: float, seed: int, slot: int
     ``"prb"`` is one value per PRB row, ``"cell"`` each cell on its own and ``"shrink"`` each
     cell shrunk towards its row, every one ``[n, 14]`` over the allocation, in units of the
     jammer's power per resource element and nan on the DMRS symbols. ``"truth"`` marks the
-    jammed cells. The jammer hits PRBs ``JAM`` of the allocation ``ALLOC`` (TDL-C, 15 dB SNR).
+    jammed cells and ``"power"`` is the jamming power that reached them (see ``_soft_estimates``).
+    The jammer hits PRBs ``JAM`` of the allocation ``ALLOC`` (TDL-C, 15 dB SNR).
     """
-    from jamloc.recovery import MapAwareReceiver, lmmse_interpolation
-
     a0, n = ALLOC
     seed_everything(seed)
     batch = 4
@@ -1275,7 +1289,21 @@ def _estimates_without_map(cfg, attack: str, jsr_db: float, seed: int, slot: int
         snr_db=torch.full((batch,), 15.0),
     )
     out = JammedPUSCHLink(cfg)(sc, decode=False)
+    return {k: v[slot] for k, v in _soft_estimates(out, cfg, jsr_db).items()}
 
+
+def _soft_estimates(out, cfg, jsr_db: float) -> dict:
+    """The jamming power that the receiver without a map assigns to every cell of the allocation,
+    for each slot of ``out``, in units of the jammer's power per resource element.
+
+    ``"prb"``, ``"cell"`` and ``"shrink"`` are the three estimates of the data cells, ``[B, n,
+    14]`` with nan on the DMRS symbols. ``"pilot"`` holds the shrinkage estimate on the data cells
+    and, on the DMRS cells, the jamming power implied by the pilot weights, ``(R_b - 1) N0``.
+    ``"truth"`` marks the jammed cells and ``"power"`` is the jamming power that reached them.
+    """
+    from jamloc.recovery import MapAwareReceiver, lmmse_interpolation
+
+    a0, n = out.scenario.alloc_start, out.scenario.alloc_size
     # Channel estimate with every pilot weighted by its residual, as the receiver without a map
     rx = MapAwareReceiver(out.tx, cfg)
     y, no = out.y_alloc, out.no
@@ -1288,15 +1316,26 @@ def _estimates_without_map(cfg, attack: str, jsr_db: float, seed: int, slot: int
 
     # The three estimates of every data cell, averaged over its 12 subcarriers
     power = 10 ** (jsr_db / 10)
+    batch = y.shape[0]
     estimates = {}
     for key, option in (("prb", "prb"), ("cell", True), ("shrink", "shrink")):
         rx._cellwise = option
         with torch.no_grad():
             v = rx._jamming_variance(y, no, h_sc, err_sc, None, r, interfered, "cell")
-        grid = torch.full((cfg.num_symbols, y.shape[-1]), float("nan"), device=v.device)
-        grid[rx.data_sym, rx.data_sc] = v[slot]
-        estimates[key] = (grid.reshape(cfg.num_symbols, n, 12).mean(-1).T / power).cpu().numpy()
-    estimates["truth"] = out.labels[slot, a0 : a0 + n].bool().cpu().numpy()
+        grid = torch.full((batch, cfg.num_symbols, y.shape[-1]), float("nan"), device=v.device)
+        grid[:, rx.data_sym, rx.data_sc] = v
+        cells = grid.reshape(batch, cfg.num_symbols, n, 12).mean(-1).transpose(1, 2)
+        estimates[key] = (cells / power).cpu().numpy()
+    # On the DMRS cells: an LS value with the noise variance sigma^2 R_b carries the jamming
+    # power (R_b - 1) N0, since sigma^2 = N0 / E_p and jamming of power S on a pilot of energy
+    # E_p adds S / E_p to the variance of its LS value
+    soft = estimates["shrink"].copy()
+    pilot = ((r - 1) * no[:, None, None] / power).cpu().numpy()  # [B, num_dmrs, n]
+    for i, sym in enumerate(rx.dmrs_symbols):
+        soft[:, :, sym] = pilot[:, i, :]
+    estimates["pilot"] = soft
+    estimates["truth"] = out.labels[:, a0 : a0 + n].bool().cpu().numpy()
+    estimates["power"] = _jamming_power(out, cfg, jsr_db)[:, a0 : a0 + n]
     return estimates
 
 
@@ -1381,22 +1420,36 @@ def shrinkage_example(jsr_db: float = 9.0, seed: int = 7):
     block = _estimates_without_map(CFG, "data", jsr_db, seed)
     rows = [(block, JAM[0] - ALLOC[0], "(a) Block jammer")]
     # (b) Of the rows that the hopping jammer hits on 2 to 5 of their 13 data symbols, the one
-    # where it is strongest
+    # where it is strongest. Without such a row, any row that it hits on some symbols but not all.
     hop = _estimates_without_map(
         dataclasses.replace(CFG, jammer_hopping=True), "data", jsr_db, seed
     )
-    hits = (hop["truth"] & ~np.isnan(hop["cell"])).sum(axis=1)
+    data = ~np.isnan(hop["cell"])
+    hits = (hop["truth"] & data).sum(axis=1)
     candidates = np.flatnonzero((hits >= 2) & (hits <= 5))
+    if not len(candidates):
+        candidates = np.flatnonzero((hits >= 1) & (hits < data.sum(axis=1)))
+    if not len(candidates):
+        raise ValueError(f"the hopping jammer hits no row on only some symbols (seed {seed})")
     strength = [np.nanmean(hop["cell"][r][hop["truth"][r]]) for r in candidates]
     row = int(candidates[int(np.argmax(strength))])
     rows.append((hop, row, "(b) Hopping jammer"))
 
     with paper_style():
-        fig, axes = new_figure(COLUMN_WIDTH, 1.75, ncols=2, sharey=True)
+        fig, axes = new_figure(COLUMN_WIDTH, 1.62, ncols=2, sharey=True)
         for ax, (est, r, title) in zip(axes, rows, strict=True):
             sym = np.flatnonzero(~np.isnan(est["cell"][r]))  # the data symbols
             for s in sym[est["truth"][r, sym]]:
                 ax.axvspan(s - 0.5, s + 0.5, color=JAM_COLOR, alpha=0.15, lw=0)
+            ax.plot(
+                sym,
+                est["power"][r, sym],
+                "_",
+                ms=7,
+                mew=1.3,
+                color="black",
+                label="True power",
+            )
             ax.plot(
                 sym,
                 est["cell"][r, sym],
@@ -1405,28 +1458,50 @@ def shrinkage_example(jsr_db: float = 9.0, seed: int = 7):
                 mfc="none",
                 mew=0.7,
                 color="0.4",
-                label="Own estimate",
+                label="Cell estimate",
             )
-            ax.axhline(est["prb"][r, sym[0]], color="0.2", ls="--", lw=0.8, label="Row mean")
+            ax.axhline(est["prb"][r, sym[0]], color="0.2", ls="--", lw=0.8, label="PRB average")
             ax.plot(sym, est["shrink"][r, sym], "s", ms=2.6, color=CLEAN_COLOR, label="Shrinkage")
-            ax.set(title=title, xlabel="OFDM symbol", xticks=[0, 4, 8, 13])
+            ax.set(title=f"{title}, PRB {ALLOC[0] + r}", xlabel="OFDM symbol", xticks=[0, 4, 8, 13])
             ax.grid(False)
         axes[0].set_ylabel("Jamming power")
-        fig.legend(*axes[1].get_legend_handles_labels(), loc="outside lower center", ncols=3)
+        fig.legend(
+            *axes[1].get_legend_handles_labels(),
+            loc="outside lower center",
+            ncols=4,
+            fontsize=6.5,
+            handlelength=1.3,
+            handletextpad=0.4,
+            columnspacing=0.8,
+        )
 
     caption = (
-        "The estimated jamming power of the data cells of one PRB row, (a) under a block jammer "
-        f"that hits every data symbol and (b) under a hopping jammer that hits {hits[row]} of "
-        f"them ({jsr_db:+g} dB JSR, TDL-C, 15 dB SNR). The circles show each cell's own estimate, "
-        "the dashed line the row mean and the squares the values after shrinkage, all in units of "
-        "the jammer's power per resource element, and the jammed symbols are shaded."
+        "Jamming power of the data cells of one PRB in one slot, (a) under a block jammer that "
+        f"hits every data symbol and (b) under a hopping jammer that hits {hits[row]} of them "
+        f"({jsr_db:+g} dB JSR, TDL-C, 15 dB SNR). The bars show the power that reached each "
+        "cell, the circles each cell's own estimate, the dashed line the PRB average and the "
+        "squares the shrinkage estimate, all in units of the jammer's power per resource element, "
+        f"with jammed symbols shaded and the DMRS symbol {CFG.dmrs_symbol} left out."
     )
     return fig, caption
 
 
-def attack_maps(jsr_db: float = 6.0, seed: int | None = None):
-    """One slot under pilot jamming: the cells the jammer hits, the U-Net's map and the map of the
-    EVM threshold, over the allocation. The U-Net is the general one (``train_gen``)."""
+# The attacks of the attack-map figure: (row title, jammer settings, attack)
+ATTACK_MAP_ROWS = (
+    ("Block,\npilot only", {}, "pilot"),
+    ("Hopping,\npilot + data", {"jammer_hopping": True}, "partial"),
+    ("Pulsed,\npilot + data", {"jammer_duty": 0.5}, "partial"),
+)
+TEXT_WIDTH = 7.16  # IEEE two-column layout, both columns [inch]
+
+
+def attack_maps(jsr_db: float = 6.0, snr_db: float = 15.0, seed: int | None = None):
+    """One slot under each of three attacks, over the allocation: the jamming power that reached
+    each cell, the U-Net's map, the map of the EVM threshold, and the jamming power that the
+    receiver assigns without a map (shrinkage on the data cells, the pilot residual on the DMRS
+    cells). The U-Net is the general one (``train_gen``), which never saw the pulsed jammer."""
+    import dataclasses
+
     from jamloc.experiments.recovery import detector_cells, unet_source, val_threshold
 
     options, val_split = unet_source("general")
@@ -1439,77 +1514,293 @@ def attack_maps(jsr_db: float = 6.0, seed: int | None = None):
     unet_thr = val_threshold("fused", model, val_split)
     evm_thr = val_threshold("evm_threshold", None, "val")
 
-    # One example slot, and the three maps over the allocation [PRB, symbol]
     seed = _example_seed("C") if seed is None else seed
-    out = _example_batch("pilot", jsr_db, 20.0, "C", seed)
     a0, n = ALLOC
     cells = slice(a0, a0 + n)
-    truth = out.labels[0, cells].bool().cpu().numpy()
-    unet = detector_cells(out, CFG, "fused", model, unet_thr)[0, cells].cpu().numpy()
-    evm = detector_cells(out, CFG, "evm_threshold", None, evm_thr)[0, cells].cpu().numpy()
-    dmrs = np.zeros_like(truth)
+    rows = []
+    for name, settings, attack in ATTACK_MAP_ROWS:
+        cfg = dataclasses.replace(CFG, **settings)
+        out = _example_batch(attack, jsr_db, snr_db, "C", seed, cfg=cfg)
+        soft = _soft_estimates(out, cfg, jsr_db)
+        unet = detector_cells(out, cfg, "fused", model, unet_thr)[0, cells].cpu().numpy()
+        evm = detector_cells(out, cfg, "evm_threshold", None, evm_thr)[0, cells].cpu().numpy()
+        rows.append((name, soft["truth"][0], soft["power"][0], unet, evm, soft["pilot"][0]))
+    dmrs = np.zeros((n, CFG.num_symbols), dtype=bool)
     dmrs[:, list(CFG.dmrs_symbols)] = True
 
-    width, height = COLUMN_WIDTH, 1.55
+    width, height = TEXT_WIDTH, 3.0
     fig = Figure(figsize=(width, height))
-    lefts = (0.32, 1.38, 2.44)
-    axes = [fig.add_axes((x / width, 0.5 / height, 0.98 / width, 0.82 / height)) for x in lefts]
+    left, panel_w, gap, panel_h, row_gap, bottom = 0.62, 1.5, 0.14, 0.62, 0.13, 0.6
+    # Columns: the two power panels side by side, then the two maps
+    titles = (
+        "(a) Jamming power received",
+        "(b) Jamming power estimated",
+        "(c) U-Net map",
+        "(d) EVM map",
+    )
     x_edges, y_edges = np.arange(CFG.num_symbols + 1) - 0.5, np.arange(n + 1) - 0.5
-    cmap = ListedColormap([ALLOC_COLOR, DMRS_COLOR, JAM_COLOR])
-    titles = ("(a) Jammer", "(b) U-Net map", "(c) EVM map")
-    for k, (ax, title, marked) in enumerate(zip(axes, titles, (truth, unet, evm), strict=True)):
-        codes = np.where(marked, 2, np.where(dmrs, 1, 0))
-        ax.pcolormesh(
-            x_edges,
-            y_edges,
-            codes,
-            cmap=cmap,
-            vmin=-0.5,
-            vmax=2.5,
-            edgecolors="#B3B3B3",
-            linewidth=0.2,
-        )
-        _outline(ax, truth, color="black", lw=0.8)
-        ax.set(
-            xlim=(-0.5, CFG.num_symbols - 0.5),
-            ylim=(-0.5, n - 0.5),
-            xticks=[0, CFG.dmrs_symbol, CFG.num_symbols - 1],
-            yticks=[0, n - 1],
-            yticklabels=[a0, a0 + n - 1],
-        )
-        ax.set_title(title, fontsize=7, pad=2)
-        ax.grid(False)
-        ax.tick_params(direction="in", length=2, width=0.5, pad=1.5, labelsize=6, labelleft=k == 0)
-        ax.set_xlabel("OFDM symbol", fontsize=6.5, labelpad=1)
-    axes[0].set_ylabel("PRB", fontsize=6.5, labelpad=1)
+    binary = ListedColormap([ALLOC_COLOR, DMRS_COLOR, JAM_COLOR])
+    vmax = 1.5
+    for i, (name, truth, power, unet, evm, soft) in enumerate(rows):
+        y0 = bottom + (len(rows) - 1 - i) * (panel_h + row_gap)
+        for j, img in enumerate((power, soft, unet, evm)):
+            ax = fig.add_axes(
+                (
+                    (left + j * (panel_w + gap)) / width,
+                    y0 / height,
+                    panel_w / width,
+                    panel_h / height,
+                )
+            )
+            if j < 2:
+                heat = ax.pcolormesh(
+                    x_edges, y_edges, np.ma.masked_invalid(img), cmap=PARULA, vmin=0, vmax=vmax
+                )
+            else:
+                codes = np.where(img, 2, np.where(dmrs, 1, 0))
+                ax.pcolormesh(
+                    x_edges,
+                    y_edges,
+                    codes,
+                    cmap=binary,
+                    vmin=-0.5,
+                    vmax=2.5,
+                    edgecolors="#B3B3B3",
+                    linewidth=0.2,
+                )
+            _outline(ax, truth, color="black", lw=0.7)
+            ax.set(
+                xlim=(-0.5, CFG.num_symbols - 0.5),
+                ylim=(-0.5, n - 0.5),
+                xticks=[0, CFG.dmrs_symbol, CFG.num_symbols - 1],
+                yticks=[0, n - 1],
+                yticklabels=[a0, a0 + n - 1],
+            )
+            ax.grid(False)
+            ax.tick_params(
+                direction="in",
+                length=2,
+                width=0.5,
+                pad=1.5,
+                labelsize=6,
+                labelleft=j == 0,
+                labelbottom=i == len(rows) - 1,
+            )
+            if i == 0:
+                ax.set_title(titles[j], fontsize=7, pad=3)
+            if i == len(rows) - 1:
+                ax.set_xlabel("OFDM symbol", fontsize=6.5, labelpad=1)
+            if j == 0:
+                ax.set_ylabel("PRB", fontsize=6.5, labelpad=-4)
+                fig.text(
+                    0.2 / width,
+                    (y0 + panel_h / 2) / height,
+                    name,
+                    rotation=90,
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    linespacing=1.1,
+                )
+    # A color bar under the two power panels and a legend under the two maps
+    cax = fig.add_axes(
+        ((left + 0.35) / width, 0.12 / height, (2 * panel_w + gap - 0.7) / width, 0.06 / height)
+    )
+    bar = fig.colorbar(heat, cax=cax, orientation="horizontal", extend="max")
+    bar.ax.tick_params(labelsize=6, length=1.5, pad=1)
+    bar.ax.set_title(
+        "Jamming power in units of the jammer's power per resource element", fontsize=6.5, pad=2
+    )
     fig.legend(
         handles=[
-            Patch(facecolor=JAM_COLOR, label="Jammed or marked"),
+            Patch(facecolor=JAM_COLOR, label="Marked"),
             Patch(facecolor=DMRS_COLOR, label="DMRS"),
             Patch(facecolor=ALLOC_COLOR, label="Data"),
             Patch(fill=False, edgecolor="black", label="Jammed cells"),
         ],
         loc="lower center",
-        bbox_to_anchor=(0.5, 0.0),
+        bbox_to_anchor=((left + 2 * (panel_w + gap) + panel_w + gap / 2) / width, 0.02),
         ncols=4,
         frameon=False,
-        fontsize=6,
+        fontsize=6.5,
         handlelength=1.2,
-        columnspacing=0.9,
+        columnspacing=1.0,
     )
 
-    jammed = np.flatnonzero(truth.any(axis=1)) + a0
+    misses = [int((r[1] & ~r[3]).sum()) for r in rows]
+    false = [int((r[4] & ~r[1]).sum()) for r in rows]
     caption = (
-        f"One slot under pilot jamming of PRBs {jammed[0]}-{jammed[-1]} at {jsr_db:+g} dB JSR "
-        f"(TDL-C, 20 dB SNR, the UE on PRBs {a0}-{a0 + n - 1}), with the jammed cells outlined. "
-        f"The U-Net marks {int((unet & truth).sum())} of the {int(truth.sum())} jammed DMRS cells, "
-        f"while the EVM threshold marks {int((evm & ~truth).sum())} data cells that the jammer "
-        "never touched."
+        f"One slot under three attacks at {jsr_db:+g} dB JSR and {snr_db:g} dB SNR (TDL-C, the "
+        f"UE on PRBs {a0}-{a0 + n - 1}), with the jammed cells outlined. Columns (a) and (b) "
+        "show the jamming power that reached each cell and the power the receiver assigns "
+        "without a map, from shrinkage on the data cells and from the pilot residual on the "
+        "DMRS cells, in units of the jammer's power per resource element. The U-Net misses "
+        f"{', '.join(map(str, misses))} jammed cells and the EVM threshold marks "
+        f"{', '.join(map(str, false))} cells the jammer never touched, row by row."
+    )
+    return fig, caption
+
+
+def unet_process(jsr_db: float = 6.0, snr_db: float = 15.0, seed: int | None = None):
+    """How the U-Net works on one slot of the hopping jammer on pilots and data: the three feature
+    maps of the carrier, the network with its channel counts and grid sizes, the score of every
+    cell and the map after the threshold, against the jammed cells."""
+    import dataclasses
+
+    from matplotlib.patches import FancyArrowPatch
+
+    from jamloc.experiments.recovery import detector_cells, unet_source, val_threshold
+    from jamloc.features import extract
+
+    options, val_split = unet_source("general")
+    if not checkpoint_path("fused", 0, **options).is_file():
+        raise MissingInput("needs the general U-Net: python -m jamloc.experiments.general_training")
+    if not (data_dir() / f"{val_split}.npz").is_file():
+        raise MissingInput(
+            f"needs the {val_split} split: python -m jamloc.dataset --split {val_split}"
+        )
+    model = load_model("fused", 0, **options)
+    thr = val_threshold("fused", model, val_split)
+
+    cfg = dataclasses.replace(CFG, jammer_hopping=True)
+    seed = _example_seed("C") if seed is None else seed
+    out = _example_batch("partial", jsr_db, snr_db, "C", seed, cfg=cfg)
+    feats = extract(out, cfg)[0].cpu().numpy()  # [7, 24, 14], dB features first
+    scores, marked = detector_cells(out, cfg, "fused", model, thr, return_scores=True)
+    prob = torch.sigmoid(scores[0]).cpu().numpy()
+    marked = marked[0].cpu().numpy()
+    truth = out.labels[0].bool().cpu().numpy()
+    dmrs, data = feats[4] > 0, feats[5] > 0
+    inputs = (
+        ("Power", feats[0], np.ones_like(dmrs)),
+        ("Residual", feats[1], dmrs),
+        ("EVM", feats[2], data),
+    )
+    a0, n = out.scenario.alloc_start, out.scenario.alloc_size
+
+    width, height = COLUMN_WIDTH, 2.15
+    fig = Figure(figsize=(width, height))
+    # One canvas in inches for the network, with the grid maps placed on top of it
+    canvas = fig.add_axes((0, 0, 1, 1))
+    canvas.set(xlim=(0, width), ylim=(0, height))
+    canvas.axis("off")
+    nb, ns = CFG.num_prb, CFG.num_symbols
+    x_edges, y_edges = np.arange(ns + 1) - 0.5, np.arange(nb + 1) - 0.5
+    map_w, map_h = 0.4, 0.43
+    gray = "0.3"
+
+    def grid_axes(x, y, title):
+        ax = fig.add_axes((x / width, y / height, map_w / width, map_h / height))
+        ax.set(xlim=(-0.5, ns - 0.5), ylim=(-0.5, nb - 0.5), xticks=[], yticks=[])
+        ax.set_title(title, fontsize=6, pad=1.5)
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.5)
+        # the allocation, which is all the receiver decodes
+        ax.add_patch(
+            Rectangle((-0.5, a0 - 0.5), ns, n, fill=False, ls=(0, (2, 1)), lw=0.5, ec=gray)
+        )
+        return ax
+
+    def text(x, y, s, **kw):
+        style = {"fontsize": 5.6, "ha": "center", "va": "center", "linespacing": 1.0}
+        canvas.text(x, y, s, **{**style, **kw})
+
+    def arrow(p, q, **kw):
+        style = {"arrowstyle": "-|>", "mutation_scale": 5, "lw": 0.6, "color": "0.15", **kw}
+        canvas.add_patch(FancyArrowPatch(p, q, shrinkA=0, shrinkB=0, **style))
+
+    # (a) The three features of the carrier, each on its own colour scale in dB
+    text(0.3, height - 0.07, "(a) Features", fontsize=6.5)
+    for k, (name, values, valid) in enumerate(inputs):
+        y = height - 0.27 - map_h - k * (map_h + 0.18)
+        ax = grid_axes(0.1, y, name)
+        ax.set_facecolor("#E8E8E8")
+        ax.pcolormesh(x_edges, y_edges, np.ma.masked_where(~valid, values), cmap=PARULA)
+
+    # (b) The network. Block height follows the grid rows, block width the channels
+    text(1.6, height - 0.07, "(b) U-Net", fontsize=6.5)
+    level = {0: (0.62, 1.62), 1: (0.36, 0.86), 2: (0.12, 0.37)}  # (bottom, top) per depth
+    blocks = {  # name: (left, channels, depth, colour)
+        "enc1": (0.72, 12, 0, "#9DB9E0"),
+        "enc2": (1.04, 24, 1, "#9DB9E0"),
+        "bottom": (1.4, 48, 2, "#BFBFBF"),
+        "dec2": (1.98, 24, 1, "#F2B880"),
+        "dec1": (2.44, 12, 0, "#F2B880"),
+    }
+    sizes = {0: "24x16", 1: "12x8", 2: "6x4"}
+    box = {}
+    for name, (x, ch, depth, color) in blocks.items():
+        lo, hi = level[depth]
+        w = ch * 0.0075
+        canvas.add_patch(Rectangle((x, lo), w, hi - lo, fc=color, ec=gray, lw=0.5))
+        box[name] = (x, lo, w, hi)
+        label = f"{ch} ch.\n{sizes[depth]}"
+        if depth == 0:
+            text(x + w / 2, lo - 0.09, label)
+        elif depth == 1:
+            text(x + w / 2, hi + 0.09, label)
+        else:
+            text(x + w + 0.15, (lo + hi) / 2, label)
+    (x1, lo1, w1, hi1), (x2, lo2, w2, hi2) = box["enc1"], box["enc2"]
+    (xb, _, wb, hib), (x3, lo3, w3, hi3), (x4, lo4, w4, hi4) = (
+        box["bottom"],
+        box["dec2"],
+        box["dec1"],
+    )
+    arrow((x1 + w1, lo1 + 0.12), (x2, hi2 - 0.12))  # 2x2 max pooling
+    arrow((x2 + w2, lo2 + 0.1), (xb, hib - 0.08))
+    arrow((xb + wb, hib - 0.08), (x3, lo3 + 0.1))  # 2x2 transposed convolution
+    arrow((x3 + w3, hi3 - 0.12), (x4, lo4 + 0.12))
+    text((x1 + w1 + x2) / 2, lo1 + 0.19, "pool", color=gray, fontsize=5.3)
+    text((x3 + w3 + x4) / 2, lo4 + 0.19, "up", color=gray, fontsize=5.3)
+    skip = {"ls": (0, (2, 1.5)), "color": "0.45"}
+    arrow((x1 + w1, hi1 - 0.18), (x4, hi4 - 0.18), **skip)  # skip connections
+    arrow((x2 + w2, hi2 - 0.14), (x3, hi3 - 0.14), **skip)
+    text((x1 + x4) / 2, hi1 - 0.11, "skip connections", color=gray, fontsize=5.3)
+    # in: three features and three masks; out: one logit per cell through a 1x1 convolution
+    arrow((0.52, (lo1 + hi1) / 2), (x1, (lo1 + hi1) / 2))
+    text(0.61, (lo1 + hi1) / 2 + 0.08, "6 ch.", fontsize=5.3)
+    xo = width - map_w - 0.08
+    arrow((x4 + w4, (lo4 + hi4) / 2 + 0.15), (xo, height - 0.27 - map_h / 2))
+    text((x4 + w4 + xo) / 2 + 0.02, (lo4 + hi4) / 2 + 0.38, "1x1\nconv.", fontsize=5.3)
+
+    # (c) The score of every cell and the map after the threshold, with the jammed cells outlined
+    text(xo + map_w / 2, height - 0.07, "(c) Output", fontsize=6.5)
+    score_y = height - 0.27 - map_h
+    ax = grid_axes(xo, score_y, "Score")
+    ax.pcolormesh(x_edges, y_edges, prob, cmap="Reds", vmin=0, vmax=1)
+    _outline(ax, truth, color="black", lw=0.5)
+    map_y = score_y - 0.3 - map_h
+    arrow((xo + map_w / 2, score_y - 0.02), (xo + map_w / 2, map_y + map_h + 0.11))
+    text(xo + map_w / 2 - 0.04, score_y - 0.1, "threshold", fontsize=5.3, ha="right")
+    ax = grid_axes(xo, map_y, "Map")
+    codes = np.where(marked, 2, np.where(dmrs, 1, 0))
+    ax.pcolormesh(
+        x_edges,
+        y_edges,
+        codes,
+        cmap=ListedColormap([ALLOC_COLOR, DMRS_COLOR, JAM_COLOR]),
+        vmin=-0.5,
+        vmax=2.5,
+    )
+    _outline(ax, truth, color="black", lw=0.5)
+
+    hit, miss = int((marked & truth).sum()), int((~marked & truth).sum())
+    false = int((marked & ~truth).sum())
+    caption = (
+        f"The U-Net on one slot of the hopping jammer on pilots and data ({jsr_db:+g} dB JSR, "
+        f"{snr_db:g} dB SNR, TDL-C, the UE on PRBs {a0}-{a0 + n - 1} dashed). (a) The received "
+        "power, the pilot residual and the EVM of every cell of the carrier, in dB on their own "
+        "colour scales. (b) The network, with blocks drawn to the size of their grid and channel "
+        "count. (c) The score of every cell and the map after the threshold, with the jammed cells "
+        f"outlined. The map marks {hit} of the {int(truth.sum())} jammed cells, misses {miss} and "
+        f"marks {false} clean cells."
     )
     return fig, caption
 
 
 FIGURES = {
+    "unet_process": unet_process,
     "jamming_estimates": jamming_estimates,
     "attack_maps": attack_maps,
     "shrinkage_example": shrinkage_example,

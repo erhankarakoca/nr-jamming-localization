@@ -321,5 +321,31 @@ uv run python -m jamloc.experiments.resolution table $M --qam
 uv run python -m jamloc.experiments.resolution sweep results/v9/sweep_hop/recovery results/v9/sweep_nom/recovery --out results/v9/resolution_sweep
 ```
 
+**Paper v10 (section 28).** `conference-v10.tex` adds 16-QAM curves to the BLER against JSR
+figure and redraws the method figures. The 16-QAM runs decode a block and the hopping jammer on
+pilots and data from -9 to +9 dB JSR with the general U-Net, under the same Monte Carlo rule as v9.
+The six runs are independent, so they can run in parallel. On a 10-core Apple M1 Pro, with two
+threads each, they took about 80 minutes.
+
+```bash
+V10="--channel C --target-block-errors 70 --max-mc-iter 160 --snr-db 18 --mcs 13 --attacks partial --jsr-db -9 -6 -3 0 3 6 9"
+SW="standard nomap_prb nomap_shrink evm_shrink p_r_e_shrink true_shrink"
+run10() { mkdir -p results/v10/$1 && ln -sfn "$PWD/results/models" results/v10/$1/models
+  JAMLOC_RESULTS_DIR=results/v10/$1 uv run python -m jamloc.experiments.recovery $V10 "${@:2}"; }
+for s in 0 1 2; do
+  run10 sweep_qam --seeds $s --receivers $SW
+  run10 sweep_qamhop --jammer hopping --seeds $s --receivers $SW
+done
+# Pool the seeds, then draw the figure with the QPSK runs of v9
+JAMLOC_RESULTS_DIR=results/v10/sweep_qam uv run python -m jamloc.experiments.recovery --channel C --snr-db 18 --mcs 13 --plot-only
+JAMLOC_RESULTS_DIR=results/v10/sweep_qamhop uv run python -m jamloc.experiments.recovery --channel C --jammer hopping --snr-db 18 --mcs 13 --plot-only
+uv run python -m jamloc.experiments.resolution sweep results/v9/sweep_nom/recovery results/v9/sweep_hop/recovery \
+    results/v10/sweep_qam/recovery results/v10/sweep_qamhop/recovery --with-qam --out results/v10/resolution_sweep
+# Fig. 2 and Fig. 3 (shrinkage example and attack maps)
+uv run python -m jamloc.experiments.figures --only shrinkage_example attack_maps
+```
+
+The system and receiver diagram (Fig. 1) is drawn in TikZ inside the paper source.
+
 The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`, and
 `plan-v10.md` lists what the next revision of the paper should add.

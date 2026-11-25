@@ -1,0 +1,8 @@
+[C hopping true seed 2] partial                JSR  -9.0 dB: standard 0.040  p_r_e_shrink 0.002  true_shrink 0.002  nomap_prb 0.022  nomap_shrink 0.008  evm_shrink 0.026
+[C hopping true seed 2] partial                JSR  -6.0 dB: standard 0.146  p_r_e_shrink 0.006  true_shrink 0.005  nomap_prb 0.099  nomap_shrink 0.025  evm_shrink 0.108
+[C hopping true seed 2] partial                JSR  -3.0 dB: standard 0.385  p_r_e_shrink 0.009  true_shrink 0.008  nomap_prb 0.277  nomap_shrink 0.046  evm_shrink 0.247
+[C hopping true seed 2] partial                JSR  +0.0 dB: standard 0.695  p_r_e_shrink 0.024  true_shrink 0.018  nomap_prb 0.641  nomap_shrink 0.094  evm_shrink 0.417
+[C hopping true seed 2] partial                JSR  +3.0 dB: standard 0.852  p_r_e_shrink 0.038  true_shrink 0.033  nomap_prb 0.898  nomap_shrink 0.119  evm_shrink 0.490
+[C hopping true seed 2] partial                JSR  +6.0 dB: standard 0.953  p_r_e_shrink 0.068  true_shrink 0.055  nomap_prb 0.984  nomap_shrink 0.193  evm_shrink 0.586
+[C hopping true seed 2] partial                JSR  +9.0 dB: standard 0.977  p_r_e_shrink 0.073  true_shrink 0.062  nomap_prb 1.000  nomap_shrink 0.208  evm_shrink 0.547
+Wrote results/v10/sweep_qamhop/recovery/recovery_C_hopping_snr18_mcs13.csv and recovery_C_hopping_snr18_mcs13_paired.csv (no figure)

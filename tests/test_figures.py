@@ -129,12 +129,26 @@ def test_data_figures_and_gallery(tmp_path, monkeypatch):
         "training_curves",
         "constellations_with_map",
         "attack_maps",
+        "unet_process",
     ):
         fig, caption = figures.FIGURES[name]()
         assert fig.axes and caption.count(". ") >= 1 and len(caption) > 120, name
-        if name == "attack_maps":  # true cells, U-Net and EVM over the 12-PRB allocation
-            assert len(fig.axes) == 3
-            assert all(np.size(ax.collections[0].get_array()) == 12 * 14 for ax in fig.axes)
+        if name == "attack_maps":  # three attacks x (power, estimate, U-Net, EVM), and a colorbar
+            panels = fig.axes[:12]
+            assert len(fig.axes) == 13
+            assert [ax.get_title() for ax in panels[:4]] == [
+                "(a) Jamming power received",
+                "(b) Jamming power estimated",
+                "(c) U-Net map",
+                "(d) EVM map",
+            ]
+            # every panel covers the 12-PRB allocation over the 14 OFDM symbols
+            assert all(np.size(ax.collections[0].get_array()) == 12 * 14 for ax in panels)
+        if name == "unet_process":  # the canvas, three feature maps, the score and the map
+            assert len(fig.axes) == 6
+            maps = fig.axes[1:]
+            assert all(np.size(ax.collections[0].get_array()) == 24 * 14 for ax in maps)
+            assert "marks" in caption and "jammed cells" in caption
         if name == "detector_outputs":
             truth, evm, unet, pd = fig.axes
             for ax in (truth, evm, unet):
@@ -250,3 +264,21 @@ def test_shrinkage_lies_between_the_cell_and_its_row_mean():
 
     fig, caption = shrinkage_example()
     assert isinstance(fig, Figure) and len(fig.axes) >= 2 and "shrinkage" in caption
+
+
+def test_true_and_soft_jamming_power_of_a_slot():
+    from jamloc.experiments.figures import CFG, _estimates_without_map
+
+    est = _estimates_without_map(CFG, "partial", 9.0, seed=7)
+    power, truth, soft = est["power"], est["truth"], est["pilot"]
+    # The jamming power that reached a cell is zero where the jammer did not transmit, and its
+    # mean over the jammed cells is of the order of the jammer's power (unit-power channel)
+    assert np.all(power[~truth] == 0)
+    assert 0.2 < power[truth].mean() < 5
+    # The soft map fills the DMRS cells from the pilot residual and keeps shrinkage elsewhere
+    dmrs = list(CFG.dmrs_symbols)
+    assert not np.isnan(soft).any()
+    data = ~np.isnan(est["shrink"])
+    assert np.array_equal(soft[data], est["shrink"][data])
+    jammed_pilots, clean_pilots = truth[:, dmrs], ~truth[:, dmrs]
+    assert soft[:, dmrs][jammed_pilots].mean() > 5 * soft[:, dmrs][clean_pilots].mean()

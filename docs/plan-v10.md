@@ -93,3 +93,22 @@ target conference decides how much of item 5 fits, and it is still open.
 - Writing rules for the paper and the docs. Use plain, connected sentences and one name for each
   idea, and explain every term. Avoid colons and semicolons in prose and never use the section
   sign. Keep captions to one or two sentences.
+
+## Status after the v10 round (25 November 2026, evening)
+
+`conference-v10.tex` on Overleaf answers items 1 to 4. With a figure of the U-Net at work on one
+slot (`figures.unet_process`), added after the first draft, it has seven pages, which the author
+accepted. Section 28 of
+[results.md](results.md) records the round, and "Paper v10" in [reproducing.md](reproducing.md)
+lists its commands. The three small code issues above are fixed, each with a test.
+
+- Done. The U-Net subsection with a detection table, the soft-detection paragraph with the reason
+  for pooling along the PRB, a TikZ diagram of the link and the receiver (new Fig. 1), the true
+  power in Fig. 2, the three-attack Fig. 3 with the receiver's own estimate as a heat map, and the
+  16-QAM curves in Fig. 4. Old Fig. 1 is gone.
+- Left out while the paper had six pages. The subsection on further decoding attempts ("Beyond One
+  Attempt"). It is still in v9 and in the long version, and the seventh page has room for it.
+- Still open. Item 5. Decoding at 1000 ns and 30 m/s needs options for the delay spread and the
+  speed in `experiments.recovery`, which do not exist yet. The sentences on an estimated noise
+  power and on cost are not written. The page limit of the target conference decides whether they
+  fit.

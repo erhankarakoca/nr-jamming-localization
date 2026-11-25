@@ -270,11 +270,14 @@ def test_estimated_noise_keeps_the_unet_trained_on_it(monkeypatch):
     assert calls == [("fused", "nest")]
 
 
-def test_general_unet_takes_its_threshold_from_val_gen(monkeypatch):
+def test_general_unet_takes_its_threshold_from_val_gen(tmp_path, monkeypatch):
     from jamloc.experiments import recovery
 
     class Calibrated(Exception):
         pass
+
+    monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path))
+    (tmp_path / "val_gen.npz").touch()
 
     def fake_val_threshold(detector, model=None, val_split=None):
         if detector == "fused":
@@ -288,3 +291,44 @@ def test_general_unet_takes_its_threshold_from_val_gen(monkeypatch):
     with pytest.raises(Calibrated) as raised:
         recovery.simulate("C", 15.0, [9.0], 8, 1, 10, seed=0, unet="general")
     assert raised.value.args == ("val_gen",)
+
+
+def test_general_unet_without_val_gen_names_the_command(tmp_path, monkeypatch):
+    from jamloc.experiments import recovery
+
+    monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path))  # no val_gen split here
+    monkeypatch.setattr(recovery, "load", lambda split: {})
+    monkeypatch.setattr(recovery, "load_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr(recovery, "checkpoint_path", lambda *a, **k: Path(__file__))
+    monkeypatch.setattr(recovery, "val_threshold", lambda *args, **kwargs: 0.0)
+    with pytest.raises(FileNotFoundError, match="jamloc.dataset --split val_gen"):
+        recovery.simulate("C", 15.0, [9.0], 8, 1, 10, seed=0, unet="general")
+
+
+def test_general_unet_is_loaded_once_unless_gen_receivers_are_asked_for(tmp_path, monkeypatch):
+    # With --unet general the p_r_e_* receivers already use the general U-Net, so the gen_*
+    # receivers would repeat them: their detector is only loaded when they are asked for
+    from jamloc.experiments import recovery
+
+    class Loaded(Exception):
+        pass
+
+    def stop(seed):
+        raise Loaded
+
+    monkeypatch.setenv("JAMLOC_DATA_DIR", str(tmp_path))
+    (tmp_path / "val_gen.npz").touch()
+    monkeypatch.setattr(recovery, "load", lambda split: {})
+    monkeypatch.setattr(recovery, "checkpoint_path", lambda *a, **k: Path(__file__))
+    monkeypatch.setattr(recovery, "val_threshold", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr(recovery, "seed_everything", stop)
+    for only, expected in ((None, 1), (["gen_soft"], 2)):
+        calls = []
+
+        def record(variant, seed=0, calls=calls, **options):
+            calls.append(options.get("data"))
+
+        monkeypatch.setattr(recovery, "load_model", record)
+        with pytest.raises(Loaded):
+            recovery.simulate("C", 15.0, [9.0], 8, 1, 10, seed=0, only=only, unet="general")
+        assert calls.count("gen") == expected
