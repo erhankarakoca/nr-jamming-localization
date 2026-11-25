@@ -21,6 +21,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from matplotlib.figure import Figure
 
 from jamloc.plotting import new_figure, paper_style, plot_bler, save, zero_error_handle
 
@@ -180,6 +181,16 @@ SWEEP_PANELS = [
     ("recovery_C_hopping", "data", "(c) Hopping, data only"),
     ("recovery_C_hopping", "partial", "(d) Hopping, pilot + data"),
 ]
+# With 16-QAM (paper v10): three QPSK panels and two 16-QAM panels, with a label over each group
+QAM = "_snr18_mcs13"
+SWEEP_PANELS_QAM = [
+    ("recovery_C", "pilot", "(a) Block, pilot only"),
+    ("recovery_C_hopping", "data", "(b) Hopping, data only"),
+    ("recovery_C_hopping", "partial", "(c) Hopping, pilot + data"),
+    (f"recovery_C{QAM}", "partial", "(d) Block, pilot + data"),
+    (f"recovery_C_hopping{QAM}", "partial", "(e) Hopping, pilot + data"),
+]
+SWEEP_GROUPS_QAM = [(0, 2, "QPSK at 15 dB SNR"), (3, 4, "16-QAM at 18 dB SNR")]
 
 
 def bler_floor(values) -> float:
@@ -187,16 +198,25 @@ def bler_floor(values) -> float:
     return min(1e-4, 10.0 ** np.floor(np.log10(min(values, default=1e-4))))
 
 
-def sweep(folders: list[Path], out: Path) -> None:
-    """BLER against JSR, one panel per case, for ``SWEEP_RECEIVERS``."""
-    panels = SWEEP_PANELS
+def sweep(folders: list[Path], out: Path, panels=SWEEP_PANELS, groups=()) -> None:
+    """BLER against JSR, one panel per case of ``panels``, for ``SWEEP_RECEIVERS``. ``groups``
+    puts a label over panels ``first`` to ``last``: ``[(first, last, label), ...]``."""
     data = {}
     for folder in folders:
         for stem in {p[0] for p in panels}:
             for key, v in pooled(folder, stem).items():
                 data[(stem, *key)] = v
     with paper_style():
-        fig, axes = new_figure(width=7.16, height=1.95, ncols=len(panels), sharey=True)
+        if groups:  # one subfigure per group, with its label on top
+            fig = Figure(figsize=(7.16, 2.15), layout="constrained")
+            widths = [last - first + 1 for first, last, _ in groups]
+            subfigs = fig.subfigures(1, len(groups), width_ratios=widths, wspace=0.01)
+            axes = []
+            for sub, width, (_, _, label) in zip(subfigs, widths, groups, strict=True):
+                sub.suptitle(label, fontsize=7)
+                axes += list(np.atleast_1d(sub.subplots(1, width, sharey=True)))
+        else:
+            fig, axes = new_figure(width=7.16, height=1.95, ncols=len(panels), sharey=True)
         for ax, (stem, attack, title) in zip(axes, panels, strict=True):
             for rx, (label, color, marker, ls) in SWEEP_RECEIVERS.items():
                 points = sorted(
@@ -216,7 +236,8 @@ def sweep(folders: list[Path], out: Path) -> None:
             ax.set_title(title, fontsize=7)
         axes[0].set_ylabel("BLER")
         drawn = [y for ax in axes for line in ax.get_lines() for y in line.get_ydata() if y > 0]
-        axes[0].set_ylim(bler_floor(drawn), 1.2)  # the panels share their y axis
+        for ax in axes:  # every panel on the same y axis, also across groups
+            ax.set_ylim(bler_floor(drawn), 1.2)
         legend = {}  # one entry per receiver, from whichever panel has its curve
         for ax in axes:
             for handle, label in zip(*ax.get_legend_handles_labels(), strict=True):
@@ -241,6 +262,7 @@ def main(argv=None):
     s = sub.add_parser("sweep", help="BLER against JSR")
     s.add_argument("folders", type=Path, nargs="+")
     s.add_argument("--out", type=Path, default=None)
+    s.add_argument("--with-qam", action="store_true", help="the panels of paper v10, with 16-QAM")
     args = p.parse_args(argv)
     if args.command == "merge":
         problems = merge(args.out, args.folders)
@@ -250,7 +272,10 @@ def main(argv=None):
         print(markdown(table(args.folder, cases), cases))
     else:
         out = args.out or args.folders[0] / "resolution_sweep"
-        sweep(args.folders, out)
+        if args.with_qam:
+            sweep(args.folders, out, SWEEP_PANELS_QAM, SWEEP_GROUPS_QAM)
+        else:
+            sweep(args.folders, out)
         print(f"Wrote {out}.pdf/.png")
 
 

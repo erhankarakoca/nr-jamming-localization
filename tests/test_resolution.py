@@ -100,3 +100,29 @@ def test_sweep_axis_shows_the_lowest_measured_point(tmp_path, monkeypatch):
     resolution.sweep([tmp_path / "run" / "recovery"], tmp_path / "sweep.pdf")
     low, high = saved["fig"].axes[0].get_ylim()
     assert low <= 3e-5 and high >= 0.05
+
+
+def test_sweep_with_16qam_groups_its_panels_on_one_axis(tmp_path, monkeypatch):
+    # QPSK hopping and 16-QAM hopping runs: five panels in two labelled groups, one y axis
+    rows = [("nomap_shrink", "partial", "9.0", 30, 1000), ("standard", "data", "9.0", 500, 1000)]
+    _run(tmp_path / "qpsk" / "recovery", 0, rows, {})
+    qam = tmp_path / "qam" / "recovery"
+    _run(qam, 0, [("p_r_e_shrink", "partial", "3.0", 2, 10_000)], {})
+    (qam / "recovery_C_hopping_seed0.csv").rename(qam / "recovery_C_hopping_snr18_mcs13_seed0.csv")
+    saved = {}
+    monkeypatch.setattr(resolution, "save", lambda fig, out: saved.setdefault("fig", fig))
+    resolution.sweep(
+        [tmp_path / "qpsk" / "recovery", qam],
+        tmp_path / "sweep",
+        resolution.SWEEP_PANELS_QAM,
+        resolution.SWEEP_GROUPS_QAM,
+    )
+    fig = saved["fig"]
+    axes = [ax for sub in fig.subfigs for ax in sub.axes]
+    assert len(axes) == 5
+    assert [sub._suptitle.get_text() for sub in fig.subfigs] == [
+        "QPSK at 15 dB SNR",
+        "16-QAM at 18 dB SNR",
+    ]
+    assert len({ax.get_ylim() for ax in axes}) == 1 and axes[0].get_ylim()[0] <= 2e-4
+    assert axes[4].get_lines()  # the 16-QAM hopping curve is drawn in the last panel
