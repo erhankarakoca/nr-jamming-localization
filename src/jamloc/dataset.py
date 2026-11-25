@@ -24,6 +24,8 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   nominal, hopping and pilot-comb jammers (``ATTACK_CONDITIONS``).
 * ``train_atk2`` / ``val_atk2`` - like ``train_atk``, plus batches with pilot spoofing over the
   scheduled PRBs (``ATTACK_CONDITIONS_SPOOF``).
+* ``train_gen`` / ``val_gen`` - every combination of those jammers, those channels and two
+  modulations, QPSK and 16-QAM (``GENERAL_CONDITIONS``, 18 conditions).
 * ``margin`` - the jammer hits exactly the scheduled PRBs, as in the BLER experiment, at a fixed
   SNR of 15 dB and down to JSR -30 dB (``experiments/detection_margin``); ``margin_snr<x>`` the
   same at another SNR.
@@ -39,8 +41,8 @@ batch, so a grid point of 500 slots mixes about 31 allocations. Each split is on
 in ``data_dir()``: ``features`` ``[N, 7, 24, 14]`` (stored as float16), ``labels``
 ``[N, 24, 14]`` and one value per slot for every key in ``META_KEYS``: among them ``batch``, the
 index of the batch the slot came from (the unit that shares an allocation), ``snr_db_est``, the
-SNR the gNB estimates from the slot, and ``noise_error_db``, the error of the noise power the
-receiver used.
+SNR the gNB estimates from the slot, ``noise_error_db``, the error of the noise power the
+receiver used, and ``mcs_index``, the UE's modulation and coding scheme.
 
     python -m jamloc.dataset --split train
 """
@@ -74,6 +76,7 @@ META_KEYS = (
     "batch",
     "snr_db_est",
     "noise_error_db",
+    "mcs_index",
 )
 GRID_BATCH_SIZE = 16  # small batches: every grid point mixes many allocations
 
@@ -142,6 +145,20 @@ GENERALIZATION = {
         "attacks": (1,),
         "title": "pilot spoofing on part of the band (unseen)",
     },
+    # 16-QAM (MCS 13) at the SNRs where link adaptation would choose it, with the nominal and the
+    # hopping jammer (experiments/general_training)
+    "test_qam16": {
+        "seed": 52_000_000,
+        "cfg": {"mcs_index": 13},
+        "snr_db": (10.0, 25.0),
+        "title": "16-QAM (MCS 13), SNR 10-25 dB",
+    },
+    "hopjam_qam16": {
+        "seed": 53_000_000,
+        "cfg": {"mcs_index": 13, "jammer_hopping": True},
+        "snr_db": (10.0, 25.0),
+        "title": "16-QAM with the hopping jammer, SNR 10-25 dB",
+    },
     # Legitimate interference: a synchronized UE of a neighboring cell (experiments/neighbor)
     "neighbor": {
         "seed": 19_000_000,
@@ -188,6 +205,28 @@ ATTACK_CONDITIONS_SPOOF = (
     {"jammer_waveform": "dmrs", "_scheduling_aware": True, "_attacks": (0, 1)},
 )
 SPLITS["train_atk2"] = {"seed": 25_000_000, "num_slots": 40_000, "mix": ATTACK_CONDITIONS_SPOOF}
+
+# General training: every combination of the jammers of ATTACK_CONDITIONS, the channels of
+# MIXED_CONDITIONS and two modulations (18 conditions). 16-QAM (MCS 13) batches draw their SNR from
+# 10-25 dB, where link adaptation would choose it. The pulsed jammer stays out as an unseen test.
+MODULATION_CONDITIONS = ({}, {"mcs_index": 13, "_snr_db": (10.0, 25.0)})
+GENERAL_CONDITIONS = tuple(
+    {**jammer, **channel, **modulation}
+    for jammer in ATTACK_CONDITIONS
+    for channel in MIXED_CONDITIONS
+    for modulation in MODULATION_CONDITIONS
+)
+SPLITS["train_gen"] = {"seed": 50_000_000, "num_slots": 120_000, "mix": GENERAL_CONDITIONS}
+SPLITS["val_gen"] = {"seed": 51_000_000, "num_slots": 15_000, "mix": GENERAL_CONDITIONS}
+# The same without the long delay spreads (12 conditions): channels whose delays exceed tau_max
+# raise the DMRS residual without a jammer, so a network trained on them may trust it less
+GENERAL_SHORT_CONDITIONS = tuple(c for c in GENERAL_CONDITIONS if "delay_spread" not in c)
+SPLITS["train_gen_short"] = {
+    "seed": 54_000_000,
+    "num_slots": 120_000,
+    "mix": GENERAL_SHORT_CONDITIONS,
+}
+SPLITS["val_gen_short"] = {"seed": 55_000_000, "num_slots": 15_000, "mix": GENERAL_SHORT_CONDITIONS}
 SPLITS["val_atk2"] = {"seed": 26_000_000, "num_slots": 5_000, "mix": ATTACK_CONDITIONS_SPOOF}
 
 # Noise power: the whole receiver chain with a fixed error of the noise power it assumes
@@ -368,6 +407,7 @@ def generate(split: str, num_slots: int | None = None, batch_size: int = 64):
         meta["noise_error_db"].append(
             (10 * torch.log10(batch.no / batch.no_true)).cpu().numpy().astype(np.float32)
         )
+        meta["mcs_index"].append(np.full(n, link.cfg.mcs_index))
 
         if (i + 1) % 50 == 0 or i + 1 == len(jobs):
             done = sum(len(f) for f in features)

@@ -21,6 +21,9 @@ allocation. Every simulated batch is decoded by every receiver, on exactly the s
 * ``p_r_e_soft``  - map from the full U-Net, soft (the proposed receiver)
 * ``p_r_e_atk_soft`` - map from the full U-Net trained on mixed attacks (``train_atk``: also
                     hopping and pilot-comb jammers), soft; only when that model is trained
+* ``gen_soft`` / ``gen_shrink`` - map from the full U-Net of the general training (``train_gen``:
+                    every jammer, channel and modulation of its mix), with the per-PRB estimate or
+                    with shrinkage; only when that model is trained
 * ``true_hard`` / ``true_soft`` - the true jamming map (where the jammer is; its strength is still
                     estimated in the soft mode)
 * ``true_prb_soft`` - the true map coarsened to the block test's resolution (one decision for the
@@ -67,7 +70,11 @@ Every point is simulated in the original order and with the original number of b
 random draws do not depend on which receivers decode); its counts must reproduce the earlier
 CSV, which ``check_replay`` verifies.
 
-    python -m jamloc.experiments.recovery --channel C --seeds 0 1 2 --replay results/recovery_pr9
+    python -m jamloc.experiments.recovery --channel C --seeds 0 1 2 --unet nominal \\
+        --replay results/recovery_pr9
+
+The U-Net map comes from the general U-Net by default. Runs made before the paper v9 runs used
+the U-Net trained on the nominal mix, and ``--unet nominal`` repeats them.
 """
 
 import argparse
@@ -145,6 +152,9 @@ RECEIVERS = {
     "p_r_e_prb2": ("fused", "soft"),
     "p_r_e_prb4": ("fused", "soft"),
     "true_prb_shrink": ("true_prb", "soft"),
+    # Map of the U-Net of the general training (experiments/general_training)
+    "gen_soft": ("fused_gen", "soft"),
+    "gen_shrink": ("fused_gen", "soft"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
 DATA_AIDED = {
@@ -196,11 +206,38 @@ OPTIONS = {
     "p_r_e_prb2": {"scale": 2.0},
     "p_r_e_prb4": {"scale": 4.0},
     "true_prb_shrink": {"cellwise": "shrink"},
+    "gen_shrink": {"cellwise": "shrink"},
 }
-DETECTORS = ("power_threshold", "evm_threshold", "block_test", "no_residual", "fused", "fused_atk")
+DETECTORS = (
+    "power_threshold",
+    "evm_threshold",
+    "block_test",
+    "no_residual",
+    "fused",
+    "fused_atk",
+    "fused_gen",
+)
 NO_MODEL = ("power_threshold", "evm_threshold")  # thresholds of a score, nothing trained
 # Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
-TRAINED_ON = {"fused_atk": ({"data": "atk"}, "val_atk")}
+TRAINED_ON = {
+    "fused_atk": ({"data": "atk"}, "val_atk"),
+    "fused_gen": ({"data": "gen"}, "val_gen"),
+}
+# Which training the U-Net of the p_r_e_* receivers ("fused") comes from: (load_model options,
+# validation split of its threshold). The general one (experiments/general_training) is the
+# default; the nominal one reproduces the results before section 26 of docs/results.md.
+UNETS = {"general": ({"data": "gen"}, "val_gen"), "nominal": ({}, "val")}
+TRAIN_COMMANDS = {
+    "general": "python -m jamloc.experiments.general_training",
+    "nominal": "python -m jamloc.train --variant fused",
+}
+
+
+def unet_source(unet: str) -> tuple[dict, str]:
+    """``load_model`` options and validation split of the U-Net trained as ``unet``."""
+    return UNETS[unet]
+
+
 # With the estimated noise power: the detectors that were trained or calibrated on it, with the
 # validation split their thresholds (and the block test's nulls) come from
 NEST_DETECTORS = {"power_threshold": "val_nest", "block_test": "val_nest", "fused": "val_nest"}
@@ -450,6 +487,18 @@ STYLE = {
         "marker": "d",
         "linestyle": "-",
     },
+    "gen_soft": {
+        "label": "Map P+R+E (general training), per PRB",
+        "color": "#882255",
+        "marker": "P",
+        "linestyle": "--",
+    },
+    "gen_shrink": {
+        "label": "Map P+R+E (general training), shrinkage",
+        "color": "#882255",
+        "marker": "P",
+        "linestyle": "-",
+    },
 }
 
 
@@ -619,12 +668,14 @@ def simulate(
     attacks=None,
     jam_size=JAM_SIZE,
     mcs_index=None,
+    unet="general",
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
     ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
     batches, decoding only the receivers ``decode[point]``. ``attacks``: simulate only these cases
     (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``).
-    ``jam_size``: PRBs of the pilot, data and partial-band attacks (inside the allocation)."""
+    ``jam_size``: PRBs of the pilot, data and partial-band attacks (inside the allocation).
+    ``unet``: the training of the ``p_r_e_*`` receivers' U-Net (``UNETS``)."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
     if mcs_index is not None:  # another MCS: the detectors were trained on the default one
         cfg = dataclasses.replace(cfg, mcs_index=mcs_index)
@@ -641,6 +692,15 @@ def simulate(
             model = load(val_split or "val")  # its empirical nulls
         elif nest:
             model = load_model(det, seed, data="nest")
+        elif det == "fused":
+            options, val_split = unet_source(unet)
+            if not checkpoint_path("fused", seed, **options).is_file():
+                other = " or pass --unet nominal for the U-Net of the earlier results"
+                raise FileNotFoundError(
+                    f"no {unet} U-Net for seed {seed}. Train it with {TRAIN_COMMANDS[unet]}"
+                    + (other if unet == "general" else "")
+                )
+            model = load_model("fused", seed, **options)
         elif det in TRAINED_ON:
             options, val_split = TRAINED_ON[det]
             if not checkpoint_path("fused", seed, **options).is_file():
@@ -663,6 +723,7 @@ def simulate(
         whole += ("p_r_e_cell", "true_cell", "p_r_e_shrink", "true_shrink", "cell_shrink")
         whole += RESOLUTION
         whole += tuple(DATA_AIDED)
+        whole += ("gen_soft", "gen_shrink")
         cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]
@@ -1000,6 +1061,12 @@ def main(argv=None):
     )
     p.add_argument("--plot-only", action="store_true", help="redraw from the saved CSV")
     p.add_argument(
+        "--unet",
+        choices=list(UNETS),
+        default="general",
+        help="training of the U-Net of the p_r_e_* receivers",
+    )
+    p.add_argument(
         "--replay",
         metavar="DIR",
         help="repeat the run whose per-seed CSVs are in DIR, decoding only the quoted points",
@@ -1068,6 +1135,7 @@ def main(argv=None):
                 args.attacks,
                 JAM_SIZE if args.jam_prb is None else args.jam_prb,
                 args.mcs,
+                args.unet,
             )
             if args.replay:
                 bad = check_replay(rows, before)

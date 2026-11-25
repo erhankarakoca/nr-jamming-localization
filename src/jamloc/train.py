@@ -31,6 +31,29 @@ PIXEL_HIDDEN = 64  # hidden units of the per-cell MLP (4 801 parameters for the 
 PIXEL_HIDDEN_MATCHED = 252  # 66 277 parameters, about as many as the U-Net (66 553)
 
 
+SCHEDULES = ("cosine", "plateau")
+
+
+class EarlyStopping:
+    """Stop training once the validation loss has not improved for ``patience`` epochs.
+
+    ``patience = 0`` turns it off.
+    """
+
+    def __init__(self, patience: int = 0):
+        self.patience = patience
+        self.best = float("inf")
+        self.epochs_without_improvement = 0
+
+    def step(self, val_loss: float) -> bool:
+        """Record one epoch's validation loss. True when training should stop."""
+        if val_loss < self.best:
+            self.best, self.epochs_without_improvement = val_loss, 0
+        else:
+            self.epochs_without_improvement += 1
+        return 0 < self.patience <= self.epochs_without_improvement
+
+
 def build_model(
     arch: str, in_channels: int, width: int = DEFAULT_WIDTH, hidden: int = PIXEL_HIDDEN
 ):
@@ -75,6 +98,8 @@ def train(
     arch: str = "unet",
     jitter: float = 0.0,
     hidden: int = PIXEL_HIDDEN,
+    schedule: str = "cosine",
+    patience: int = 0,
 ):
     """Train a variant and save its best weights. Returns the checkpoint path.
 
@@ -82,7 +107,12 @@ def train(
     ``arch="pixel"`` trains the per-cell MLP (``hidden`` units) instead of the U-Net.
     ``jitter > 0`` shows every training slot as if the noise power had been estimated with an
     error drawn uniformly from +-``jitter`` dB (``model.noise_shift``); validation stays exact.
+    ``schedule="cosine"`` anneals the learning rate over ``epochs``; ``"plateau"`` halves it when
+    the validation loss has not improved for 3 epochs. ``patience > 0`` stops training once the
+    validation loss has not improved for that many epochs.
     """
+    if schedule not in SCHEDULES:
+        raise ValueError(f"unknown schedule {schedule!r}")
     torch.manual_seed(seed)
     device = config.device
     suffix = f"_{data}" if data else ""
@@ -95,7 +125,11 @@ def train(
     pos_weight = (y_tr == 0).sum() / (y_tr == 1).sum().clamp_min(1)
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+    if schedule == "cosine":
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+    else:
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=3)
+    stopper = EarlyStopping(patience)
 
     path = checkpoint_path(variant, seed, width, data, arch, jitter, hidden)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,8 +150,8 @@ def train(
             loss.backward()
             opt.step()
             batch_losses.append(loss.item())
-        sched.step()
         train_loss = sum(batch_losses) / len(batch_losses)
+        lr_used = opt.param_groups[0]["lr"]
 
         model.eval()
         with torch.no_grad():
@@ -142,13 +176,23 @@ def train(
                 },
                 path,
             )
-        history.append({"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss})
+        history.append(
+            {"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss, "lr": lr_used}
+        )
         print(
             f"[{variant}, {arch} width {width}, seed {seed}] epoch {epoch + 1}/{epochs}  "
-            f"train loss {train_loss:.4f}  "
-            f"val loss {val_loss:.4f}  ({time.perf_counter() - start:.1f} s)",
+            f"train loss {train_loss:.4f}  val loss {val_loss:.4f}  lr {lr_used:.2e}  "
+            f"({time.perf_counter() - start:.1f} s)",
             flush=True,
         )
+        # The learning rate for the next epoch, then stop if the validation loss has stalled
+        if schedule == "cosine":
+            sched.step()
+        else:
+            sched.step(val_loss)
+        if stopper.step(val_loss):
+            print(f"Stopping: no improvement in {patience} epochs", flush=True)
+            break
 
     with open(path.with_name(f"{path.stem}_history.csv"), "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(history[0]))
@@ -193,6 +237,12 @@ def main(argv=None):
     p.add_argument(
         "--noise-jitter-db", type=float, default=0.0, help="train with +-this noise-estimate error"
     )
+    p.add_argument(
+        "--schedule", choices=SCHEDULES, default="cosine", help="plateau: halve lr when val stalls"
+    )
+    p.add_argument(
+        "--patience", type=int, default=0, help="stop after this many epochs without improvement"
+    )
     args = p.parse_args(argv)
     for variant in VARIANTS if args.variant == "all" else [args.variant]:
         for seed in args.seeds:
@@ -207,6 +257,8 @@ def main(argv=None):
                 arch=args.arch,
                 jitter=args.noise_jitter_db,
                 hidden=args.hidden,
+                schedule=args.schedule,
+                patience=args.patience,
             )
             print("Saved", path)
 

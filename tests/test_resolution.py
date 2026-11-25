@@ -73,3 +73,30 @@ def test_table_takes_the_best_scale_and_keeps_ties_unscaled(tmp_path):
     assert rows[("true", "shrinkage")] is None  # not run
     text = resolution.markdown(resolution.table(tmp_path, cases), cases)
     assert "40.00 (x2)" in text and "| U-Net | per PRB, best scale | 0.00 |" in text
+
+
+def test_sweep_uses_the_names_of_the_paper():
+    from jamloc.experiments.resolution import SWEEP_PANELS, SWEEP_RECEIVERS
+
+    labels = [style[0] for style in SWEEP_RECEIVERS.values()]
+    assert labels[0] == "Baseline receiver" and "No map, PRB average" in labels
+    assert [panel[2] for panel in SWEEP_PANELS] == [
+        "(a) Pilot only",
+        "(b) Pilot + data",
+        "(c) Hopping, data only",
+        "(d) Hopping, pilot + data",
+    ]
+
+
+def test_sweep_axis_shows_the_lowest_measured_point(tmp_path, monkeypatch):
+    # One curve reaches 3 errors in 100,000 blocks, below the old fixed floor of 1e-4
+    rows = [
+        ("nomap_shrink", "data", "3.0", 50, 1000),
+        ("nomap_shrink", "data", "9.0", 3, 100_000),
+    ]
+    _run(tmp_path / "run" / "recovery", 0, rows, {})
+    saved = {}
+    monkeypatch.setattr(resolution, "save", lambda fig, out: saved.setdefault("fig", fig))
+    resolution.sweep([tmp_path / "run" / "recovery"], tmp_path / "sweep.pdf")
+    low, high = saved["fig"].axes[0].get_ylim()
+    assert low <= 3e-5 and high >= 0.05

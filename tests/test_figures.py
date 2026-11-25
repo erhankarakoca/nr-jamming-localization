@@ -1,4 +1,5 @@
 import csv
+import dataclasses
 import json
 import xml.etree.ElementTree as ET
 
@@ -9,7 +10,7 @@ from matplotlib.figure import Figure
 from jamloc.experiments import figures
 from jamloc.paths import REPO_ROOT
 
-MODEL_FREE = ["attack_patterns", "residual_explained", "constellations"]
+MODEL_FREE = ["attack_patterns", "residual_explained", "constellations", "shrinkage_example"]
 
 
 def test_drawio_sources_are_xml():
@@ -95,6 +96,10 @@ def _tiny_project(tmp_path, monkeypatch):
     generate("test", num_slots=60, batch_size=32)
     for variant in VARIANTS:
         train(variant, epochs=2, batch_size=32)
+    # A tiny general U-Net, for the map figure
+    generate("train_gen", num_slots=64, batch_size=32)
+    generate("val_gen", num_slots=32, batch_size=32)
+    train("fused", epochs=1, batch_size=32, data="gen")
 
     # A miniature interval export, with other seeds, attacks and JSRs to distinguish.
     out = tmp_path / "results" / "intervals"
@@ -123,9 +128,13 @@ def test_data_figures_and_gallery(tmp_path, monkeypatch):
         "detector_outputs",
         "training_curves",
         "constellations_with_map",
+        "attack_maps",
     ):
         fig, caption = figures.FIGURES[name]()
         assert fig.axes and caption.count(". ") >= 1 and len(caption) > 120, name
+        if name == "attack_maps":  # true cells, U-Net and EVM over the 12-PRB allocation
+            assert len(fig.axes) == 3
+            assert all(np.size(ax.collections[0].get_array()) == 12 * 14 for ax in fig.axes)
         if name == "detector_outputs":
             truth, evm, unet, pd = fig.axes
             for ax in (truth, evm, unet):
@@ -213,3 +222,31 @@ def test_gallery_only_keeps_existing_figures(tmp_path, monkeypatch):
     page = (out / "index.html").read_text(encoding="utf-8")
     assert 'src="system_diagram.png"' in page
     assert "second pass through the same slot" in page
+
+
+def test_shrinkage_lies_between_the_cell_and_its_row_mean():
+    from jamloc.experiments.figures import CFG, _estimates_without_map, shrinkage_example
+
+    # Block data jammer: the rows it does not touch shrink to their (near zero) row mean
+    est = _estimates_without_map(CFG, "data", 9.0, seed=7)
+    cell, row, shrink = est["cell"], est["prb"], est["shrink"]
+    ok = ~np.isnan(cell)
+    lo, hi = np.minimum(cell, row), np.maximum(cell, row)
+    assert np.all(shrink[ok] >= np.maximum(lo[ok], 0) - 1e-6)
+    assert np.all(shrink[ok] <= np.maximum(hi[ok], 0) + 1e-6)
+    clean = ~est["truth"].any(axis=1)[:, None] & ok  # data cells of rows without any jammed cell
+    assert clean.any()
+    # Shrinkage pulls a clean cell at least halfway from its own estimate to the row mean
+    assert np.abs(shrink - row)[clean].mean() < 0.5 * np.abs(cell - row)[clean].mean()
+
+    # Hopping data jammer: in a row hit on a few symbols, a jammed cell keeps part of its own
+    # estimate, so it lies strictly between that estimate and the row mean
+    est = _estimates_without_map(dataclasses.replace(CFG, jammer_hopping=True), "data", 9.0, seed=7)
+    cell, row, shrink, truth = est["cell"], est["prb"], est["shrink"], est["truth"]
+    hits = (truth & ~np.isnan(cell)).sum(axis=1)
+    few = ((hits >= 2) & (hits <= 5))[:, None] & truth & ~np.isnan(cell)
+    assert few.any()
+    assert np.all((shrink[few] - row[few]) * (cell[few] - shrink[few]) > 0)
+
+    fig, caption = shrinkage_example()
+    assert isinstance(fig, Figure) and len(fig.axes) >= 2 and "shrinkage" in caption
