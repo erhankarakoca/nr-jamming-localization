@@ -1,0 +1,3 @@
+receiver,jammer,noise_estimate,seed,attack,jsr_db,snr_db,ber,bler,block_errors,blocks
+p_r_e_shrink,nominal,true,0,pilot_whole_allocation,9.0,15.0,0.10231285310734463,0.3958333333333333,76,192
+p_r_e_shrink_full,nominal,true,0,pilot_whole_allocation,9.0,15.0,0.0657699211393597,0.203125,78,384

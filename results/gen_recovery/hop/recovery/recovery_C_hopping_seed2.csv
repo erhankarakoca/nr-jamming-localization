@@ -1,0 +1,15 @@
+receiver,jammer,noise_estimate,seed,attack,jsr_db,snr_db,ber,bler,block_errors,blocks
+standard,hopping,true,2,data,9.0,15.0,0.026665910008071024,0.25669642857142855,115,448
+p_r_e_soft,hopping,true,2,data,9.0,15.0,0.028897177102950408,0.19270833333333334,111,576
+p_r_e_shrink,hopping,true,2,data,9.0,15.0,1.2358757062146892e-05,0.01,16,1600
+true_shrink,hopping,true,2,data,9.0,15.0,0.0,0.0,0,1600
+nomap_shrink,hopping,true,2,data,9.0,15.0,0.0,0.0,0,1600
+gen_soft,hopping,true,2,data,9.0,15.0,0.0,0.0,0,1600
+gen_shrink,hopping,true,2,data,9.0,15.0,0.0,0.0,0,1600
+standard,hopping,true,2,partial,9.0,15.0,0.13657162193973635,0.6302083333333334,121,192
+p_r_e_soft,hopping,true,2,partial,9.0,15.0,0.04521035108958838,0.25,112,448
+p_r_e_shrink,hopping,true,2,partial,9.0,15.0,0.012496426889965025,0.0744047619047619,100,1344
+true_shrink,hopping,true,2,partial,9.0,15.0,0.0006510416666666666,0.00375,6,1600
+nomap_shrink,hopping,true,2,partial,9.0,15.0,0.0016697563559322033,0.008125,13,1600
+gen_soft,hopping,true,2,partial,9.0,15.0,0.0008885063559322034,0.005,8,1600
+gen_shrink,hopping,true,2,partial,9.0,15.0,0.0010165077683615819,0.005,8,1600

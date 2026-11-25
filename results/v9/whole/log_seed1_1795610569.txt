@@ -1,0 +1,3 @@
+[C nominal true seed 1] pilot_whole_allocation JSR  +3.0 dB: standard 0.363  lmmse 0.091  p_r_e_soft 0.037  true_soft 0.030  p_r_e_cell 0.037  true_cell 0.030  p_r_e_shrink 0.037  true_shrink 0.030  nomap_prb 0.039  nomap_cell 0.039  nomap_shrink 0.039  evm_prb 0.092  evm_cell 0.092  evm_shrink 0.092  true_prb_shrink 0.030
+[C nominal true seed 1] pilot_whole_allocation JSR  +9.0 dB: standard 0.938  lmmse 0.719  p_r_e_soft 0.411  true_soft 0.411  p_r_e_cell 0.411  true_cell 0.411  p_r_e_shrink 0.411  true_shrink 0.411  nomap_prb 0.474  nomap_cell 0.474  nomap_shrink 0.474  evm_prb 0.719  evm_cell 0.719  evm_shrink 0.719  true_prb_shrink 0.411
+Wrote results/v9/whole/recovery/recovery_C.csv and recovery_C_paired.csv (no figure)
