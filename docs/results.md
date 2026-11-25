@@ -1905,3 +1905,111 @@ moves and gains up to 12.8 where it fills its rows. With QPSK the true map is wo
 1 point over shrinkage without a map except with every pilot jammed (0.9 to 5.1). With 16-QAM it
 is worth up to 9.3 points on a block and 13.5 under hopping. The U-Net delivers part of this on
 the attacks it was trained on and costs up to 19 points on the hopping jammer it never saw.
+
+## 26. General training: one detector for every jammer, channel and modulation
+
+Round of 25 Nov 2026 (branch `mixed-training`), run on an RTX 4070 laptop GPU. The U-Net of
+section 25 was trained only on block jammers, nominal channels and QPSK, so it was tested on hopping and
+16-QAM without having seen either. This round trains it on all of them and asks whether the map
+then pays off.
+
+**A bug in the EVM feature.** Until this round the EVM sliced every equalized symbol to the
+nearest QPSK point. On clean 16-QAM slots at 25 dB SNR its mean was 52.8 times the noise level
+instead of about 1. It now slices to the transmitted constellation (`features.nearest_point`), and
+QPSK values are unchanged. The U-Net rows of the 16-QAM tables of section 25 came from a network that saw
+the broken input. The tables below supersede them.
+
+**Training.** `train_gen` / `val_gen` (120 000 / 15 000 slots) cycle through 18 conditions, every
+combination of three jammers (block, hopping, pilot comb), three channel conditions (nominal,
+1000 ns delay spread, 30 m/s) and two modulations (QPSK, and 16-QAM at MCS 13 with SNR 10-25 dB).
+The pulsed jammer stays out as an unseen test. The fused U-Net trains for up to 80 epochs with a
+learning rate that halves when the validation loss has not improved for 3 epochs, and stops after
+10 epochs without improvement (`train --schedule plateau --patience 10`). The best epoch came at
+10 to 16, and training stopped after 20 to 26 epochs. After about 15 epochs the training loss kept
+falling while the validation loss rose. The nominal U-Net was trained again on this machine as in
+`paper_run` (15 epochs, cosine). An ablation, `train_gen_short`, leaves out the long delay spreads
+(12 conditions).
+
+**Detection** (`experiments.general_training`, three seeds each, F1 / false alarms on scored
+cells, thresholds from each training's validation split, SNR 10-25 dB on the 16-QAM grids):
+
+| Test grid | Nominal | General | General, no long delays |
+| --- | --- | --- | --- |
+| matched | 0.950 / 1.2% | 0.954 / 0.7% | 0.955 / 0.8% |
+| hopping | 0.602 / 13.8% | 0.923 / 1.5% | 0.922 / 1.8% |
+| pilot comb | 0.950 / 1.2% | 0.954 / 0.7% | 0.954 / 0.8% |
+| 1000 ns delay | 0.801 / 6.8% | 0.924 / 1.5% | 0.811 / 6.7% |
+| 30 m/s | 0.848 / 6.0% | 0.949 / 0.8% | 0.950 / 0.9% |
+| 16-QAM | 0.934 / 0.4% | 0.967 / 0.4% | 0.967 / 0.5% |
+| 16-QAM hopping | 0.576 / 10.0% | 0.940 / 1.2% | 0.939 / 1.4% |
+| pulsed (in no mix) | 0.633 / 10.9% | 0.821 / 3.8% | 0.799 / 4.6% |
+
+Standard deviations over seeds are at most 0.013. Pd of jammed scheduled pilot cells at -15 dB
+JSR with the threshold set to 1% false alarms on each grid's own clean cells, nominal / general /
+no long delays: matched 0.58 / 0.49 / 0.57, 16-QAM 0.77 / 0.71 / 0.76.
+
+**Reading.**
+- General training improves F1 on every grid and keeps false alarms at 0.4 to 1.5% except on the
+  pulsed jammer (3.8%). On the pulsed jammer, which no mix contained, F1 rises from 0.633 to 0.821.
+- It costs weak-pilot sensitivity. At a matched 1% false-alarm rate the Pd at -15 dB falls from
+  0.58 to 0.49. Without the long delay spreads it stays at 0.57, but F1 on those channels falls
+  back to 0.811. Channels whose delays exceed `tau_max` raise the residual without a jammer, so a
+  network trained on them learns to trust it less. A residual whose `tau_max` adapts to the UE
+  would avoid the trade-off.
+
+**Decoding** (`experiments.recovery` with the receivers `gen_soft` and `gen_shrink`, TDL-C, one
+attempt, three detector seeds with up to 1 600 slots each, new slots that differ from those of
+section 25, a receiver stops after 100 block errors with QPSK and 200 with 16-QAM, pooled BLER %,
+`python -m jamloc.experiments.general_training --decoding results/gen_recovery`):
+
+QPSK, 15 dB SNR, jammer on 4 of 12 PRBs at +9 dB, or on every pilot of the allocation:
+
+| Receiver | hopping data | hopping partial | every pilot +3 | every pilot +9 | block pilot | block data | block partial | no jammer |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| No protection | 25.5 | 59.4 | 38.2 | 93.5 | 29.0 | 84.4 | 85.7 | 0/4800 |
+| No map, shrinkage | 0/4800 | 0.62 | 5.08 | 41.7 | 0.02 | 0.02 | 0.19 | 0/4800 |
+| Nominal U-Net, per PRB | 22.5 | 29.5 | 4.25 | 40.4 | 0.08 | 0/4800 | 0.12 | 0/4800 |
+| Nominal U-Net, shrinkage | 0.62 | 6.99 | 4.25 | 40.4 | 0.08 | 0/4800 | 0.12 | 0/4800 |
+| General U-Net, per PRB | 0/4800 | 0.27 | 4.52 | 39.7 | 0/4800 | 0/4800 | 0.10 | 0/4800 |
+| General U-Net, shrinkage | 0/4800 | 0.29 | 4.52 | 39.7 | 0/4800 | 0/4800 | 0.10 | 0/4800 |
+| True map, shrinkage | 0/4800 | 0.25 | 4.10 | 38.4 | 0/4800 | 0/4800 | 0.10 | 0/4800 |
+
+16-QAM (MCS 13), 18 dB SNR, +3 / +9 dB JSR:
+
+| Receiver | block pilot | block data | block partial | hopping data | hopping partial |
+| --- | --- | --- | --- | --- | --- |
+| No protection | 55.8 / 90.1 | 94.8 / 99.5 | 96.9 / 99.7 | 76.5 / 94.0 | 87.6 / 97.3 |
+| No map, shrinkage | 0.92 / 4.56 | 7.40 / 10.2 | 9.56 / 17.5 | 2.00 / 1.54 | 12.0 / 21.0 |
+| Nominal U-Net, per PRB | 1.19 / 2.77 | 4.79 / 7.25 | 10.0 / 10.4 | 63.8 / 82.3 | 72.8 / 89.2 |
+| Nominal U-Net, shrinkage | 1.19 / 2.77 | 5.19 / 7.25 | 10.2 / 10.5 | 34.8 / 33.0 | 62.8 / 69.1 |
+| General U-Net, per PRB | 0.42 / 1.19 | 4.81 / 7.19 | 5.27 / 8.23 | 0.38 / 0.42 | 3.62 / 7.81 |
+| General U-Net, shrinkage | 0.42 / 1.19 | 5.23 / 7.21 | 5.54 / 8.33 | 0.44 / 0.42 | 3.98 / 7.88 |
+| True map, shrinkage | 0.33 / 1.04 | 5.19 / 7.21 | 5.35 / 8.21 | 0.38 / 0.35 | 3.48 / 7.19 |
+
+Without a jammer, every receiver except no protection (0.04%) and no map (0.02%) decoded all 4 800
+16-QAM slots.
+
+**Paired differences** (points, 95% Newcombe interval, common slots), general U-Net with
+shrinkage minus:
+- the true map with shrinkage: at most +0.19 on 16-QAM blocks, +0.06 / +0.06 and +0.50 (0.29 to
+  0.73) / +0.69 (0.44 to 0.95) under 16-QAM hopping, +0.04 (-0.06 to 0.16) under QPSK hopping
+  partial, +0.42 (0.21 to 0.64) and +1.08 (0.27 to 1.90, 832 slots) with every pilot jammed.
+- no map with shrinkage: -0.33 (-0.56 to -0.14) under QPSK hopping partial, -0.56 (-0.94 to
+  -0.19) and -2.47 (-4.37 to -0.57) with every pilot jammed, -0.50 to -9.80 (-10.81 to -8.83) on
+  16-QAM blocks, -1.56 / -1.12 and -8.07 (-8.89 to -7.29) / -12.95 (-14.23 to -11.72) under
+  16-QAM hopping. QPSK blocks within 0.08, intervals including zero.
+- the nominal U-Net with shrinkage: -0.62 and -6.72 (-7.54 to -5.98) under QPSK hopping, -0.77 to
+  -4.71 on 16-QAM blocks, -32.5 to -61.7 under 16-QAM hopping.
+
+**Reading.**
+- Trained on the conditions it meets, the learned map comes within 1.1 points of the true map in
+  every tested case, and within 0.2 on every block attack. It beats the receiver without a map in
+  every case where a map can help, by up to 13 points with 16-QAM, and costs nothing on clean
+  slots.
+- The nominal U-Net, which never saw hopping or 16-QAM, now fails much more under 16-QAM hopping
+  (33 to 69%) than the one of section 25 (8.3 to 40%). The difference presumably comes from the
+  EVM input, which was broken there and is correct here.
+- With an accurate map, the per-PRB average over the flagged cells and shrinkage give the same
+  BLER within 0.5 points. Shrinkage is what protects a receiver whose map is wrong.
+- The general U-Net's lower weak-pilot Pd does not show in decoding, because jamming that weak
+  barely hurts the link.

@@ -254,4 +254,28 @@ JAMLOC_RESULTS_DIR=results/res_study/qamhop uv run python -m jamloc.experiments.
 uv run python -m jamloc.experiments.figures --only jamming_estimates
 ```
 
+**General training (section 26).** The experiment generates the missing splits, trains the
+nominal, general and no-long-delay U-Nets with three seeds and evaluates them on eight test grids.
+The decoding runs then put the general U-Net's map next to no map, the nominal U-Net and the true
+map. The recovery script loads every detector, so the nominal U-Net without the residual must be
+trained too.
+
+```bash
+uv run python -m jamloc.experiments.general_training --seeds 0 1 2
+uv run python -m jamloc.train --variant no_residual --seeds 0 1 2 --epochs 15
+RX="standard nomap_shrink p_r_e_soft p_r_e_shrink gen_soft gen_shrink true_shrink"
+run() { mkdir -p results/gen_recovery/$1 && ln -sfn "$PWD/results/models" results/gen_recovery/$1/models
+  JAMLOC_RESULTS_DIR=results/gen_recovery/$1 uv run python -m jamloc.experiments.recovery \
+    --channel C --seeds $2 --max-mc-iter 25 --receivers $RX "${@:3}"; }
+for s in 0 1 2; do
+  run hop $s --jammer hopping --jsr-db 9
+  run whole $s --attacks pilot_whole_allocation --jsr-db 3 9
+  run nom $s --attacks none pilot data partial --jsr-db 9
+  run qam16 $s --snr-db 18 --mcs 13 --attacks none pilot data partial --jsr-db 3 9 \
+    --target-block-errors 200
+  run qamhop $s --snr-db 18 --mcs 13 --jammer hopping --jsr-db 3 9 --target-block-errors 200
+done
+uv run python -m jamloc.experiments.general_training --decoding results/gen_recovery
+```
+
 The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`.
