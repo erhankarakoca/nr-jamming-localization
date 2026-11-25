@@ -57,6 +57,29 @@ def test_benign_evm_is_noise_level():
     assert 0.5 < e[data.bool()].mean().item() < 1.5
 
 
+def test_nearest_point_matches_the_qpsk_sign_rule():
+    from jamloc.features import nearest_point
+
+    gen = torch.Generator().manual_seed(0)
+    x = torch.complex(torch.randn(1000, generator=gen), torch.randn(1000, generator=gen))
+    qpsk = torch.tensor([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j], dtype=torch.complex64) / 2**0.5
+    sign = (torch.where(x.real >= 0, 1.0, -1.0) + 1j * torch.where(x.imag >= 0, 1.0, -1.0)) / 2**0.5
+    assert torch.allclose(nearest_point(x, qpsk), sign.to(torch.complex64))
+
+
+def test_benign_evm_is_noise_level_with_16qam():
+    # The EVM slices to the transmitted constellation. Slicing 16-QAM symbols to QPSK points
+    # would leave them far from their decisions and the EVM far above the noise level.
+    import dataclasses
+
+    qam = dataclasses.replace(cfg, mcs_index=13)
+    rng = seed_everything(3)
+    out = JammedPUSCHLink(qam)(draw_scenario(rng, 32, qam, "A", attacks=(NONE,), snr_db=25.0))
+    _, _, data = masks(out, qam)
+    e = evm_map(out, qam)
+    assert 0.5 < e[data.bool()].mean().item() < 1.5
+
+
 def test_pilot_attack_raises_residual():
     pilot = _batch(3, "A", PILOT, snr_db=20.0, scheduling_aware=True)
     _, dmrs, _ = masks(pilot, cfg)

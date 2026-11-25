@@ -164,15 +164,19 @@ def residual_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
 # --- EVM --------------------------------------------------------------------------------------
 
 
+def nearest_point(x: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
+    """The constellation point nearest to each value of ``x`` (hard decision)."""
+    idx = (x[..., None] - points).abs().argmin(dim=-1)
+    return points[idx]
+
+
 def evm_map(batch: SlotBatch, cfg: SimConfig) -> torch.Tensor:
     """Decision-directed EVM per cell, on the data symbols of the scheduled PRBs; 0 elsewhere."""
     x_hat, no_eff = batch.rx["x_hat"], batch.rx["no_eff"]
 
-    # Nearest QPSK point (Sionna's QPSK constellation is (+-1 +-1j)/sqrt(2))
-    decision = (
-        torch.where(x_hat.real >= 0, 1.0, -1.0) + 1j * torch.where(x_hat.imag >= 0, 1.0, -1.0)
-    ) / np.sqrt(2)
-    error = (x_hat - decision).abs() ** 2
+    # Nearest point of the transmitted constellation (QPSK, 16-QAM, ...)
+    points = batch.tx._mapper.constellation.points.to(device=x_hat.device, dtype=x_hat.dtype)
+    error = (x_hat - nearest_point(x_hat, points)).abs() ** 2
 
     # Put error and expected noise back on the resource grid, then sum the 12 subcarriers of each
     # cell (every RE is written once, so this is deterministic on GPU as well)
