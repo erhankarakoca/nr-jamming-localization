@@ -49,6 +49,8 @@ SHORT = {
     "tonejam": "tone",
     "unnorm": "no norm.",
     "neighbor": "neighbor UE",
+    "test_qam16": "16-QAM",
+    "hopjam_qam16": "16-QAM hop.",
 }
 DETECTORS = (
     "fused",

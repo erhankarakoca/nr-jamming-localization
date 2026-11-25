@@ -21,6 +21,9 @@ allocation. Every simulated batch is decoded by every receiver, on exactly the s
 * ``p_r_e_soft``  - map from the full U-Net, soft (the proposed receiver)
 * ``p_r_e_atk_soft`` - map from the full U-Net trained on mixed attacks (``train_atk``: also
                     hopping and pilot-comb jammers), soft; only when that model is trained
+* ``gen_soft`` / ``gen_shrink`` - map from the full U-Net of the general training (``train_gen``:
+                    every jammer, channel and modulation of its mix), with the per-PRB estimate or
+                    with shrinkage; only when that model is trained
 * ``true_hard`` / ``true_soft`` - the true jamming map (where the jammer is; its strength is still
                     estimated in the soft mode)
 * ``true_prb_soft`` - the true map coarsened to the block test's resolution (one decision for the
@@ -145,6 +148,9 @@ RECEIVERS = {
     "p_r_e_prb2": ("fused", "soft"),
     "p_r_e_prb4": ("fused", "soft"),
     "true_prb_shrink": ("true_prb", "soft"),
+    # Map of the U-Net of the general training (experiments/general_training)
+    "gen_soft": ("fused_gen", "soft"),
+    "gen_shrink": ("fused_gen", "soft"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
 DATA_AIDED = {
@@ -196,11 +202,23 @@ OPTIONS = {
     "p_r_e_prb2": {"scale": 2.0},
     "p_r_e_prb4": {"scale": 4.0},
     "true_prb_shrink": {"cellwise": "shrink"},
+    "gen_shrink": {"cellwise": "shrink"},
 }
-DETECTORS = ("power_threshold", "evm_threshold", "block_test", "no_residual", "fused", "fused_atk")
+DETECTORS = (
+    "power_threshold",
+    "evm_threshold",
+    "block_test",
+    "no_residual",
+    "fused",
+    "fused_atk",
+    "fused_gen",
+)
 NO_MODEL = ("power_threshold", "evm_threshold")  # thresholds of a score, nothing trained
 # Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
-TRAINED_ON = {"fused_atk": ({"data": "atk"}, "val_atk")}
+TRAINED_ON = {
+    "fused_atk": ({"data": "atk"}, "val_atk"),
+    "fused_gen": ({"data": "gen"}, "val_gen"),
+}
 # With the estimated noise power: the detectors that were trained or calibrated on it, with the
 # validation split their thresholds (and the block test's nulls) come from
 NEST_DETECTORS = {"power_threshold": "val_nest", "block_test": "val_nest", "fused": "val_nest"}
@@ -450,6 +468,18 @@ STYLE = {
         "marker": "d",
         "linestyle": "-",
     },
+    "gen_soft": {
+        "label": "Map P+R+E (general training), per PRB",
+        "color": "#882255",
+        "marker": "P",
+        "linestyle": "--",
+    },
+    "gen_shrink": {
+        "label": "Map P+R+E (general training), shrinkage",
+        "color": "#882255",
+        "marker": "P",
+        "linestyle": "-",
+    },
 }
 
 
@@ -663,6 +693,7 @@ def simulate(
         whole += ("p_r_e_cell", "true_cell", "p_r_e_shrink", "true_shrink", "cell_shrink")
         whole += RESOLUTION
         whole += tuple(DATA_AIDED)
+        whole += ("gen_soft", "gen_shrink")
         cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]

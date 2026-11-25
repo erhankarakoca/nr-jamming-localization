@@ -104,15 +104,17 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
         for r in rows
         if r["attack"] in ("pilot", "data", "partial")
     }
+    # Receivers whose U-Net is trained on other data (mixed attacks, general) are left out here
+    untrained = {rx for rx, (src, _) in recovery.RECEIVERS.items() if src in recovery.TRAINED_ON}
+    assert untrained == {"p_r_e_atk_soft", "gen_soft", "gen_shrink"}
     assert main_rows == {
         (rx, a, j)
-        for rx in recovery.RECEIVERS
-        if rx != "p_r_e_atk_soft"  # its model (trained on mixed attacks) is not trained here
+        for rx in set(recovery.RECEIVERS) - untrained
         for a in ("pilot", "data", "partial")
         for j in ("-3.0", "3.0")
     }
     benign = {r["receiver"] for r in rows if r["attack"] == "none"}
-    assert benign == set(recovery.RECEIVERS) - {"p_r_e_atk_soft"}
+    assert benign == set(recovery.RECEIVERS) - untrained
     limit = [r for r in rows if r["attack"] == "pilot_whole_allocation"]
     assert {r["receiver"] for r in limit} == {
         "standard",
