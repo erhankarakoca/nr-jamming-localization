@@ -321,4 +321,5 @@ uv run python -m jamloc.experiments.resolution table $M --qam
 uv run python -m jamloc.experiments.resolution sweep results/v9/sweep_hop/recovery results/v9/sweep_nom/recovery --out results/v9/resolution_sweep
 ```
 
-The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`.
+The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`, and
+`plan-v10.md` lists what the next revision of the paper should add.
