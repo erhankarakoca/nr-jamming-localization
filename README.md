@@ -39,9 +39,9 @@ the map.</sub>
 | --- | --- | --- |
 | Detection | Cell-level F1 0.954 at 0.7% per-cell false alarms, 0.92 to 0.97 on hopping, pilot-comb, long-delay, fast and 16-QAM grids, and 0.82 on a pulsed jammer it never saw | Test grids (TDL-A and TDL-C, JSR −15 to +9 dB), three seeds (section 26 of the results) |
 | Decoding | Block error rate 89.8% with the baseline receiver and 0.12% with the U-Net map and shrinkage, the same as with the true map | Pilot + data jamming at +9 dB JSR on 4 of 12 PRBs, TDL-C, 15 dB SNR, 30,720 slots (section 27 of the results) |
-| Resolution and maps | Hopping data jamming: one jamming estimate per PRB fails on 51% of the slots, shrinkage without any map on none of 30,720. With 16-QAM the U-Net map lowers the block error rate by up to 12.6 percentage points over shrinkage alone and stays within 0.73 of the true map. An EVM map raises it by up to 29 points | +9 dB JSR, TDL-C, 15 dB SNR (QPSK) and 18 dB (16-QAM), one decoding attempt (section 27 of the results) |
+| Resolution and maps | Hopping data jamming: one jamming estimate per PRB fails on 51% of the slots, shrinkage without any map on none of 30,720. With 16-QAM the U-Net map lowers the block error rate by up to 12.6 percentage points over shrinkage alone and stays within 0.73 of the true map. With QPSK and every pilot jammed, an EVM map raises it by 29 points over shrinkage alone | +9 dB JSR, TDL-C, 15 dB SNR (QPSK) and 18 dB (16-QAM), one decoding attempt (section 27 of the results) |
 | Unseen jammer | Pulsed jammer, in no training mix: at most 0.02% block errors with the U-Net map and shrinkage | +9 dB JSR, TDL-C, 15 dB SNR (section 27 of the results) |
-| Jammer width | 0.06%, 2.1% and 38% with the map when 4, 6 and 8 of 12 PRBs are jammed (standard receiver: 53%, 79%, 92%) | Partial-band jamming at +3 dB JSR, TDL-C, 15 dB SNR |
+| Jammer width | 0.06%, 2.1% and 38% with the map of the earlier U-Net, trained on block jammers and QPSK only, when 4, 6 and 8 of 12 PRBs are jammed, against 53%, 79% and 92% with the baseline receiver | Partial-band jamming at +3 dB JSR, TDL-C, 15 dB SNR (section 22 of the results) |
 | Speed | 0.68 ms per slot to compute the features and run the U-Net | One core of an Apple M1 Pro, 24-PRB allocation; channel estimation, equalization and decoding not included |
 
 These come from a synchronized, single-antenna simulation with known noise power.
@@ -60,13 +60,16 @@ uv run pytest
 ```
 
 [`notebooks/01_link_walkthrough.ipynb`](notebooks/01_link_walkthrough.ipynb) steps through one
-slot. To rebuild the paper's results on a GPU:
+slot. `paper_run` rebuilds the datasets, models and detection results of the earlier paper drafts
+on a GPU:
 
 ```bash
 uv run python -m jamloc.experiments.paper_run --seeds 0 1 2
 ```
 
-[docs/reproducing.md](docs/reproducing.md) lists every other experiment, and
+The current paper reads the general training runs and the paper v9 runs (sections 26 and 27 of
+the results), whose commands close [docs/reproducing.md](docs/reproducing.md). That file also
+lists every other experiment, and
 [docs/development.md](docs/development.md) covers Colab, VS Code, the code map and the Overleaf
 paper.
 

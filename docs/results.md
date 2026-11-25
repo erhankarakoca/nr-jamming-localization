@@ -1906,7 +1906,7 @@ moves and gains up to 12.8 where it fills its rows. With QPSK the true map is wo
 is worth up to 9.3 points on a block and 13.5 under hopping. The U-Net delivers part of this on
 the attacks it was trained on and costs up to 19 points on the hopping jammer it never saw.
 
-## 26. General training: one detector for every jammer, channel and modulation
+## 26. General training for every jammer, channel and modulation
 
 Round of 25 Nov 2026 (branch `mixed-training`), run on an RTX 4070 laptop GPU. The U-Net of
 section 25 was trained only on block jammers, nominal channels and QPSK, so it was tested on hopping and
@@ -1930,8 +1930,9 @@ falling while the validation loss rose. The nominal U-Net was trained again on t
 `paper_run` (15 epochs, cosine). An ablation, `train_gen_short`, leaves out the long delay spreads
 (12 conditions).
 
-**Detection** (`experiments.general_training`, three seeds each, F1 / false alarms on scored
-cells, thresholds from each training's validation split, SNR 10-25 dB on the 16-QAM grids):
+**Detection.** The table gives F1 / false alarms on scored cells over three seeds each
+(`experiments.general_training`). The thresholds come from each training's validation split, and
+the 16-QAM grids use SNR 10-25 dB.
 
 | Test grid | Nominal | General | General, no long delays |
 | --- | --- | --- | --- |
@@ -1944,9 +1945,10 @@ cells, thresholds from each training's validation split, SNR 10-25 dB on the 16-
 | 16-QAM hopping | 0.576 / 10.0% | 0.940 / 1.2% | 0.939 / 1.4% |
 | pulsed (in no mix) | 0.633 / 10.9% | 0.821 / 3.8% | 0.799 / 4.6% |
 
-Standard deviations over seeds are at most 0.013. Pd of jammed scheduled pilot cells at -15 dB
-JSR with the threshold set to 1% false alarms on each grid's own clean cells, nominal / general /
-no long delays: matched 0.58 / 0.49 / 0.57, 16-QAM 0.77 / 0.71 / 0.76.
+Standard deviations over seeds are at most 0.013. With the threshold set to 1% false alarms on
+each grid's own clean cells, the Pd of jammed scheduled pilot cells at -15 dB JSR is 0.58 / 0.49 /
+0.57 on the matched grid and 0.77 / 0.71 / 0.76 on the 16-QAM grid, for the nominal, general and
+no-long-delay U-Nets in that order.
 
 **Reading.**
 - General training improves F1 on every grid and keeps false alarms at 0.4 to 1.5% except on the
@@ -1957,12 +1959,14 @@ no long delays: matched 0.58 / 0.49 / 0.57, 16-QAM 0.77 / 0.71 / 0.76.
   network trained on them learns to trust it less. A residual whose `tau_max` adapts to the UE
   would avoid the trade-off.
 
-**Decoding** (`experiments.recovery` with the receivers `gen_soft` and `gen_shrink`, TDL-C, one
-attempt, three detector seeds with up to 1 600 slots each, new slots that differ from those of
-section 25, a receiver stops after 100 block errors with QPSK and 200 with 16-QAM, pooled BLER %,
-`python -m jamloc.experiments.general_training --decoding results/gen_recovery`):
+**Decoding.** These runs use `experiments.recovery` with the receivers `gen_soft` and
+`gen_shrink` on TDL-C, with one decoding attempt and three detector seeds of up to 1 600 slots
+each. The slots differ from those of section 25, and a receiver stops after 100 block errors with
+QPSK and 200 with 16-QAM. The tables give the pooled BLER in percent
+(`python -m jamloc.experiments.general_training --decoding results/gen_recovery`). The runs came
+before the recovery experiment switched to the general U-Net, so today they need `--unet nominal`.
 
-QPSK, 15 dB SNR, jammer on 4 of 12 PRBs at +9 dB, or on every pilot of the allocation:
+QPSK at 15 dB SNR, with the jammer on 4 of 12 PRBs at +9 dB or on every pilot of the allocation.
 
 | Receiver | hopping data | hopping partial | every pilot +3 | every pilot +9 | block pilot | block data | block partial | no jammer |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1974,7 +1978,7 @@ QPSK, 15 dB SNR, jammer on 4 of 12 PRBs at +9 dB, or on every pilot of the alloc
 | General U-Net, shrinkage | 0/4800 | 0.29 | 4.52 | 39.7 | 0/4800 | 0/4800 | 0.10 | 0/4800 |
 | True map, shrinkage | 0/4800 | 0.25 | 4.10 | 38.4 | 0/4800 | 0/4800 | 0.10 | 0/4800 |
 
-16-QAM (MCS 13), 18 dB SNR, +3 / +9 dB JSR:
+16-QAM (MCS 13) at 18 dB SNR, with +3 / +9 dB JSR.
 
 | Receiver | block pilot | block data | block partial | hopping data | hopping partial |
 | --- | --- | --- | --- | --- | --- |
@@ -1989,16 +1993,16 @@ QPSK, 15 dB SNR, jammer on 4 of 12 PRBs at +9 dB, or on every pilot of the alloc
 Without a jammer, every receiver except no protection (0.04%) and no map (0.02%) decoded all 4 800
 16-QAM slots.
 
-**Paired differences** (points, 95% Newcombe interval, common slots), general U-Net with
-shrinkage minus:
-- the true map with shrinkage: at most +0.19 on 16-QAM blocks, +0.06 / +0.06 and +0.50 (0.29 to
+**Paired differences** of the general U-Net with shrinkage against three receivers, in points
+with 95% Newcombe intervals on common slots.
+- Minus the true map with shrinkage, at most +0.19 on 16-QAM blocks, +0.06 / +0.06 and +0.50 (0.29 to
   0.73) / +0.69 (0.44 to 0.95) under 16-QAM hopping, +0.04 (-0.06 to 0.16) under QPSK hopping
   partial, +0.42 (0.21 to 0.64) and +1.08 (0.27 to 1.90, 832 slots) with every pilot jammed.
-- no map with shrinkage: -0.33 (-0.56 to -0.14) under QPSK hopping partial, -0.56 (-0.94 to
+- Minus no map with shrinkage, -0.33 (-0.56 to -0.14) under QPSK hopping partial, -0.56 (-0.94 to
   -0.19) and -2.47 (-4.37 to -0.57) with every pilot jammed, -0.50 to -9.80 (-10.81 to -8.83) on
   16-QAM blocks, -1.56 / -1.12 and -8.07 (-8.89 to -7.29) / -12.95 (-14.23 to -11.72) under
   16-QAM hopping. QPSK blocks within 0.08, intervals including zero.
-- the nominal U-Net with shrinkage: -0.62 and -6.72 (-7.54 to -5.98) under QPSK hopping, -0.77 to
+- Minus the nominal U-Net with shrinkage, -0.62 and -6.72 (-7.54 to -5.98) under QPSK hopping, -0.77 to
   -4.71 on 16-QAM blocks, -32.5 to -61.7 under 16-QAM hopping.
 
 **Reading.**
@@ -2014,17 +2018,18 @@ shrinkage minus:
 - The general U-Net's lower weak-pilot Pd does not show in decoding, because jamming that weak
   barely hurts the link.
 
-## 27. Paper v9: one U-Net and more Monte Carlo
+## 27. Paper v9 with one U-Net and more Monte Carlo runs
 
 Round of 25 Nov 2026 (branch `mixed-training`), run on an RTX 4070 laptop GPU. Every result of
 `conference-v9.tex` comes from these runs. The U-Net behind the `p_r_e_*` receivers is the general
 one of section 26, which is now the default of the recovery experiment (`--unet general`, threshold
 from `val_gen`). Each seed decodes until 70 block errors or 160 batches of 64 slots, so a point
 pooled over three seeds rests on at least 210 block errors or 30 720 slots. All 431 receiver points
-meet this rule. The commands are under "Paper v9" in `reproducing.md`.
+meet this rule. The commands are under "Paper v9" in `reproducing.md`. The decoding runs of the
+earlier sections used the U-Net trained on the nominal mix, and `--unet nominal` repeats them.
 
-**QPSK** (TDL-C, 15 dB SNR, +9 dB JSR unless stated, BLER %, pooled over three seeds, a zero means
-no block error in 30 720 slots):
+**QPSK** on TDL-C at 15 dB SNR and +9 dB JSR unless stated. The table gives the BLER in percent
+pooled over three seeds, and a zero means no block error in 30 720 slots.
 
 | Map | Estimate | no jammer | pilot only | data only | pilot + data | pulsed data | pulsed pilot + data | hopping data | hopping pilot + data | every pilot +3 | every pilot +9 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -2039,7 +2044,7 @@ no block error in 30 720 slots):
 | true | PRB average | 0 | 0.02 | 0.08 | 0.11 | 0 | 0.01 | 0 | 0.24 | 3.92 | 38.7 |
 | true | shrinkage | 0 | 0.02 | 0.08 | 0.12 | 0 | 0.01 | 0 | 0.24 | 3.92 | 38.7 |
 
-**16-QAM** (MCS 13, 18 dB SNR, BLER % at +3 / +9 dB JSR):
+**16-QAM** at MCS 13 and 18 dB SNR, with the BLER in percent at +3 / +9 dB JSR.
 
 | Map | Estimate | pilot only | data only | pilot + data | hopping data | hopping pilot + data |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -2053,7 +2058,7 @@ no block error in 30 720 slots):
 | true | cell estimate | 0.44 / 1.11 | 7.23 / 7.81 | 7.19 / 8.49 | 0.53 / 0.49 | 3.79 / 6.49 |
 | true | shrinkage | 0.44 / 1.11 | 4.44 / 7.21 | 5.07 / 7.67 | 0.36 / 0.44 | 3.40 / 6.28 |
 
-**Paired differences** (percentage points, 95% Newcombe interval, common slots):
+**Paired differences** in percentage points, with 95% Newcombe intervals on common slots.
 - No map, PRB average minus shrinkage under hopping, 51.0 (46.6 to 55.3) data only and 57.6 (52.9
   to 62.1) pilot + data. The PRB average is 24.4 (19.8 to 28.8) worse than the baseline receiver
   under data-only hopping.
