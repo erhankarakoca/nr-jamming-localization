@@ -86,9 +86,10 @@ def _power_pvalues(y, no) -> torch.Tensor:
     """P-values ``[B, B_c, num_symbols]`` of the received power of every carrier cell without the
     UE's signal: its mean energy over the 12 subcarriers divided by N0 is Gamma(12, 1/12)."""
     unit = (y.abs() ** 2).reshape(y.shape[0], y.shape[1], -1, 12) / no[:, None, None, None]
-    pv = torch.special.gammaincc(torch.tensor(12.0), unit.sum(-1))
+    twelve = unit.new_tensor(12.0)  # on the device of y, also on a GPU
+    pv = torch.special.gammaincc(twelve, unit.sum(-1))
     if PEAKS:
-        pv = _with_peak(pv, unit.amax(-1), torch.tensor(12.0))
+        pv = _with_peak(pv, unit.amax(-1), twelve)
     return pv.transpose(1, 2)
 
 
