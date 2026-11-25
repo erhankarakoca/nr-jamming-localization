@@ -2096,3 +2096,77 @@ jammed at +9 dB, the BLER of the U-Net receiver falls from 39.8% to 17.8%, by 21
 - Trained on the conditions it meets, the U-Net map is close to the true map everywhere tested and
   pays off where the cell's own energy is ambiguous, with 16-QAM and when every pilot is jammed.
 - The EVM map raises the BLER because it marks the damaged data symbols and never the jammed pilots.
+
+## 28. Paper v10 with 16-QAM curves and clearer method figures
+
+Round of 25 Nov 2026 (branch `paper-v10`), run on an Apple M1 Pro (10 cores, no GPU) after the
+Colab L4 and A100 runtimes were unavailable. The commands are under "Paper v10" in
+`reproducing.md`. `docs/plan-v10.md` lists what this round answers.
+
+**Method figures.** The link output now keeps the jamming signal at the gNB (`SlotBatch.y_jam`),
+so the figures can show the jamming power that reached each cell, in units of the jammer's power
+per resource element. The shrinkage example (`figures.shrinkage_example`) marks this power next to
+the cell estimate, the PRB average and the shrinkage estimate. The attack-map figure
+(`figures.attack_maps`) now shows three attacks (a block on the pilots, the hopping jammer and the
+pulsed jammer on pilots and data, +6 dB JSR, 15 dB SNR). Next to the U-Net and EVM maps it shows
+the jamming power that the receiver assigns without a map, from shrinkage on the data cells and
+from the pilot residual on the DMRS cells. A pilot noise variance sigma^2 R_b corresponds to the
+jamming power (R_b - 1) N0 on that pilot, since sigma^2 = N0 / E_p and jamming of power S adds
+S / E_p to the variance of an LS value. On the example slot the U-Net misses no jammed cell in the
+three attacks, while the EVM threshold marks 28 clean data cells under pilot jamming.
+
+**16-QAM against JSR** (MCS 13, 18 dB SNR, TDL-C, pilots and data jammed, general U-Net, three
+seeds, at least 210 block errors or 30 720 slots per point). BLER in percent.
+
+Block of 4 PRBs on pilots and data.
+
+| Receiver | -9 dB | -6 dB | -3 dB | +0 dB | +3 dB | +6 dB | +9 dB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline receiver | 18.3 | 45.8 | 70.1 | 80.7 | 97.4 | 98.7 | 99.7 |
+| no map, PRB average | 1.51 | 2.86 | 4.29 | 5.83 | 8.84 | 11.4 | 17.9 |
+| no map, shrinkage | 1.69 | 3.35 | 4.89 | 6.46 | 9.64 | 11.7 | 18.6 |
+| EVM map, shrinkage | 13.7 | 42.5 | 63.6 | 75.3 | 84.9 | 74.7 | 72.1 |
+| U-Net map, shrinkage | 0.91 | 2.04 | 2.91 | 4.09 | 5.95 | 6.89 | 8.36 |
+| true map, shrinkage | 0.85 | 1.83 | 2.87 | 4.04 | 5.77 | 6.59 | 8.26 |
+
+Hopping jammer on pilots and data.
+
+| Receiver | -9 dB | -6 dB | -3 dB | +0 dB | +3 dB | +6 dB | +9 dB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline receiver | 3.4 | 15.2 | 40.5 | 66.4 | 87.2 | 96.1 | 97.9 |
+| no map, PRB average | 2.12 | 10.4 | 30.2 | 60.7 | 86.7 | 98.2 | 99.7 |
+| no map, shrinkage | 0.86 | 2.64 | 5.19 | 8.36 | 11.7 | 15.8 | 19.7 |
+| EVM map, shrinkage | 2.14 | 11.2 | 28.4 | 37.5 | 46.5 | 49.4 | 56.5 |
+| U-Net map, shrinkage | 0.24 | 0.52 | 1.09 | 2.1 | 3.45 | 5.49 | 7.37 |
+| true map, shrinkage | 0.19 | 0.42 | 0.87 | 1.75 | 2.92 | 4.67 | 6.62 |
+
+Paired differences in percentage points on common slots, with 95% Newcombe intervals.
+
+- Block, U-Net map minus no map, both with shrinkage. -9 dB -0.78 (-0.95 to -0.63), -6 dB -1.36 (-1.69 to -1.05), -3 dB -1.81 (-2.26 to -1.40), +0 dB -2.24 (-2.82 to -1.70), +3 dB -3.26 (-4.09 to -2.49), +6 dB -4.64 (-5.68 to -3.66), +9 dB -10.86 (-12.71 to -9.11).
+- Block, U-Net map minus true map. -9 dB +0.04 (+0.01 to +0.08), -6 dB +0.18 (+0.09 to +0.28), -3 dB +0.07 (-0.02 to +0.16), +0 dB +0.08 (-0.03 to +0.19), +3 dB +0.22 (+0.04 to +0.41), +6 dB +0.29 (+0.07 to +0.52), +9 dB +0.20 (-0.02 to +0.43).
+- Block, PRB average minus shrinkage, no map. -9 dB -0.19 (-0.29 to -0.09), -6 dB -0.47 (-0.68 to -0.28), -3 dB -0.57 (-0.86 to -0.29), +0 dB -0.80 (-1.16 to -0.46), +3 dB -0.67 (-1.08 to -0.29), +6 dB -0.36 (-0.70 to -0.05), +9 dB -0.66 (-1.28 to -0.05).
+- Hopping, U-Net map minus no map, both with shrinkage. -9 dB -0.64 (-0.75 to -0.55), -6 dB -2.12 (-2.46 to -1.83), -3 dB -4.21 (-4.86 to -3.62), +0 dB -6.45 (-7.48 to -5.50), +3 dB -7.97 (-9.28 to -6.76), +6 dB -10.33 (-12.01 to -8.75), +9 dB -12.59 (-14.59 to -10.70).
+- Hopping, U-Net map minus true map. -9 dB +0.05 (+0.02 to +0.08), -6 dB +0.10 (+0.06 to +0.15), -3 dB +0.19 (+0.12 to +0.26), +0 dB +0.34 (+0.22 to +0.47), +3 dB +0.54 (+0.34 to +0.75), +6 dB +0.76 (+0.48 to +1.06), +9 dB +0.68 (+0.37 to +1.02).
+- Hopping, PRB average minus shrinkage, no map. -9 dB +1.34 (+1.12 to +1.59), -6 dB +7.43 (+6.35 to +8.63), -3 dB +23.44 (+20.45 to +26.52), +0 dB +49.74 (+44.50 to +54.54), +3 dB +75.52 (+70.69 to +79.37), +6 dB +83.85 (+79.61 to +87.12), +9 dB +81.77 (+77.45 to +85.29).
+
+**Reading.**
+
+- Every point meets the Monte Carlo rule of section 27. Pooled over the seeds, each rests on at
+  least 210 block errors or 30 720 slots.
+- With 16-QAM the U-Net map pays off at every JSR, by 0.6 to 12.6 percentage points, and the gain
+  grows with the JSR. It stays within 0.8 points of the true map.
+- On a block, the PRB average without a map is 0.2 to 0.8 points better than shrinkage. Under the
+  hopping jammer it fails on up to 99.7% of the blocks, and at +9 dB more often than the baseline
+  receiver (97.9%).
+- The EVM map, whose threshold comes from the QPSK split `val`, fails on 14% to 85% of the blocks
+  under the block jammer and on 2% to 57% under the hopping jammer. As with QPSK, it never marks
+  the jammed pilots.
+
+**Paper v10** (`conference-v10.tex` on Overleaf, six pages). It adds a TikZ diagram of the link
+and the receiver (Fig. 1), presents the method in the receiver's order (pilot weights, unexplained
+energy, shrinkage), says why the estimate is pooled along the PRB and not along the symbol, and
+explains that the estimate locates the jammer softly. A new subsection describes the U-Net and
+gives its detection F1 on each test grid (section 26). Fig. 2 to Fig. 4 are the figures above.
+The subsection on further decoding attempts was left out to keep six pages. It stays in v9 and in
+the long version. An independent review checked all 91 table entries and the text against the
+result files and found no mismatch. Its points on wording and precision were applied.
