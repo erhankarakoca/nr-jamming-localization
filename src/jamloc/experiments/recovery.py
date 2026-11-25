@@ -70,7 +70,11 @@ Every point is simulated in the original order and with the original number of b
 random draws do not depend on which receivers decode); its counts must reproduce the earlier
 CSV, which ``check_replay`` verifies.
 
-    python -m jamloc.experiments.recovery --channel C --seeds 0 1 2 --replay results/recovery_pr9
+    python -m jamloc.experiments.recovery --channel C --seeds 0 1 2 --unet nominal \\
+        --replay results/recovery_pr9
+
+The U-Net map comes from the general U-Net by default. Runs made before the paper v9 runs used
+the U-Net trained on the nominal mix, and ``--unet nominal`` repeats them.
 """
 
 import argparse
@@ -691,8 +695,10 @@ def simulate(
         elif det == "fused":
             options, val_split = unet_source(unet)
             if not checkpoint_path("fused", seed, **options).is_file():
+                other = " or pass --unet nominal for the U-Net of the earlier results"
                 raise FileNotFoundError(
-                    f"no {unet} U-Net for seed {seed}; train it with {TRAIN_COMMANDS[unet]}"
+                    f"no {unet} U-Net for seed {seed}. Train it with {TRAIN_COMMANDS[unet]}"
+                    + (other if unet == "general" else "")
                 )
             model = load_model("fused", seed, **options)
         elif det in TRAINED_ON:

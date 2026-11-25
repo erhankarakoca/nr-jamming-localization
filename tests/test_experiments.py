@@ -1,4 +1,5 @@
 import csv
+from pathlib import Path
 
 import pytest
 
@@ -98,7 +99,7 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
 
     args = ["--channel", "A", "--batch-size", "8", "--max-mc-iter", "1", "--jsr-db", "-3", "3"]
     # The general U-Net is the default, and none is trained here: the error names its command
-    with pytest.raises(FileNotFoundError, match="general_training"):
+    with pytest.raises(FileNotFoundError, match="general_training.*--unet nominal"):
         recovery.main(args)
     args = ["--unet", "nominal", *args]  # first, so that args[-2:] stay the JSR values
     recovery.main(args)
@@ -267,3 +268,23 @@ def test_estimated_noise_keeps_the_unet_trained_on_it(monkeypatch):
     with pytest.raises(Loaded):
         recovery.simulate("C", 15.0, [9.0], 8, 1, 10, seed=0, noise_estimate="comb", unet="general")
     assert calls == [("fused", "nest")]
+
+
+def test_general_unet_takes_its_threshold_from_val_gen(monkeypatch):
+    from jamloc.experiments import recovery
+
+    class Calibrated(Exception):
+        pass
+
+    def fake_val_threshold(detector, model=None, val_split=None):
+        if detector == "fused":
+            raise Calibrated(val_split)
+        return 0.0
+
+    monkeypatch.setattr(recovery, "load", lambda split: {})
+    monkeypatch.setattr(recovery, "load_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr(recovery, "checkpoint_path", lambda *a, **k: Path(__file__))
+    monkeypatch.setattr(recovery, "val_threshold", fake_val_threshold)
+    with pytest.raises(Calibrated) as raised:
+        recovery.simulate("C", 15.0, [9.0], 8, 1, 10, seed=0, unet="general")
+    assert raised.value.args == ("val_gen",)
