@@ -208,7 +208,7 @@ def sweep(folders: list[Path], out: Path, panels=SWEEP_PANELS, groups=()) -> Non
                 data[(stem, *key)] = v
     with paper_style():
         if groups:  # one subfigure per group, with its label on top
-            fig = Figure(figsize=(7.16, 2.15), layout="constrained")
+            fig = Figure(figsize=(7.16, 1.9), layout="constrained")
             widths = [last - first + 1 for first, last, _ in groups]
             subfigs = fig.subfigures(1, len(groups), width_ratios=widths, wspace=0.01)
             axes = []

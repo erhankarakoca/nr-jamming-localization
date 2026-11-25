@@ -1528,9 +1528,9 @@ def attack_maps(jsr_db: float = 6.0, snr_db: float = 15.0, seed: int | None = No
     dmrs = np.zeros((n, CFG.num_symbols), dtype=bool)
     dmrs[:, list(CFG.dmrs_symbols)] = True
 
-    width, height = TEXT_WIDTH, 3.2
+    width, height = TEXT_WIDTH, 3.0
     fig = Figure(figsize=(width, height))
-    left, panel_w, gap, panel_h, row_gap, bottom = 0.62, 1.5, 0.14, 0.68, 0.14, 0.62
+    left, panel_w, gap, panel_h, row_gap, bottom = 0.62, 1.5, 0.14, 0.62, 0.13, 0.6
     # Columns: the two power panels side by side, then the two maps
     titles = (
         "(a) Jamming power received",
