@@ -86,3 +86,17 @@ def test_sweep_uses_the_names_of_the_paper():
         "(c) Hopping, data only",
         "(d) Hopping, pilot + data",
     ]
+
+
+def test_sweep_axis_shows_the_lowest_measured_point(tmp_path, monkeypatch):
+    # One curve reaches 3 errors in 100,000 blocks, below the old fixed floor of 1e-4
+    rows = [
+        ("nomap_shrink", "data", "3.0", 50, 1000),
+        ("nomap_shrink", "data", "9.0", 3, 100_000),
+    ]
+    _run(tmp_path / "run" / "recovery", 0, rows, {})
+    saved = {}
+    monkeypatch.setattr(resolution, "save", lambda fig, out: saved.setdefault("fig", fig))
+    resolution.sweep([tmp_path / "run" / "recovery"], tmp_path / "sweep.pdf")
+    low, high = saved["fig"].axes[0].get_ylim()
+    assert low <= 3e-5 and high >= 0.05

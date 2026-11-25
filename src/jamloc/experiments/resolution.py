@@ -182,6 +182,11 @@ SWEEP_PANELS = [
 ]
 
 
+def bler_floor(values) -> float:
+    """Bottom of a log BLER axis, the decade below the lowest point drawn and at most 1e-4."""
+    return min(1e-4, 10.0 ** np.floor(np.log10(min(values, default=1e-4))))
+
+
 def sweep(folders: list[Path], out: Path) -> None:
     """BLER against JSR, one panel per case, for ``SWEEP_RECEIVERS``."""
     panels = SWEEP_PANELS
@@ -207,10 +212,11 @@ def sweep(folders: list[Path], out: Path) -> None:
                 style = {"color": color, "marker": marker, "ls": ls, "ms": 3, "lw": 1}
                 plot_bler(ax, x, errors, blocks, style, label)
             ax.set_yscale("log")
-            ax.set_ylim(1e-4, 1.2)
             ax.set_xlabel("JSR per jammed RE [dB]")
             ax.set_title(title, fontsize=7)
         axes[0].set_ylabel("BLER")
+        drawn = [y for ax in axes for line in ax.get_lines() for y in line.get_ydata() if y > 0]
+        axes[0].set_ylim(bler_floor(drawn), 1.2)  # the panels share their y axis
         legend = {}  # one entry per receiver, from whichever panel has its curve
         for ax in axes:
             for handle, label in zip(*ax.get_legend_handles_labels(), strict=True):
