@@ -2162,11 +2162,13 @@ Paired differences in percentage points on common slots, with 95% Newcombe inter
   under the block jammer and on 2% to 57% under the hopping jammer. As with QPSK, it never marks
   the jammed pilots.
 
-**Paper v10** (`conference-v10.tex` on Overleaf, six pages). It adds a TikZ diagram of the link
+**Paper v10** (`conference-v10.tex` on Overleaf, seven pages). It adds a TikZ diagram of the link
 and the receiver (Fig. 1), presents the method in the receiver's order (pilot weights, unexplained
 energy, shrinkage), says why the estimate is pooled along the PRB and not along the symbol, and
 explains that the estimate locates the jammer softly. A new subsection describes the U-Net and
-gives its detection F1 on each test grid (section 26). Fig. 2 to Fig. 4 are the figures above.
-The subsection on further decoding attempts was left out to keep six pages. It stays in v9 and in
+gives its detection F1 on each test grid (section 26), with a figure of the network at work on one
+hopping slot (`figures.unet_process`, its features, blocks drawn to the size of their grid and
+channel count, and the score and map). The other method figures are the ones above.
+The subsection on further decoding attempts was left out while the paper had six pages. It stays in v9 and in
 the long version. An independent review checked all 91 table entries and the text against the
 result files and found no mismatch. Its points on wording and precision were applied.
