@@ -132,9 +132,17 @@ def test_data_figures_and_gallery(tmp_path, monkeypatch):
     ):
         fig, caption = figures.FIGURES[name]()
         assert fig.axes and caption.count(". ") >= 1 and len(caption) > 120, name
-        if name == "attack_maps":  # true cells, U-Net and EVM over the 12-PRB allocation
-            assert len(fig.axes) == 3
-            assert all(np.size(ax.collections[0].get_array()) == 12 * 14 for ax in fig.axes)
+        if name == "attack_maps":  # three attacks x (power, estimate, U-Net, EVM), and a colorbar
+            panels = fig.axes[:12]
+            assert len(fig.axes) == 13
+            assert [ax.get_title() for ax in panels[:4]] == [
+                "(a) Jamming power received",
+                "(b) Jamming power estimated",
+                "(c) U-Net map",
+                "(d) EVM map",
+            ]
+            # every panel covers the 12-PRB allocation over the 14 OFDM symbols
+            assert all(np.size(ax.collections[0].get_array()) == 12 * 14 for ax in panels)
         if name == "detector_outputs":
             truth, evm, unet, pd = fig.axes
             for ax in (truth, evm, unet):
