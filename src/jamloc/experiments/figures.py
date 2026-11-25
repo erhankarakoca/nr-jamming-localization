@@ -1424,8 +1424,94 @@ def shrinkage_example(jsr_db: float = 9.0, seed: int = 7):
     return fig, caption
 
 
+def attack_maps(jsr_db: float = 6.0, seed: int | None = None):
+    """One slot under pilot jamming: the cells the jammer hits, the U-Net's map and the map of the
+    EVM threshold, over the allocation. The U-Net is the general one (``train_gen``)."""
+    from jamloc.experiments.recovery import detector_cells, unet_source, val_threshold
+
+    options, val_split = unet_source("general")
+    if not checkpoint_path("fused", 0, **options).is_file():
+        raise MissingInput("needs the general U-Net: python -m jamloc.experiments.general_training")
+    for split in (val_split, "val"):
+        if not (data_dir() / f"{split}.npz").is_file():
+            raise MissingInput(f"needs the {split} split: python -m jamloc.dataset --split {split}")
+    model = load_model("fused", 0, **options)
+    unet_thr = val_threshold("fused", model, val_split)
+    evm_thr = val_threshold("evm_threshold", None, "val")
+
+    # One example slot, and the three maps over the allocation [PRB, symbol]
+    seed = _example_seed("C") if seed is None else seed
+    out = _example_batch("pilot", jsr_db, 20.0, "C", seed)
+    a0, n = ALLOC
+    cells = slice(a0, a0 + n)
+    truth = out.labels[0, cells].bool().cpu().numpy()
+    unet = detector_cells(out, CFG, "fused", model, unet_thr)[0, cells].cpu().numpy()
+    evm = detector_cells(out, CFG, "evm_threshold", None, evm_thr)[0, cells].cpu().numpy()
+    dmrs = np.zeros_like(truth)
+    dmrs[:, list(CFG.dmrs_symbols)] = True
+
+    width, height = COLUMN_WIDTH, 1.55
+    fig = Figure(figsize=(width, height))
+    lefts = (0.32, 1.38, 2.44)
+    axes = [fig.add_axes((x / width, 0.5 / height, 0.98 / width, 0.82 / height)) for x in lefts]
+    x_edges, y_edges = np.arange(CFG.num_symbols + 1) - 0.5, np.arange(n + 1) - 0.5
+    cmap = ListedColormap([ALLOC_COLOR, DMRS_COLOR, JAM_COLOR])
+    titles = ("(a) Jammer", "(b) U-Net map", "(c) EVM map")
+    for k, (ax, title, marked) in enumerate(zip(axes, titles, (truth, unet, evm), strict=True)):
+        codes = np.where(marked, 2, np.where(dmrs, 1, 0))
+        ax.pcolormesh(
+            x_edges,
+            y_edges,
+            codes,
+            cmap=cmap,
+            vmin=-0.5,
+            vmax=2.5,
+            edgecolors="#B3B3B3",
+            linewidth=0.2,
+        )
+        _outline(ax, truth, color="black", lw=0.8)
+        ax.set(
+            xlim=(-0.5, CFG.num_symbols - 0.5),
+            ylim=(-0.5, n - 0.5),
+            xticks=[0, CFG.dmrs_symbol, CFG.num_symbols - 1],
+            yticks=[0, n - 1],
+            yticklabels=[a0, a0 + n - 1],
+        )
+        ax.set_title(title, fontsize=7, pad=2)
+        ax.grid(False)
+        ax.tick_params(direction="in", length=2, width=0.5, pad=1.5, labelsize=6, labelleft=k == 0)
+        ax.set_xlabel("OFDM symbol", fontsize=6.5, labelpad=1)
+    axes[0].set_ylabel("PRB", fontsize=6.5, labelpad=1)
+    fig.legend(
+        handles=[
+            Patch(facecolor=JAM_COLOR, label="Jammed or marked"),
+            Patch(facecolor=DMRS_COLOR, label="DMRS"),
+            Patch(facecolor=ALLOC_COLOR, label="Data"),
+            Patch(fill=False, edgecolor="black", label="Jammed cells"),
+        ],
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.0),
+        ncols=4,
+        frameon=False,
+        fontsize=6,
+        handlelength=1.2,
+        columnspacing=0.9,
+    )
+
+    jammed = np.flatnonzero(truth.any(axis=1)) + a0
+    caption = (
+        f"One slot under pilot jamming of PRBs {jammed[0]}-{jammed[-1]} at {jsr_db:+g} dB JSR "
+        f"(TDL-C, 20 dB SNR, the UE on PRBs {a0}-{a0 + n - 1}), with the jammed cells outlined. "
+        f"The U-Net marks {int((unet & truth).sum())} of the {int(truth.sum())} jammed DMRS cells, "
+        f"while the EVM threshold marks {int((evm & ~truth).sum())} data cells that the jammer "
+        "never touched."
+    )
+    return fig, caption
+
+
 FIGURES = {
     "jamming_estimates": jamming_estimates,
+    "attack_maps": attack_maps,
     "shrinkage_example": shrinkage_example,
     "after_decoding": after_decoding,
     "system_views": system_views,

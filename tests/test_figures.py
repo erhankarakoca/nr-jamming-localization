@@ -95,6 +95,10 @@ def _tiny_project(tmp_path, monkeypatch):
     generate("test", num_slots=60, batch_size=32)
     for variant in VARIANTS:
         train(variant, epochs=2, batch_size=32)
+    # A tiny general U-Net, for the map figure
+    generate("train_gen", num_slots=64, batch_size=32)
+    generate("val_gen", num_slots=32, batch_size=32)
+    train("fused", epochs=1, batch_size=32, data="gen")
 
     # A miniature interval export, with other seeds, attacks and JSRs to distinguish.
     out = tmp_path / "results" / "intervals"
@@ -123,9 +127,13 @@ def test_data_figures_and_gallery(tmp_path, monkeypatch):
         "detector_outputs",
         "training_curves",
         "constellations_with_map",
+        "attack_maps",
     ):
         fig, caption = figures.FIGURES[name]()
         assert fig.axes and caption.count(". ") >= 1 and len(caption) > 120, name
+        if name == "attack_maps":  # true cells, U-Net and EVM over the 12-PRB allocation
+            assert len(fig.axes) == 3
+            assert all(np.size(ax.collections[0].get_array()) == 12 * 14 for ax in fig.axes)
         if name == "detector_outputs":
             truth, evm, unet, pd = fig.axes
             for ax in (truth, evm, unet):
