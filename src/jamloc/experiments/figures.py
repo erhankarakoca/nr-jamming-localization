@@ -1641,7 +1641,166 @@ def attack_maps(jsr_db: float = 6.0, snr_db: float = 15.0, seed: int | None = No
     return fig, caption
 
 
+def unet_process(jsr_db: float = 6.0, snr_db: float = 15.0, seed: int | None = None):
+    """How the U-Net works on one slot of the hopping jammer on pilots and data: the three feature
+    maps of the carrier, the network with its channel counts and grid sizes, the score of every
+    cell and the map after the threshold, against the jammed cells."""
+    import dataclasses
+
+    from matplotlib.patches import FancyArrowPatch
+
+    from jamloc.experiments.recovery import detector_cells, unet_source, val_threshold
+    from jamloc.features import extract
+
+    options, val_split = unet_source("general")
+    if not checkpoint_path("fused", 0, **options).is_file():
+        raise MissingInput("needs the general U-Net: python -m jamloc.experiments.general_training")
+    if not (data_dir() / f"{val_split}.npz").is_file():
+        raise MissingInput(
+            f"needs the {val_split} split: python -m jamloc.dataset --split {val_split}"
+        )
+    model = load_model("fused", 0, **options)
+    thr = val_threshold("fused", model, val_split)
+
+    cfg = dataclasses.replace(CFG, jammer_hopping=True)
+    seed = _example_seed("C") if seed is None else seed
+    out = _example_batch("partial", jsr_db, snr_db, "C", seed, cfg=cfg)
+    feats = extract(out, cfg)[0].cpu().numpy()  # [7, 24, 14], dB features first
+    scores, marked = detector_cells(out, cfg, "fused", model, thr, return_scores=True)
+    prob = torch.sigmoid(scores[0]).cpu().numpy()
+    marked = marked[0].cpu().numpy()
+    truth = out.labels[0].bool().cpu().numpy()
+    dmrs, data = feats[4] > 0, feats[5] > 0
+    inputs = (
+        ("Power", feats[0], np.ones_like(dmrs)),
+        ("Residual", feats[1], dmrs),
+        ("EVM", feats[2], data),
+    )
+    a0, n = out.scenario.alloc_start, out.scenario.alloc_size
+
+    width, height = COLUMN_WIDTH, 2.15
+    fig = Figure(figsize=(width, height))
+    # One canvas in inches for the network, with the grid maps placed on top of it
+    canvas = fig.add_axes((0, 0, 1, 1))
+    canvas.set(xlim=(0, width), ylim=(0, height))
+    canvas.axis("off")
+    nb, ns = CFG.num_prb, CFG.num_symbols
+    x_edges, y_edges = np.arange(ns + 1) - 0.5, np.arange(nb + 1) - 0.5
+    map_w, map_h = 0.4, 0.43
+    gray = "0.3"
+
+    def grid_axes(x, y, title):
+        ax = fig.add_axes((x / width, y / height, map_w / width, map_h / height))
+        ax.set(xlim=(-0.5, ns - 0.5), ylim=(-0.5, nb - 0.5), xticks=[], yticks=[])
+        ax.set_title(title, fontsize=6, pad=1.5)
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.5)
+        # the allocation, which is all the receiver decodes
+        ax.add_patch(
+            Rectangle((-0.5, a0 - 0.5), ns, n, fill=False, ls=(0, (2, 1)), lw=0.5, ec=gray)
+        )
+        return ax
+
+    def text(x, y, s, **kw):
+        style = {"fontsize": 5.6, "ha": "center", "va": "center", "linespacing": 1.0}
+        canvas.text(x, y, s, **{**style, **kw})
+
+    def arrow(p, q, **kw):
+        style = {"arrowstyle": "-|>", "mutation_scale": 5, "lw": 0.6, "color": "0.15", **kw}
+        canvas.add_patch(FancyArrowPatch(p, q, shrinkA=0, shrinkB=0, **style))
+
+    # (a) The three features of the carrier, each on its own colour scale in dB
+    text(0.3, height - 0.07, "(a) Features", fontsize=6.5)
+    for k, (name, values, valid) in enumerate(inputs):
+        y = height - 0.27 - map_h - k * (map_h + 0.18)
+        ax = grid_axes(0.1, y, name)
+        ax.set_facecolor("#E8E8E8")
+        ax.pcolormesh(x_edges, y_edges, np.ma.masked_where(~valid, values), cmap=PARULA)
+
+    # (b) The network. Block height follows the grid rows, block width the channels
+    text(1.6, height - 0.07, "(b) U-Net", fontsize=6.5)
+    level = {0: (0.62, 1.62), 1: (0.36, 0.86), 2: (0.12, 0.37)}  # (bottom, top) per depth
+    blocks = {  # name: (left, channels, depth, colour)
+        "enc1": (0.72, 12, 0, "#9DB9E0"),
+        "enc2": (1.04, 24, 1, "#9DB9E0"),
+        "bottom": (1.4, 48, 2, "#BFBFBF"),
+        "dec2": (1.98, 24, 1, "#F2B880"),
+        "dec1": (2.44, 12, 0, "#F2B880"),
+    }
+    sizes = {0: "24x16", 1: "12x8", 2: "6x4"}
+    box = {}
+    for name, (x, ch, depth, color) in blocks.items():
+        lo, hi = level[depth]
+        w = ch * 0.0075
+        canvas.add_patch(Rectangle((x, lo), w, hi - lo, fc=color, ec=gray, lw=0.5))
+        box[name] = (x, lo, w, hi)
+        label = f"{ch} ch.\n{sizes[depth]}"
+        if depth == 0:
+            text(x + w / 2, lo - 0.09, label)
+        elif depth == 1:
+            text(x + w / 2, hi + 0.09, label)
+        else:
+            text(x + w + 0.15, (lo + hi) / 2, label)
+    (x1, lo1, w1, hi1), (x2, lo2, w2, hi2) = box["enc1"], box["enc2"]
+    (xb, _, wb, hib), (x3, lo3, w3, hi3), (x4, lo4, w4, hi4) = (
+        box["bottom"],
+        box["dec2"],
+        box["dec1"],
+    )
+    arrow((x1 + w1, lo1 + 0.12), (x2, hi2 - 0.12))  # 2x2 max pooling
+    arrow((x2 + w2, lo2 + 0.1), (xb, hib - 0.08))
+    arrow((xb + wb, hib - 0.08), (x3, lo3 + 0.1))  # 2x2 transposed convolution
+    arrow((x3 + w3, hi3 - 0.12), (x4, lo4 + 0.12))
+    text((x1 + w1 + x2) / 2, lo1 + 0.19, "pool", color=gray, fontsize=5.3)
+    text((x3 + w3 + x4) / 2, lo4 + 0.19, "up", color=gray, fontsize=5.3)
+    skip = {"ls": (0, (2, 1.5)), "color": "0.45"}
+    arrow((x1 + w1, hi1 - 0.18), (x4, hi4 - 0.18), **skip)  # skip connections
+    arrow((x2 + w2, hi2 - 0.14), (x3, hi3 - 0.14), **skip)
+    text((x1 + x4) / 2, hi1 - 0.11, "skip connections", color=gray, fontsize=5.3)
+    # in: three features and three masks; out: one logit per cell through a 1x1 convolution
+    arrow((0.52, (lo1 + hi1) / 2), (x1, (lo1 + hi1) / 2))
+    text(0.61, (lo1 + hi1) / 2 + 0.08, "6 ch.", fontsize=5.3)
+    xo = width - map_w - 0.08
+    arrow((x4 + w4, (lo4 + hi4) / 2 + 0.15), (xo, height - 0.27 - map_h / 2))
+    text((x4 + w4 + xo) / 2 + 0.02, (lo4 + hi4) / 2 + 0.38, "1x1\nconv.", fontsize=5.3)
+
+    # (c) The score of every cell and the map after the threshold, with the jammed cells outlined
+    text(xo + map_w / 2, height - 0.07, "(c) Output", fontsize=6.5)
+    score_y = height - 0.27 - map_h
+    ax = grid_axes(xo, score_y, "Score")
+    ax.pcolormesh(x_edges, y_edges, prob, cmap="Reds", vmin=0, vmax=1)
+    _outline(ax, truth, color="black", lw=0.5)
+    map_y = score_y - 0.3 - map_h
+    arrow((xo + map_w / 2, score_y - 0.02), (xo + map_w / 2, map_y + map_h + 0.11))
+    text(xo + map_w / 2 - 0.04, score_y - 0.1, "threshold", fontsize=5.3, ha="right")
+    ax = grid_axes(xo, map_y, "Map")
+    codes = np.where(marked, 2, np.where(dmrs, 1, 0))
+    ax.pcolormesh(
+        x_edges,
+        y_edges,
+        codes,
+        cmap=ListedColormap([ALLOC_COLOR, DMRS_COLOR, JAM_COLOR]),
+        vmin=-0.5,
+        vmax=2.5,
+    )
+    _outline(ax, truth, color="black", lw=0.5)
+
+    hit, miss = int((marked & truth).sum()), int((~marked & truth).sum())
+    false = int((marked & ~truth).sum())
+    caption = (
+        f"The U-Net on one slot of the hopping jammer on pilots and data ({jsr_db:+g} dB JSR, "
+        f"{snr_db:g} dB SNR, TDL-C, the UE on PRBs {a0}-{a0 + n - 1} dashed). (a) The received "
+        "power, the pilot residual and the EVM of every cell of the carrier, in dB on their own "
+        "colour scales. (b) The network, with blocks drawn to the size of their grid and channel "
+        "count. (c) The score of every cell and the map after the threshold, with the jammed cells "
+        f"outlined. The map marks {hit} of the {int(truth.sum())} jammed cells, misses {miss} and "
+        f"marks {false} clean cells."
+    )
+    return fig, caption
+
+
 FIGURES = {
+    "unet_process": unet_process,
     "jamming_estimates": jamming_estimates,
     "attack_maps": attack_maps,
     "shrinkage_example": shrinkage_example,

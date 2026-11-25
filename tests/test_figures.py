@@ -129,6 +129,7 @@ def test_data_figures_and_gallery(tmp_path, monkeypatch):
         "training_curves",
         "constellations_with_map",
         "attack_maps",
+        "unet_process",
     ):
         fig, caption = figures.FIGURES[name]()
         assert fig.axes and caption.count(". ") >= 1 and len(caption) > 120, name
@@ -143,6 +144,11 @@ def test_data_figures_and_gallery(tmp_path, monkeypatch):
             ]
             # every panel covers the 12-PRB allocation over the 14 OFDM symbols
             assert all(np.size(ax.collections[0].get_array()) == 12 * 14 for ax in panels)
+        if name == "unet_process":  # the canvas, three feature maps, the score and the map
+            assert len(fig.axes) == 6
+            maps = fig.axes[1:]
+            assert all(np.size(ax.collections[0].get_array()) == 24 * 14 for ax in maps)
+            assert "marks" in caption and "jammed cells" in caption
         if name == "detector_outputs":
             truth, evm, unet, pd = fig.axes
             for ax in (truth, evm, unet):
