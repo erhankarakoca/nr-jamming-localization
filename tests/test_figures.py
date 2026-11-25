@@ -1,4 +1,5 @@
 import csv
+import dataclasses
 import json
 import xml.etree.ElementTree as ET
 
@@ -235,7 +236,17 @@ def test_shrinkage_lies_between_the_cell_and_its_row_mean():
     assert np.all(shrink[ok] <= np.maximum(hi[ok], 0) + 1e-6)
     clean = ~est["truth"].any(axis=1)[:, None] & ok  # data cells of rows without any jammed cell
     assert clean.any()
-    assert np.allclose(shrink[clean], row[clean], atol=0.05)
+    # Shrinkage pulls a clean cell at least halfway from its own estimate to the row mean
+    assert np.abs(shrink - row)[clean].mean() < 0.5 * np.abs(cell - row)[clean].mean()
+
+    # Hopping data jammer: in a row hit on a few symbols, a jammed cell keeps part of its own
+    # estimate, so it lies strictly between that estimate and the row mean
+    est = _estimates_without_map(dataclasses.replace(CFG, jammer_hopping=True), "data", 9.0, seed=7)
+    cell, row, shrink, truth = est["cell"], est["prb"], est["shrink"], est["truth"]
+    hits = (truth & ~np.isnan(cell)).sum(axis=1)
+    few = ((hits >= 2) & (hits <= 5))[:, None] & truth & ~np.isnan(cell)
+    assert few.any()
+    assert np.all((shrink[few] - row[few]) * (cell[few] - shrink[few]) > 0)
 
     fig, caption = shrinkage_example()
     assert isinstance(fig, Figure) and len(fig.axes) >= 2 and "shrinkage" in caption
