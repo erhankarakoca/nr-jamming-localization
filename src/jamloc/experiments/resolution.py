@@ -270,7 +270,7 @@ def sweep_grid(root: Path, layout, out: Path, receivers=SWEEP_RECEIVERS_V11) -> 
                 for key, v in pooled(root / case / "recovery", stem).items():
                     data[(case, stem, *key)] = v
     with paper_style():
-        fig = Figure(figsize=(7.16, 1.85 * len(layout) + 0.35), layout="constrained")
+        fig = Figure(figsize=(7.16, 1.5 * len(layout) + 0.35), layout="constrained")
         row_figs = np.atleast_1d(fig.subfigures(len(layout), 1, hspace=0.02))
         axes, specs = [], []
         for row_fig, row in zip(row_figs, layout, strict=True):
@@ -298,9 +298,17 @@ def sweep_grid(root: Path, layout, out: Path, receivers=SWEEP_RECEIVERS_V11) -> 
             ax.set_xlabel("JSR per jammed RE [dB]", fontsize=6)
             ax.set_title(title, fontsize=7)
         drawn = [y for ax in axes for line in ax.get_lines() for y in line.get_ydata() if y > 0]
+        # the decade below the lowest point drawn (bler_floor would keep the axis down to 1e-4)
+        floor = 10.0 ** np.floor(np.log10(min(drawn, default=1e-4)))
+        # a hollow triangle (no block error) is drawn without a line style
+        zero_points = any(
+            line.get_linestyle() == "None" and len(line.get_ydata())
+            for ax in axes
+            for line in ax.get_lines()
+        )
         first = {id(ax.figure): ax for ax in axes[::-1]}  # first panel of each group
         for ax in axes:
-            ax.set_ylim(bler_floor(drawn), 1.2)
+            ax.set_ylim(floor, 1.2)
             if first[id(ax.figure)] is ax:
                 ax.set_ylabel("BLER")
         legend = {}
@@ -309,8 +317,9 @@ def sweep_grid(root: Path, layout, out: Path, receivers=SWEEP_RECEIVERS_V11) -> 
                 legend.setdefault(label, handle)
         labels = [s[0] for s in receivers.values() if s[0] in legend]
         handles = [legend[label] for label in labels]
-        handles.append(zero_error_handle())
-        labels.append(handles[-1].get_label())
+        if zero_points:
+            handles.append(zero_error_handle())
+            labels.append(handles[-1].get_label())
         fig.legend(handles, labels, loc="outside lower center", ncols=4, fontsize=6)
     save(fig, out)
 
@@ -320,8 +329,9 @@ V11_STEMS = {
     "q_nom": "recovery_C_snr8",
     "q_hop": "recovery_C_hopping_snr8",
     "q_whole": "recovery_C_snr8",
-    "m16_nom": "recovery_C_snr15_mcs13",
-    "m16_hop": "recovery_C_hopping_snr15_mcs13",
+    # recovery leaves its default SNR, 15 dB, out of the file name
+    "m16_nom": "recovery_C_mcs13",
+    "m16_hop": "recovery_C_hopping_mcs13",
     "m64_nom": "recovery_C_snr18_mcs17",
     "m64_hop": "recovery_C_hopping_snr18_mcs17",
     "d2_nom": "recovery_C_snr8_dmrs2",

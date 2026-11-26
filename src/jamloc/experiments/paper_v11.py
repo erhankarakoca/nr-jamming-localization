@@ -5,8 +5,8 @@ Every case is one ``jamloc.experiments.recovery`` run per seed of the v11 U-Net 
 slots). The sweeps decode the receivers of Fig. 5 from -9 to +9 dB JSR. The ``*9`` cases decode
 every receiver of the text at +9 dB (and +3 dB with every pilot jammed). Each modulation runs
 at the SNR where the baseline receiver fails on about 0.8% of the blocks without a jammer (random
-allocations, ``docs/plan-v11.md``): QPSK (MCS 5) at 8 dB, 16-QAM (MCS 13) at 15 dB and 64-QAM
-(MCS 17) at 18 dB. At the 15 dB of paper v10, the receivers that estimate the jamming power made
+allocations, see ``docs/plan-v11.md``). That is QPSK (MCS 5) at 8 dB, 16-QAM (MCS 13) at 15 dB and
+64-QAM (MCS 17) at 18 dB. At the 15 dB of paper v10, the receivers that estimate the jamming power made
 almost no errors with QPSK, so their curves followed chance.
 
     python -m jamloc.experiments.paper_v11 run ROOT [--cases ...] [--parallel 8]

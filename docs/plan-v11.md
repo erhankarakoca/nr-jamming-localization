@@ -108,12 +108,14 @@ frees about half a page, more than the second row takes.
 
 ## Code changes
 
-- `dataset.py`: the 64-QAM modulation condition, a DMRS axis, `ALL_CONDITIONS`, the splits
+- `dataset.py` gets the 64-QAM modulation condition, a DMRS axis, `ALL_CONDITIONS`, the splits
   `train_all` and `val_all`, and the 64-QAM and two-DMRS test grids.
-- `general_training.py`: the new training tag and test grids, and a comparison with the v10 U-Net.
-- `experiments/recovery.py`: a `--dmrs-additional-position` option (files get a `_dmrs2` suffix)
-  and the new U-Net under `--unet all`.
-- `experiments/resolution.py`: the v11 panels with the new curve.
+- `experiments/one_unet.py` generates and trains the new U-Net and compares it with the v10 one.
+- `experiments/recovery.py` gets a `--dmrs2` option (files get a `_dmrs2` suffix) and the new
+  U-Net under `--unet all`.
+- `experiments/paper_v11.py` holds the decoding cases, runs them and prints the quoted numbers.
+- `experiments/resolution.py` draws the two-row figure with the new curve (`sweep-v11`).
+- `experiments/figures.py` draws the attack maps and the U-Net figure with any U-Net (`--unet`).
 - Tests for each, then `docs/results.md` section 30 and the commands in `docs/reproducing.md`.
 
 ## Compute
