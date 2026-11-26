@@ -347,5 +347,33 @@ uv run python -m jamloc.experiments.figures --only shrinkage_example attack_maps
 
 The system and receiver diagram (Fig. 1) is drawn in TikZ inside the paper source.
 
+**Inputs and architecture (section 29).** Two ablations of the general U-Net, trained on
+`train_gen` like it. One drops the EVM input, and the other is a residual CNN of the same size that
+keeps the full resolution. The experiment generates the missing splits, trains both with three
+seeds and compares them with the general U-Net on the eight test grids. The decoding runs then give
+each map to the shrinkage receiver on fresh slots, under the Monte Carlo rule of v9. They ran on a
+Colab L4 (12 vCPUs), with all nine decoding processes in parallel on one thread each.
+
+```bash
+uv run python -m jamloc.experiments.input_ablation --seeds 0 1 2
+RX="nomap_shrink p_r_e_shrink pr_shrink resnet_shrink true_shrink"
+AB="--channel C --target-block-errors 70 --max-mc-iter 160 --receivers $RX"
+run() { mkdir -p results/input_ablation/$1 && ln -sfn "$PWD/results/models" results/input_ablation/$1/models
+  JAMLOC_RESULTS_DIR=results/input_ablation/$1 uv run python -m jamloc.experiments.recovery $AB --seeds $2 "${@:3}"; }
+for s in 0 1 2; do
+  run nom $s --attacks none pilot data partial --jsr-db 9
+  run whole $s --attacks pilot_whole_allocation --jsr-db 3 9
+  run hop $s --jammer hopping --jsr-db 9
+  run qam16 $s --snr-db 18 --mcs 13 --attacks none pilot data partial --jsr-db 9
+  run qamhop $s --snr-db 18 --mcs 13 --jammer hopping --jsr-db 9
+done
+# Pool the seeds (this writes the paired differences), then print the table
+for f in "nom" "whole" "hop --jammer hopping" "qam16 --snr-db 18 --mcs 13" "qamhop --jammer hopping --snr-db 18 --mcs 13"; do
+  set -- $f; JAMLOC_RESULTS_DIR=results/input_ablation/$1 uv run python -m jamloc.experiments.recovery \
+    --channel C "${@:2}" --plot-only
+done
+uv run python -m jamloc.experiments.input_ablation --decoding results/input_ablation
+```
+
 The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`, and
 `plan-v10.md` lists what the next revision of the paper should add.

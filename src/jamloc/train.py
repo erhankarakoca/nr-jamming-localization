@@ -14,7 +14,15 @@ from torch import nn
 
 from jamloc.config import SimConfig
 from jamloc.dataset import SPLITS, load
-from jamloc.model import ALL_VARIANTS, VARIANTS, PixelMLP, TinyUNet, noise_shift, select_inputs
+from jamloc.model import (
+    ALL_VARIANTS,
+    VARIANTS,
+    PixelMLP,
+    SlotResNet,
+    TinyUNet,
+    noise_shift,
+    select_inputs,
+)
 from jamloc.paths import results_dir
 
 
@@ -26,7 +34,9 @@ def _tensors(split: str, variant: str, device: str):
 
 
 DEFAULT_WIDTH = 12  # channels of the first U-Net level (66 553 parameters for the fused variant)
-ARCHS = ("unet", "pixel")  # the U-Net, or the per-cell MLP of the spatial-context ablation
+# the U-Net, the per-cell MLP of the spatial-context ablation, or the full-resolution residual CNN
+# of the multi-scale ablation (as many parameters as the U-Net)
+ARCHS = ("unet", "pixel", "resnet")
 PIXEL_HIDDEN = 64  # hidden units of the per-cell MLP (4 801 parameters for the fused inputs)
 PIXEL_HIDDEN_MATCHED = 252  # 66 277 parameters, about as many as the U-Net (66 553)
 
@@ -61,6 +71,8 @@ def build_model(
         return TinyUNet(in_channels, base=width)
     if arch == "pixel":
         return PixelMLP(in_channels, hidden)
+    if arch == "resnet":
+        return SlotResNet(in_channels)
     raise ValueError(f"unknown architecture {arch!r}")
 
 
@@ -77,9 +89,12 @@ def checkpoint_path(
     ``fused_mix_seed0.pt`` for one trained on ``train_mix`` (``data="mix"``),
     ``fused_pixel_seed0.pt`` for the per-cell MLP (``arch="pixel"``, no width),
     ``fused_pixel_h252_seed0.pt`` for a wider one (``hidden=252``),
-    ``fused_nj1_seed0.pt`` for one trained with +-1 dB noise-estimation error (``jitter=1``)."""
+    ``fused_nj1_seed0.pt`` for one trained with +-1 dB noise-estimation error (``jitter=1``),
+    ``fused_resnet_gen_seed0.pt`` for the residual CNN (``arch="resnet"``) trained on ``train_gen``."""
     if arch == "pixel":
         tag = f"{variant}_pixel" if hidden == PIXEL_HIDDEN else f"{variant}_pixel_h{hidden}"
+    elif arch == "resnet":
+        tag = f"{variant}_resnet"
     else:
         tag = variant if width == DEFAULT_WIDTH else f"{variant}_w{width}"
     tag = f"{tag}_{data}" if data else tag
@@ -134,6 +149,8 @@ def train(
     path = checkpoint_path(variant, seed, width, data, arch, jitter, hidden)
     path.parent.mkdir(parents=True, exist_ok=True)
     best = float("inf")
+    # how the log names the network (only the U-Net has a width)
+    net = f"unet width {width}" if arch == "unet" else arch
     gen = torch.Generator().manual_seed(seed)
     history = []  # one row per epoch, saved next to the checkpoint for the training-curve figure
     for epoch in range(epochs):
@@ -180,7 +197,7 @@ def train(
             {"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss, "lr": lr_used}
         )
         print(
-            f"[{variant}, {arch} width {width}, seed {seed}] epoch {epoch + 1}/{epochs}  "
+            f"[{variant}, {net}, seed {seed}] epoch {epoch + 1}/{epochs}  "
             f"train loss {train_loss:.4f}  val loss {val_loss:.4f}  lr {lr_used:.2e}  "
             f"({time.perf_counter() - start:.1f} s)",
             flush=True,
@@ -231,7 +248,9 @@ def main(argv=None):
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--seeds", type=int, nargs="+", default=[0])
     p.add_argument("--width", type=int, default=DEFAULT_WIDTH, help="channels of the first level")
-    p.add_argument("--arch", choices=ARCHS, default="unet", help="pixel: per-cell MLP ablation")
+    p.add_argument(
+        "--arch", choices=ARCHS, default="unet", help="pixel: per-cell MLP, resnet: residual CNN"
+    )
     p.add_argument("--hidden", type=int, default=PIXEL_HIDDEN, help="hidden units of the MLP")
     p.add_argument("--data", default="", help="train on train_<data> / val_<data> (e.g. dmrs2)")
     p.add_argument(

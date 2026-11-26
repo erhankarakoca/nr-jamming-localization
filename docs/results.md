@@ -2163,8 +2163,8 @@ Paired differences in percentage points on common slots, with 95% Newcombe inter
   the jammed pilots.
 
 **Paper v10** (`conference-v10.tex` on Overleaf, seven pages). It adds a TikZ diagram of the link
-and the receiver (Fig. 1), presents the method in the receiver's order (pilot weights, unexplained
-energy, shrinkage), says why the estimate is pooled along the PRB and not along the symbol, and
+and the receiver (Fig. 1), presents the method in the receiver's order (pilot weights, excess power,
+shrinkage), says why the estimate is pooled along the PRB and not along the symbol, and
 explains that the estimate locates the jammer softly. A new subsection describes the U-Net and
 gives its detection F1 on each test grid (section 26), with a figure of the network at work on one
 hopping slot (`figures.unet_process`, its features, blocks drawn to the size of their grid and
@@ -2172,3 +2172,101 @@ channel count, and the score and map). The other method figures are the ones abo
 The subsection on further decoding attempts was left out while the paper had six pages. It stays in v9 and in
 the long version. An independent review checked all 91 table entries and the text against the
 result files and found no mismatch. Its points on wording and precision were applied.
+On 26 Nov the term "unexplained energy" became "excess power" throughout the paper.
+
+## 29. Which inputs and which network
+
+Round of 26 Nov 2026 (branch `input-ablation`), run on a Colab L4 (12 vCPUs). The commands are
+under "Inputs and architecture" in `reproducing.md`.
+
+**Questions.** Does the EVM input still help once the pilot residual is there? The EVM rises on
+the data cells of a PRB whose pilots are jammed, and on fast or long-delay channels without any
+jammer. And is the U-Net's pooling path needed, or would any CNN of the same size do?
+
+**Detectors.** Two ablations of the general U-Net of section 26, trained on `train_gen` in the
+same way (up to 80 epochs, learning rate halved after a plateau, early stopping after 10 epochs,
+thresholds from `val_gen`, three seeds). *U-Net P+R* is the same U-Net without the EVM channel
+(66 445 parameters). *ResNet P+R+E* (`model.SlotResNet`) keeps the full 24 x 14 grid. One 3 x 3
+convolution lifts the inputs to 30 channels, four residual blocks of two 3 x 3 convolutions follow,
+and a 1 x 1 convolution gives the logits (66 991 parameters, against 66 553 for the U-Net). Each
+cell sees the 19 x 19 cells around it, whereas the U-Net's pooling lets every cell see the whole
+slot. The best validation loss was 0.117 to 0.120 for the U-Net, 0.123 to 0.124 for the ResNet and
+0.210 to 0.213 without the EVM. The training split and the test grids were generated again on the
+L4, and the general U-Net's F1 on these grids matches section 26 to within 0.001.
+
+**Detection.** F1 / false alarms on scored cells, mean over three seeds (standard deviations at most
+0.003).
+
+| Test grid | U-Net P+R+E | U-Net P+R | ResNet P+R+E |
+| --- | --- | --- | --- |
+| matched | 0.954 / 0.7% | 0.922 / 0.5% | 0.957 / 0.5% |
+| hopping | 0.923 / 1.5% | 0.867 / 1.3% | 0.925 / 1.2% |
+| pilot comb | 0.954 / 0.7% | 0.923 / 0.6% | 0.956 / 0.5% |
+| 1000 ns delay | 0.924 / 1.5% | 0.912 / 0.9% | 0.928 / 1.4% |
+| 30 m/s | 0.949 / 0.8% | 0.920 / 0.6% | 0.952 / 0.7% |
+| 16-QAM | 0.966 / 0.4% | 0.903 / 0.8% | 0.963 / 0.6% |
+| 16-QAM hopping | 0.940 / 1.2% | 0.859 / 1.8% | 0.937 / 1.3% |
+| pulsed (in no mix) | 0.822 / 3.8% | 0.794 / 2.8% | **0.907 / 1.3%** |
+
+F1 per attack type, and the Pd of jammed scheduled pilot cells at -15 dB JSR with the threshold
+that gives 1% false alarms on each grid's own clean cells.
+
+| Detector | Grid | F1 pilot | F1 data | F1 partial | Pilot Pd at -15 dB, 1% FA |
+| --- | --- | --- | --- | --- | --- |
+| U-Net P+R+E | matched | 0.871 | 0.957 | 0.960 | 0.50 |
+| U-Net P+R | matched | 0.904 | 0.915 | 0.930 | 0.54 |
+| ResNet P+R+E | matched | 0.879 | 0.959 | 0.962 | 0.57 |
+| U-Net P+R+E | 16-QAM | 0.911 | 0.966 | 0.972 | 0.71 |
+| U-Net P+R | 16-QAM | 0.851 | 0.885 | 0.925 | 0.64 |
+| ResNet P+R+E | 16-QAM | 0.795 | 0.969 | 0.973 | 0.72 |
+
+**Decoding.** Each map is given to the shrinkage receiver on the same fresh slots (TDL-C, QPSK at
+15 dB SNR or 16-QAM MCS 13 at 18 dB, the cases of Tables II and III of paper v10). Each seed runs
+until 70 block errors or 160 batches of 64 slots, and every point has at least 210 block errors or
+30 720 slots. BLER in percent, and paired differences in percentage points with 95% intervals.
+
+| Case | Point | No map | U-Net P+R+E | U-Net P+R | ResNet P+R+E | True map | U-Net P+R - U-Net P+R+E | ResNet P+R+E - U-Net P+R+E |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| QPSK block | data +9 dB | 0.08 | 0.07 | 0.11 | 0.07 | 0.07 | +0.04 (+0.02 to +0.07) | -0.00 (-0.01 to +0.01) |
+| QPSK block | no jammer | 0/30720 | 0/30720 | 0/30720 | 0/30720 | 0/30720 | -0.00 (-0.01 to +0.01) | -0.00 (-0.01 to +0.01) |
+| QPSK block | partial +9 dB | 0.13 | 0.08 | 0.15 | 0.09 | 0.08 | +0.07 (+0.04 to +0.10) | +0.00 (-0.01 to +0.02) |
+| QPSK block | pilot +9 dB | 0.06 | 0.03 | 0.02 | 0.02 | 0.01 | -0.01 (-0.03 to +0.00) | -0.01 (-0.03 to +0.00) |
+| QPSK hopping | data +9 dB | 0/30720 | 0/30720 | 0/30720 | 0/30720 | 0/30720 | -0.00 (-0.01 to +0.01) | -0.00 (-0.01 to +0.01) |
+| QPSK hopping | partial +9 dB | 0.42 | 0.25 | 0.25 | 0.20 | 0.18 | -0.00 (-0.04 to +0.04) | -0.05 (-0.08 to -0.02) |
+| QPSK every pilot | every pilot +3 dB | 5.06 | 4.23 | 4.33 | 3.90 | 3.79 | +0.08 (-0.14 to +0.31) | -0.34 (-0.55 to -0.13) |
+| QPSK every pilot | every pilot +9 dB | 43.23 | 38.72 | 37.85 | 37.67 | 37.50 | -0.87 (-1.84 to +0.10) | -1.04 (-1.95 to -0.14) |
+| 16-QAM block | data +9 dB | 9.51 | 6.70 | 8.44 | 6.61 | 6.58 | +1.95 (+1.41 to +2.54) | -0.09 (-0.25 to +0.06) |
+| 16-QAM block | no jammer | 0.01 | 0.01 | 0.01 | 0.01 | 0.01 | -0.00 (-0.01 to +0.01) | -0.00 (-0.01 to +0.01) |
+| 16-QAM block | partial +9 dB | 16.52 | 8.40 | 11.04 | 8.40 | 8.52 | +2.77 (+2.02 to +3.58) | -0.00 (-0.24 to +0.24) |
+| 16-QAM block | pilot +9 dB | 4.09 | 1.22 | 1.17 | 1.09 | 1.02 | -0.05 (-0.13 to +0.03) | -0.13 (-0.21 to -0.06) |
+| 16-QAM hopping | data +9 dB | 1.99 | 0.46 | 1.03 | 0.43 | 0.41 | +0.53 (+0.43 to +0.64) | -0.03 (-0.06 to -0.01) |
+| 16-QAM hopping | partial +9 dB | 22.06 | 7.57 | 9.20 | 7.11 | 6.53 | +1.48 (+0.76 to +2.22) | -0.45 (-0.86 to -0.06) |
+
+**Reading.**
+- **The EVM helps.** Without it F1 falls on every grid, most with 16-QAM (0.966 to 0.903) and
+  under hopping (0.923 to 0.867, and 0.940 to 0.859 with 16-QAM). On the matched grid, data-jamming
+  F1 falls from 0.957 to 0.915. The EVM costs a little on pilot attacks with QPSK. Without it the
+  network reaches pilot F1 0.904 instead of 0.871, because the raised EVM of the data cells of a
+  PRB whose pilots are jammed looks like data jamming (section 7). With 16-QAM the EVM helps pilot
+  attacks too (0.911 against 0.851).
+- **In decoding the map without the EVM is worse wherever data are jammed.** The gap is 1.95
+  percentage points (1.41 to 2.54) under data jamming of a 16-QAM block, 2.77 (2.02 to 3.58) under
+  pilot + data jamming, and 1.48 (0.76 to 2.22) under 16-QAM hopping on pilots and data. It is
+  never better by a significant margin. Its gain with every pilot jammed at +9 dB, 0.87 (-0.10 to
+  1.84), lies within the interval.
+- **The U-Net's pooling is not needed.** The ResNet matches it on every grid of the training mix
+  (F1 within 0.004) and does much better on the pulsed jammer, which no mix contained (0.907 with
+  1.3% false alarms against 0.822 with 3.8%). Its seeds also agree more closely. Its one weakness
+  is pilot jamming with 16-QAM (pilot F1 0.795 against 0.911). The DMRS is symbol 2, so the data
+  cells of the last symbols lie beyond its 19 cells and cannot tell a jammed pilot from jammed data.
+  These marks do not cost BLER. The excess power of those cells is real, since it comes from
+  the wrong channel estimate, and shrinkage probably accounts for it.
+- **In decoding the ResNet's map is as good as the U-Net's or better.** It lowers the BLER by 1.04
+  percentage points (0.14 to 1.95) with every pilot jammed at +9 dB, by 0.34 (0.13 to 0.55) at +3
+  dB, and by 0.45 (0.06 to 0.86) under 16-QAM hopping on pilots and data. It is never worse by a
+  significant margin.
+- **For the paper.** The evidence supports a convolutional network that sees its neighbours, not
+  the U-Net in particular. The per-cell network of section 11 shows that context is what matters
+  (F1 0.694 against 0.951 with nominal training). The U-Net can stay as the detector with this
+  ablation as its justification, or the ResNet can replace it, which means running the decoding
+  behind every table and figure again.

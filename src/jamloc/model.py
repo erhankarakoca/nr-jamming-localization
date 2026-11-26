@@ -23,9 +23,10 @@ VARIANTS = {
     "no_residual": [_P, _E, _ALLOC, _DMRS, _DATA],
 }
 # Ablations trained on their own (not part of ``--variant all``): the fused inputs plus the power
-# on the empty DMRS comb
+# on the empty DMRS comb, and the fused inputs without the EVM
 EXTRA_VARIANTS = {
     "fused_comb": [_P, _R, _E, _COMB, _ALLOC, _DMRS, _DATA],
+    "no_evm": [_P, _R, _ALLOC, _DMRS, _DATA],
 }
 ALL_VARIANTS = {**VARIANTS, **EXTRA_VARIANTS}
 _DB_CHANNELS = (_P, _R, _E, _COMB)
@@ -126,3 +127,45 @@ class TinyUNet(nn.Module):
         d2 = self.dec2(torch.cat([self.up2(b), e2], dim=1))
         d1 = self.dec1(torch.cat([self.up1(d2), e1], dim=1))
         return self.head(d1)[:, 0, :, :num_symbols]
+
+
+class _ResidualBlock(nn.Module):
+    """Two 3 x 3 convolutions with batch norm, added to the block's input (He et al., 2016)."""
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Conv2d(channels, channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels, channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(channels),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.relu(x + self.body(x))
+
+
+class SlotResNet(nn.Module):
+    """A residual CNN that keeps the full 24 x 14 resolution, for the ablation of the U-Net's
+    multi-scale path.
+
+    One 3 x 3 convolution lifts the inputs to ``width`` channels, ``blocks`` residual blocks
+    follow, and a 1 x 1 convolution gives the logits. With ``width=30`` and ``blocks=4`` it has
+    66 991 parameters for the fused inputs, about as many as the U-Net (66 553). Its nine 3 x 3
+    convolutions see 19 x 19 cells around each cell, whereas the U-Net's pooling lets every cell
+    see the whole slot.
+    """
+
+    def __init__(self, in_channels: int, width: int = 30, blocks: int = 4):
+        super().__init__()
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_channels, width, 3, padding=1, bias=False),
+            nn.BatchNorm2d(width),
+            nn.ReLU(inplace=True),
+        )
+        self.blocks = nn.Sequential(*[_ResidualBlock(width) for _ in range(blocks)])
+        self.head = nn.Conv2d(width, 1, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.blocks(self.stem(x)))[:, 0]

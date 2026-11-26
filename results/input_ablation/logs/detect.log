@@ -1,0 +1,407 @@
+[train_gen] 6400 slots, 282 slots/s
+[train_gen] 12800 slots, 346 slots/s
+[train_gen] 19200 slots, 386 slots/s
+[train_gen] 25600 slots, 405 slots/s
+[train_gen] 32000 slots, 441 slots/s
+[train_gen] 38400 slots, 483 slots/s
+[train_gen] 44800 slots, 502 slots/s
+[train_gen] 51200 slots, 534 slots/s
+[train_gen] 57600 slots, 583 slots/s
+[train_gen] 64000 slots, 610 slots/s
+[train_gen] 70400 slots, 634 slots/s
+[train_gen] 76800 slots, 659 slots/s
+[train_gen] 83200 slots, 703 slots/s
+[train_gen] 89600 slots, 738 slots/s
+[train_gen] 96000 slots, 772 slots/s
+[train_gen] 102400 slots, 809 slots/s
+[train_gen] 108800 slots, 838 slots/s
+[train_gen] 115200 slots, 871 slots/s
+[train_gen] 120000 slots, 899 slots/s
+[test] 788 slots, 150 slots/s
+[test] 1564 slots, 235 slots/s
+[test] 2352 slots, 315 slots/s
+[test] 3128 slots, 378 slots/s
+[test] 3916 slots, 430 slots/s
+[test] 4692 slots, 472 slots/s
+[test] 5480 slots, 510 slots/s
+[test] 6256 slots, 541 slots/s
+[test] 7032 slots, 568 slots/s
+[test] 7820 slots, 592 slots/s
+[test] 8596 slots, 613 slots/s
+[test] 9384 slots, 632 slots/s
+[test] 10160 slots, 648 slots/s
+[test] 10948 slots, 664 slots/s
+[test] 11724 slots, 677 slots/s
+[test] 12500 slots, 690 slots/s
+[test] 13288 slots, 702 slots/s
+[test] 14076 slots, 713 slots/s
+[test] 14876 slots, 723 slots/s
+[test] 15676 slots, 733 slots/s
+[test] 16464 slots, 741 slots/s
+[test] 17240 slots, 748 slots/s
+[test] 18016 slots, 756 slots/s
+[test] 18804 slots, 763 slots/s
+[test] 19580 slots, 770 slots/s
+[test] 20368 slots, 776 slots/s
+[test] 21144 slots, 782 slots/s
+[test] 21932 slots, 787 slots/s
+[test] 22708 slots, 792 slots/s
+[test] 23496 slots, 797 slots/s
+[test] 24272 slots, 801 slots/s
+[test] 25048 slots, 805 slots/s
+[test] 25836 slots, 809 slots/s
+[test] 26612 slots, 812 slots/s
+[test] 27400 slots, 816 slots/s
+[test] 28176 slots, 819 slots/s
+[test] 28964 slots, 822 slots/s
+[test] 29752 slots, 825 slots/s
+[test] 30552 slots, 829 slots/s
+[test] 31000 slots, 831 slots/s
+[hopjam] 776 slots, 138 slots/s
+[hopjam] 1544 slots, 229 slots/s
+[hopjam] 2312 slots, 305 slots/s
+[hopjam] 3080 slots, 366 slots/s
+[hopjam] 3848 slots, 417 slots/s
+[hopjam] 4616 slots, 458 slots/s
+[hopjam] 5392 slots, 495 slots/s
+[hopjam] 6184 slots, 527 slots/s
+[hopjam] 6960 slots, 554 slots/s
+[hopjam] 7728 slots, 577 slots/s
+[hopjam] 8496 slots, 598 slots/s
+[hopjam] 9264 slots, 617 slots/s
+[hopjam] 10032 slots, 633 slots/s
+[hopjam] 10800 slots, 648 slots/s
+[hopjam] 11576 slots, 662 slots/s
+[hopjam] 12360 slots, 675 slots/s
+[hopjam] 12800 slots, 682 slots/s
+[combjam] 776 slots, 149 slots/s
+[combjam] 1544 slots, 231 slots/s
+[combjam] 2312 slots, 308 slots/s
+[combjam] 3080 slots, 369 slots/s
+[combjam] 3848 slots, 420 slots/s
+[combjam] 4616 slots, 462 slots/s
+[combjam] 5392 slots, 498 slots/s
+[combjam] 6184 slots, 531 slots/s
+[combjam] 6960 slots, 558 slots/s
+[combjam] 7728 slots, 582 slots/s
+[combjam] 8496 slots, 602 slots/s
+[combjam] 9264 slots, 621 slots/s
+[combjam] 10032 slots, 637 slots/s
+[combjam] 10800 slots, 652 slots/s
+[combjam] 11576 slots, 665 slots/s
+[combjam] 12360 slots, 678 slots/s
+[combjam] 12800 slots, 684 slots/s
+[longdelay] 776 slots, 138 slots/s
+[longdelay] 1544 slots, 229 slots/s
+[longdelay] 2312 slots, 307 slots/s
+[longdelay] 3080 slots, 368 slots/s
+[longdelay] 3848 slots, 419 slots/s
+[longdelay] 4616 slots, 462 slots/s
+[longdelay] 5392 slots, 499 slots/s
+[longdelay] 6184 slots, 531 slots/s
+[longdelay] 6400 slots, 539 slots/s
+[fast] 776 slots, 132 slots/s
+[fast] 1544 slots, 230 slots/s
+[fast] 2312 slots, 307 slots/s
+[fast] 3080 slots, 368 slots/s
+[fast] 3848 slots, 419 slots/s
+[fast] 4616 slots, 460 slots/s
+[fast] 5392 slots, 496 slots/s
+[fast] 6184 slots, 529 slots/s
+[fast] 6960 slots, 556 slots/s
+[fast] 7728 slots, 579 slots/s
+[fast] 8496 slots, 600 slots/s
+[fast] 9264 slots, 618 slots/s
+[fast] 10032 slots, 634 slots/s
+[fast] 10800 slots, 650 slots/s
+[fast] 11576 slots, 664 slots/s
+[fast] 12360 slots, 678 slots/s
+[fast] 12800 slots, 685 slots/s
+[test_qam16] 776 slots, 84 slots/s
+[test_qam16] 1544 slots, 155 slots/s
+[test_qam16] 2312 slots, 214 slots/s
+[test_qam16] 3080 slots, 265 slots/s
+[test_qam16] 3848 slots, 310 slots/s
+[test_qam16] 4616 slots, 349 slots/s
+[test_qam16] 5392 slots, 383 slots/s
+[test_qam16] 6184 slots, 415 slots/s
+[test_qam16] 6960 slots, 443 slots/s
+[test_qam16] 7728 slots, 468 slots/s
+[test_qam16] 8496 slots, 491 slots/s
+[test_qam16] 9264 slots, 511 slots/s
+[test_qam16] 10032 slots, 530 slots/s
+[test_qam16] 10800 slots, 547 slots/s
+[test_qam16] 11576 slots, 563 slots/s
+[test_qam16] 12360 slots, 579 slots/s
+[test_qam16] 12800 slots, 587 slots/s
+[hopjam_qam16] 776 slots, 95 slots/s
+[hopjam_qam16] 1544 slots, 154 slots/s
+[hopjam_qam16] 2312 slots, 214 slots/s
+[hopjam_qam16] 3080 slots, 265 slots/s
+[hopjam_qam16] 3848 slots, 309 slots/s
+[hopjam_qam16] 4616 slots, 348 slots/s
+[hopjam_qam16] 5392 slots, 382 slots/s
+[hopjam_qam16] 6184 slots, 414 slots/s
+[hopjam_qam16] 6960 slots, 442 slots/s
+[hopjam_qam16] 7728 slots, 466 slots/s
+[hopjam_qam16] 8496 slots, 489 slots/s
+[hopjam_qam16] 9264 slots, 509 slots/s
+[hopjam_qam16] 10032 slots, 528 slots/s
+[hopjam_qam16] 10800 slots, 545 slots/s
+[hopjam_qam16] 11576 slots, 560 slots/s
+[hopjam_qam16] 12360 slots, 576 slots/s
+[hopjam_qam16] 12800 slots, 583 slots/s
+[pulsejam] 776 slots, 132 slots/s
+[pulsejam] 1544 slots, 231 slots/s
+[pulsejam] 2312 slots, 308 slots/s
+[pulsejam] 3080 slots, 369 slots/s
+[pulsejam] 3856 slots, 421 slots/s
+[pulsejam] 4648 slots, 465 slots/s
+[pulsejam] 5416 slots, 501 slots/s
+[pulsejam] 6192 slots, 531 slots/s
+[pulsejam] 6960 slots, 557 slots/s
+[pulsejam] 7728 slots, 580 slots/s
+[pulsejam] 8504 slots, 602 slots/s
+[pulsejam] 9200 slots, 619 slots/s
+[no_evm, unet width 12, seed 0] epoch 1/80  train loss 0.4344  val loss 0.3352  lr 1.00e-03  (9.0 s)
+[no_evm, unet width 12, seed 0] epoch 2/80  train loss 0.3109  val loss 0.3019  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 3/80  train loss 0.2814  val loss 0.3680  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 0] epoch 4/80  train loss 0.2618  val loss 0.2542  lr 1.00e-03  (7.0 s)
+[no_evm, unet width 12, seed 0] epoch 5/80  train loss 0.2480  val loss 0.2644  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 6/80  train loss 0.2374  val loss 0.2539  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 7/80  train loss 0.2304  val loss 0.2674  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 8/80  train loss 0.2254  val loss 0.2379  lr 1.00e-03  (7.0 s)
+[no_evm, unet width 12, seed 0] epoch 9/80  train loss 0.2213  val loss 0.2592  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 0] epoch 10/80  train loss 0.2152  val loss 0.2348  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 11/80  train loss 0.2121  val loss 0.2188  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 0] epoch 12/80  train loss 0.2084  val loss 0.2450  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 0] epoch 13/80  train loss 0.2054  val loss 0.2287  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 14/80  train loss 0.2037  val loss 0.2200  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 15/80  train loss 0.2006  val loss 0.2567  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 16/80  train loss 0.1880  val loss 0.2303  lr 5.00e-04  (7.0 s)
+[no_evm, unet width 12, seed 0] epoch 17/80  train loss 0.1847  val loss 0.2119  lr 5.00e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 18/80  train loss 0.1820  val loss 0.2194  lr 5.00e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 19/80  train loss 0.1807  val loss 0.2319  lr 5.00e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 20/80  train loss 0.1787  val loss 0.2146  lr 5.00e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 21/80  train loss 0.1763  val loss 0.2165  lr 5.00e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 22/80  train loss 0.1672  val loss 0.2185  lr 2.50e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 23/80  train loss 0.1656  val loss 0.2203  lr 2.50e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 24/80  train loss 0.1635  val loss 0.2239  lr 2.50e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 25/80  train loss 0.1623  val loss 0.2293  lr 2.50e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 26/80  train loss 0.1571  val loss 0.2325  lr 1.25e-04  (6.9 s)
+[no_evm, unet width 12, seed 0] epoch 27/80  train loss 0.1564  val loss 0.2271  lr 1.25e-04  (6.9 s)
+Stopping: no improvement in 10 epochs
+[fused, resnet width 12, seed 0] epoch 1/80  train loss 0.2571  val loss 0.2060  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 0] epoch 2/80  train loss 0.1840  val loss 0.1805  lr 1.00e-03  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 3/80  train loss 0.1685  val loss 0.1739  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 0] epoch 4/80  train loss 0.1584  val loss 0.1523  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 5/80  train loss 0.1537  val loss 0.1509  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 0] epoch 6/80  train loss 0.1484  val loss 0.1478  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 7/80  train loss 0.1454  val loss 0.1417  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 8/80  train loss 0.1415  val loss 0.1475  lr 1.00e-03  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 9/80  train loss 0.1388  val loss 0.1461  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 10/80  train loss 0.1365  val loss 0.1412  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 11/80  train loss 0.1336  val loss 0.1327  lr 1.00e-03  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 12/80  train loss 0.1318  val loss 0.1376  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 13/80  train loss 0.1306  val loss 0.1367  lr 1.00e-03  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 14/80  train loss 0.1293  val loss 0.1500  lr 1.00e-03  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 15/80  train loss 0.1275  val loss 0.1469  lr 1.00e-03  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 16/80  train loss 0.1199  val loss 0.1267  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 17/80  train loss 0.1185  val loss 0.1298  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 18/80  train loss 0.1171  val loss 0.1255  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 19/80  train loss 0.1164  val loss 0.1287  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 20/80  train loss 0.1159  val loss 0.1272  lr 5.00e-04  (6.1 s)
+[fused, resnet width 12, seed 0] epoch 21/80  train loss 0.1150  val loss 0.1249  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 22/80  train loss 0.1144  val loss 0.1265  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 23/80  train loss 0.1138  val loss 0.1260  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 24/80  train loss 0.1128  val loss 0.1247  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 25/80  train loss 0.1128  val loss 0.1294  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 26/80  train loss 0.1121  val loss 0.1272  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 27/80  train loss 0.1117  val loss 0.1249  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 28/80  train loss 0.1106  val loss 0.1237  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 29/80  train loss 0.1106  val loss 0.1261  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 30/80  train loss 0.1100  val loss 0.1259  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 31/80  train loss 0.1092  val loss 0.1256  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 32/80  train loss 0.1087  val loss 0.1244  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 33/80  train loss 0.1045  val loss 0.1247  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 34/80  train loss 0.1037  val loss 0.1272  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 35/80  train loss 0.1035  val loss 0.1226  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 36/80  train loss 0.1029  val loss 0.1257  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 37/80  train loss 0.1026  val loss 0.1310  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 38/80  train loss 0.1024  val loss 0.1234  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 39/80  train loss 0.1021  val loss 0.1265  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 40/80  train loss 0.0993  val loss 0.1267  lr 1.25e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 41/80  train loss 0.0991  val loss 0.1252  lr 1.25e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 42/80  train loss 0.0991  val loss 0.1261  lr 1.25e-04  (6.0 s)
+[fused, resnet width 12, seed 0] epoch 43/80  train loss 0.0989  val loss 0.1244  lr 1.25e-04  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 44/80  train loss 0.0974  val loss 0.1256  lr 6.25e-05  (5.9 s)
+[fused, resnet width 12, seed 0] epoch 45/80  train loss 0.0970  val loss 0.1270  lr 6.25e-05  (6.0 s)
+Stopping: no improvement in 10 epochs
+[no_evm, unet width 12, seed 1] epoch 1/80  train loss 0.4299  val loss 0.3267  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 1] epoch 2/80  train loss 0.3009  val loss 0.2940  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 3/80  train loss 0.2669  val loss 0.2726  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 1] epoch 4/80  train loss 0.2484  val loss 0.2398  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 5/80  train loss 0.2372  val loss 0.2312  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 6/80  train loss 0.2311  val loss 0.2330  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 7/80  train loss 0.2242  val loss 0.2325  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 8/80  train loss 0.2202  val loss 0.2249  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 1] epoch 9/80  train loss 0.2157  val loss 0.2433  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 10/80  train loss 0.2131  val loss 0.2234  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 11/80  train loss 0.2086  val loss 0.2154  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 12/80  train loss 0.2067  val loss 0.2272  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 13/80  train loss 0.2034  val loss 0.2411  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 14/80  train loss 0.2012  val loss 0.2185  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 15/80  train loss 0.1987  val loss 0.2403  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 16/80  train loss 0.1858  val loss 0.2157  lr 5.00e-04  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 17/80  train loss 0.1834  val loss 0.2154  lr 5.00e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 18/80  train loss 0.1815  val loss 0.2237  lr 5.00e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 19/80  train loss 0.1801  val loss 0.2104  lr 5.00e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 20/80  train loss 0.1784  val loss 0.2215  lr 5.00e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 21/80  train loss 0.1761  val loss 0.2204  lr 5.00e-04  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 22/80  train loss 0.1741  val loss 0.2295  lr 5.00e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 23/80  train loss 0.1738  val loss 0.2185  lr 5.00e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 24/80  train loss 0.1643  val loss 0.2285  lr 2.50e-04  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 25/80  train loss 0.1631  val loss 0.2263  lr 2.50e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 26/80  train loss 0.1620  val loss 0.2315  lr 2.50e-04  (6.9 s)
+[no_evm, unet width 12, seed 1] epoch 27/80  train loss 0.1607  val loss 0.2426  lr 2.50e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 28/80  train loss 0.1553  val loss 0.2371  lr 1.25e-04  (7.0 s)
+[no_evm, unet width 12, seed 1] epoch 29/80  train loss 0.1545  val loss 0.2377  lr 1.25e-04  (7.0 s)
+Stopping: no improvement in 10 epochs
+[fused, resnet width 12, seed 1] epoch 1/80  train loss 0.2593  val loss 0.1909  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 1] epoch 2/80  train loss 0.1853  val loss 0.1710  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 1] epoch 3/80  train loss 0.1695  val loss 0.1773  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 4/80  train loss 0.1595  val loss 0.1634  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 5/80  train loss 0.1533  val loss 0.1558  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 6/80  train loss 0.1490  val loss 0.1658  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 7/80  train loss 0.1446  val loss 0.1613  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 8/80  train loss 0.1408  val loss 0.1435  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 9/80  train loss 0.1380  val loss 0.1437  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 10/80  train loss 0.1354  val loss 0.1385  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 11/80  train loss 0.1342  val loss 0.1372  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 12/80  train loss 0.1323  val loss 0.1377  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 13/80  train loss 0.1296  val loss 0.1374  lr 1.00e-03  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 14/80  train loss 0.1290  val loss 0.1420  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 15/80  train loss 0.1264  val loss 0.1399  lr 1.00e-03  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 16/80  train loss 0.1185  val loss 0.1258  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 17/80  train loss 0.1179  val loss 0.1273  lr 5.00e-04  (6.1 s)
+[fused, resnet width 12, seed 1] epoch 18/80  train loss 0.1170  val loss 0.1301  lr 5.00e-04  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 19/80  train loss 0.1160  val loss 0.1282  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 20/80  train loss 0.1153  val loss 0.1250  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 21/80  train loss 0.1149  val loss 0.1272  lr 5.00e-04  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 22/80  train loss 0.1135  val loss 0.1260  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 23/80  train loss 0.1136  val loss 0.1267  lr 5.00e-04  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 24/80  train loss 0.1126  val loss 0.1268  lr 5.00e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 25/80  train loss 0.1084  val loss 0.1274  lr 2.50e-04  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 26/80  train loss 0.1077  val loss 0.1247  lr 2.50e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 27/80  train loss 0.1069  val loss 0.1260  lr 2.50e-04  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 28/80  train loss 0.1063  val loss 0.1239  lr 2.50e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 29/80  train loss 0.1062  val loss 0.1247  lr 2.50e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 30/80  train loss 0.1062  val loss 0.1264  lr 2.50e-04  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 31/80  train loss 0.1055  val loss 0.1257  lr 2.50e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 32/80  train loss 0.1054  val loss 0.1242  lr 2.50e-04  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 33/80  train loss 0.1023  val loss 0.1239  lr 1.25e-04  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 34/80  train loss 0.1021  val loss 0.1259  lr 1.25e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 35/80  train loss 0.1019  val loss 0.1257  lr 1.25e-04  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 36/80  train loss 0.1015  val loss 0.1249  lr 1.25e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 37/80  train loss 0.1017  val loss 0.1276  lr 1.25e-04  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 38/80  train loss 0.0999  val loss 0.1268  lr 6.25e-05  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 39/80  train loss 0.0998  val loss 0.1259  lr 6.25e-05  (5.8 s)
+[fused, resnet width 12, seed 1] epoch 40/80  train loss 0.0995  val loss 0.1245  lr 6.25e-05  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 41/80  train loss 0.0998  val loss 0.1268  lr 6.25e-05  (5.9 s)
+[fused, resnet width 12, seed 1] epoch 42/80  train loss 0.0989  val loss 0.1253  lr 3.13e-05  (6.0 s)
+[fused, resnet width 12, seed 1] epoch 43/80  train loss 0.0987  val loss 0.1268  lr 3.13e-05  (6.0 s)
+Stopping: no improvement in 10 epochs
+[no_evm, unet width 12, seed 2] epoch 1/80  train loss 0.4268  val loss 0.3278  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 2] epoch 2/80  train loss 0.3015  val loss 0.2709  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 2] epoch 3/80  train loss 0.2687  val loss 0.2774  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 2] epoch 4/80  train loss 0.2524  val loss 0.2572  lr 1.00e-03  (6.9 s)
+[no_evm, unet width 12, seed 2] epoch 5/80  train loss 0.2411  val loss 0.2402  lr 1.00e-03  (6.8 s)
+[no_evm, unet width 12, seed 2] epoch 6/80  train loss 0.2344  val loss 0.2329  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 7/80  train loss 0.2285  val loss 0.2399  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 8/80  train loss 0.2233  val loss 0.2328  lr 1.00e-03  (7.0 s)
+[no_evm, unet width 12, seed 2] epoch 9/80  train loss 0.2189  val loss 0.2315  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 10/80  train loss 0.2146  val loss 0.2444  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 11/80  train loss 0.2118  val loss 0.2282  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 12/80  train loss 0.2081  val loss 0.2277  lr 1.00e-03  (7.2 s)
+[no_evm, unet width 12, seed 2] epoch 13/80  train loss 0.2066  val loss 0.2326  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 14/80  train loss 0.2041  val loss 0.2260  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 15/80  train loss 0.2014  val loss 0.2277  lr 1.00e-03  (7.2 s)
+[no_evm, unet width 12, seed 2] epoch 16/80  train loss 0.1986  val loss 0.2192  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 17/80  train loss 0.1958  val loss 0.2482  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 18/80  train loss 0.1934  val loss 0.2351  lr 1.00e-03  (7.0 s)
+[no_evm, unet width 12, seed 2] epoch 19/80  train loss 0.1918  val loss 0.2151  lr 1.00e-03  (7.0 s)
+[no_evm, unet width 12, seed 2] epoch 20/80  train loss 0.1908  val loss 0.2132  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 21/80  train loss 0.1865  val loss 0.2253  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 22/80  train loss 0.1854  val loss 0.2204  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 23/80  train loss 0.1847  val loss 0.2461  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 24/80  train loss 0.1822  val loss 0.2316  lr 1.00e-03  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 25/80  train loss 0.1685  val loss 0.2201  lr 5.00e-04  (7.0 s)
+[no_evm, unet width 12, seed 2] epoch 26/80  train loss 0.1653  val loss 0.2366  lr 5.00e-04  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 27/80  train loss 0.1639  val loss 0.2430  lr 5.00e-04  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 28/80  train loss 0.1618  val loss 0.2483  lr 5.00e-04  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 29/80  train loss 0.1532  val loss 0.2424  lr 2.50e-04  (7.1 s)
+[no_evm, unet width 12, seed 2] epoch 30/80  train loss 0.1512  val loss 0.2524  lr 2.50e-04  (7.1 s)
+Stopping: no improvement in 10 epochs
+[fused, resnet width 12, seed 2] epoch 1/80  train loss 0.2562  val loss 0.1990  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 2/80  train loss 0.1827  val loss 0.1757  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 3/80  train loss 0.1695  val loss 0.1755  lr 1.00e-03  (6.2 s)
+[fused, resnet width 12, seed 2] epoch 4/80  train loss 0.1600  val loss 0.1550  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 5/80  train loss 0.1533  val loss 0.1636  lr 1.00e-03  (6.2 s)
+[fused, resnet width 12, seed 2] epoch 6/80  train loss 0.1504  val loss 0.1650  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 7/80  train loss 0.1457  val loss 0.1523  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 8/80  train loss 0.1426  val loss 0.1449  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 9/80  train loss 0.1402  val loss 0.1402  lr 1.00e-03  (6.2 s)
+[fused, resnet width 12, seed 2] epoch 10/80  train loss 0.1375  val loss 0.1570  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 11/80  train loss 0.1361  val loss 0.1405  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 12/80  train loss 0.1341  val loss 0.1406  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 2] epoch 13/80  train loss 0.1326  val loss 0.1354  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 14/80  train loss 0.1312  val loss 0.1417  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 15/80  train loss 0.1288  val loss 0.1380  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 2] epoch 16/80  train loss 0.1281  val loss 0.1454  lr 1.00e-03  (6.0 s)
+[fused, resnet width 12, seed 2] epoch 17/80  train loss 0.1264  val loss 0.1358  lr 1.00e-03  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 18/80  train loss 0.1184  val loss 0.1250  lr 5.00e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 19/80  train loss 0.1178  val loss 0.1277  lr 5.00e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 20/80  train loss 0.1169  val loss 0.1283  lr 5.00e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 21/80  train loss 0.1159  val loss 0.1355  lr 5.00e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 22/80  train loss 0.1153  val loss 0.1260  lr 5.00e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 23/80  train loss 0.1108  val loss 0.1292  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 2] epoch 24/80  train loss 0.1098  val loss 0.1262  lr 2.50e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 25/80  train loss 0.1093  val loss 0.1234  lr 2.50e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 26/80  train loss 0.1088  val loss 0.1275  lr 2.50e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 27/80  train loss 0.1087  val loss 0.1260  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 2] epoch 28/80  train loss 0.1082  val loss 0.1254  lr 2.50e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 29/80  train loss 0.1077  val loss 0.1256  lr 2.50e-04  (6.0 s)
+[fused, resnet width 12, seed 2] epoch 30/80  train loss 0.1051  val loss 0.1238  lr 1.25e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 31/80  train loss 0.1049  val loss 0.1255  lr 1.25e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 32/80  train loss 0.1045  val loss 0.1252  lr 1.25e-04  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 33/80  train loss 0.1043  val loss 0.1266  lr 1.25e-04  (6.0 s)
+[fused, resnet width 12, seed 2] epoch 34/80  train loss 0.1030  val loss 0.1271  lr 6.25e-05  (6.1 s)
+[fused, resnet width 12, seed 2] epoch 35/80  train loss 0.1026  val loss 0.1258  lr 6.25e-05  (6.0 s)
+Stopping: no improvement in 10 epochs
+matched: done
+hopping: done
+pilot comb: done
+1000 ns delay: done
+30 m/s: done
+16-QAM: done
+16-QAM hopping: done
+pulsed (unseen): done
+| Test grid | U-Net, P+R+E: F1 / FA | U-Net, P+R: F1 / FA | ResNet, P+R+E: F1 / FA |
+| --- | --- | --- | --- |
+| matched | 0.954 +- 0.002 / 0.7% | 0.922 +- 0.003 / 0.5% | 0.957 +- 0.000 / 0.5% |
+| hopping | 0.923 +- 0.002 / 1.5% | 0.867 +- 0.001 / 1.3% | 0.925 +- 0.000 / 1.2% |
+| pilot comb | 0.954 +- 0.002 / 0.7% | 0.923 +- 0.002 / 0.6% | 0.956 +- 0.000 / 0.5% |
+| 1000 ns delay | 0.924 +- 0.003 / 1.5% | 0.912 +- 0.002 / 0.9% | 0.928 +- 0.001 / 1.4% |
+| 30 m/s | 0.949 +- 0.002 / 0.8% | 0.920 +- 0.003 / 0.6% | 0.952 +- 0.001 / 0.7% |
+| 16-QAM | 0.966 +- 0.001 / 0.4% | 0.903 +- 0.001 / 0.8% | 0.963 +- 0.000 / 0.6% |
+| 16-QAM hopping | 0.940 +- 0.002 / 1.2% | 0.859 +- 0.003 / 1.8% | 0.937 +- 0.000 / 1.3% |
+| pulsed (unseen) | 0.822 +- 0.003 / 3.8% | 0.794 +- 0.002 / 2.8% | 0.907 +- 0.003 / 1.3% |
+
+| Detector | Grid | F1 pilot | F1 data | F1 partial | Pilot Pd at -15 dB | Same at 1% FA |
+| --- | --- | --- | --- | --- | --- | --- |
+| U-Net, P+R+E | matched | 0.871 +- 0.021 | 0.957 +- 0.002 | 0.960 +- 0.002 | 0.451 +- 0.031 | 0.495 +- 0.038 |
+| U-Net, P+R | matched | 0.904 +- 0.004 | 0.915 +- 0.004 | 0.930 +- 0.002 | 0.482 +- 0.030 | 0.535 +- 0.028 |
+| ResNet, P+R+E | matched | 0.879 +- 0.006 | 0.959 +- 0.001 | 0.962 +- 0.000 | 0.493 +- 0.007 | 0.568 +- 0.015 |
+| U-Net, P+R+E | 16-QAM | 0.911 +- 0.008 | 0.966 +- 0.001 | 0.972 +- 0.001 | 0.624 +- 0.041 | 0.712 +- 0.046 |
+| U-Net, P+R | 16-QAM | 0.851 +- 0.029 | 0.885 +- 0.001 | 0.925 +- 0.005 | 0.617 +- 0.025 | 0.638 +- 0.033 |
+| ResNet, P+R+E | 16-QAM | 0.795 +- 0.004 | 0.969 +- 0.000 | 0.973 +- 0.000 | 0.663 +- 0.008 | 0.720 +- 0.007 |

@@ -1,0 +1,5 @@
+[C nominal true seed 1] none                   JSR  +9.0 dB: p_r_e_shrink 0.000  true_shrink 0.000  nomap_shrink 0.000  pr_shrink 0.000  resnet_shrink 0.000
+[C nominal true seed 1] pilot                  JSR  +9.0 dB: p_r_e_shrink 0.013  true_shrink 0.010  nomap_shrink 0.045  pr_shrink 0.011  resnet_shrink 0.011
+[C nominal true seed 1] data                   JSR  +9.0 dB: p_r_e_shrink 0.068  true_shrink 0.068  nomap_shrink 0.104  pr_shrink 0.101  resnet_shrink 0.068
+[C nominal true seed 1] partial                JSR  +9.0 dB: p_r_e_shrink 0.101  true_shrink 0.103  nomap_shrink 0.165  pr_shrink 0.125  resnet_shrink 0.099
+Wrote /content/dec/qam16/recovery/recovery_C_snr18_mcs13.csv and recovery_C_snr18_mcs13_paired.csv (no figure)
