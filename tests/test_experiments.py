@@ -113,7 +113,7 @@ def test_recovery_script_runs(tmp_path, monkeypatch):
     }
     # Receivers whose U-Net is trained on other data (mixed attacks, general) are left out here
     untrained = {rx for rx, (src, _) in recovery.RECEIVERS.items() if src in recovery.TRAINED_ON}
-    assert untrained == {"p_r_e_atk_soft", "gen_soft", "gen_shrink"}
+    assert untrained == {"p_r_e_atk_soft", "gen_soft", "gen_shrink", "pr_shrink", "resnet_shrink"}
     assert main_rows == {
         (rx, a, j)
         for rx in set(recovery.RECEIVERS) - untrained

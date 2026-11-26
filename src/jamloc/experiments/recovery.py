@@ -24,6 +24,9 @@ allocation. Every simulated batch is decoded by every receiver, on exactly the s
 * ``gen_soft`` / ``gen_shrink`` - map from the full U-Net of the general training (``train_gen``:
                     every jammer, channel and modulation of its mix), with the per-PRB estimate or
                     with shrinkage; only when that model is trained
+* ``pr_shrink`` / ``resnet_shrink`` - shrinkage with the map of an ablation of that U-Net
+                    (``experiments.input_ablation``): the same U-Net without the EVM input, or a
+                    residual CNN of the same size; only when asked for with ``--receivers``
 * ``true_hard`` / ``true_soft`` - the true jamming map (where the jammer is; its strength is still
                     estimated in the soft mode)
 * ``true_prb_soft`` - the true map coarsened to the block test's resolution (one decision for the
@@ -155,6 +158,9 @@ RECEIVERS = {
     # Map of the U-Net of the general training (experiments/general_training)
     "gen_soft": ("fused_gen", "soft"),
     "gen_shrink": ("fused_gen", "soft"),
+    # Ablations of the general U-Net (experiments/input_ablation): no EVM input, or a residual CNN
+    "pr_shrink": ("no_evm_gen", "soft"),
+    "resnet_shrink": ("resnet_gen", "soft"),
 }
 # Data-aided passes after the first decoding (jamloc.recovery); three take most of the gain
 DATA_AIDED = {
@@ -185,6 +191,8 @@ OPTIONS = {
     "p_r_e_cell_da": {"cellwise": True},
     "p_r_e_refine_prb": {"refine": True},
     "p_r_e_shrink": {"cellwise": "shrink"},
+    "pr_shrink": {"cellwise": "shrink"},
+    "resnet_shrink": {"cellwise": "shrink"},
     "p_r_e_shrink_da": {"cellwise": "shrink"},
     "p_r_e_shrink_full": {"cellwise": "shrink", "refine": True, "renoise": "auto"},
     "true_shrink": {"cellwise": "shrink"},
@@ -216,13 +224,21 @@ DETECTORS = (
     "fused",
     "fused_atk",
     "fused_gen",
+    "no_evm_gen",
+    "resnet_gen",
 )
 NO_MODEL = ("power_threshold", "evm_threshold")  # thresholds of a score, nothing trained
-# Detectors that are a fused U-Net trained on other data: (load_model options, validation split)
+# Detectors trained on other data: (load_model options, validation split). They see the fused
+# inputs unless ``INPUTS`` names other ones
 TRAINED_ON = {
     "fused_atk": ({"data": "atk"}, "val_atk"),
     "fused_gen": ({"data": "gen"}, "val_gen"),
+    "no_evm_gen": ({"data": "gen"}, "val_gen"),
+    "resnet_gen": ({"data": "gen", "arch": "resnet"}, "val_gen"),
 }
+INPUTS = {"no_evm_gen": "no_evm"}
+# Detectors that are loaded only when one of their receivers is asked for with --receivers
+ON_REQUEST = {"no_evm_gen": {"pr_shrink"}, "resnet_gen": {"resnet_shrink"}}
 # Which training the U-Net of the p_r_e_* receivers ("fused") comes from: (load_model options,
 # validation split of its threshold). The general one (experiments/general_training) is the
 # default; the nominal one reproduces the results before section 26 of docs/results.md.
@@ -526,8 +542,12 @@ def _scores(detector: str, model, features: torch.Tensor) -> torch.Tensor:
     if detector in ("evm_threshold", "residual_threshold"):
         baseline = evm_scores if detector == "evm_threshold" else residual_scores
         return torch.from_numpy(baseline(features.cpu().numpy())).to(features.device)
-    variant = "fused" if detector in TRAINED_ON else detector
-    return model(select_inputs(features, variant))
+    return model(select_inputs(features, input_variant(detector)))
+
+
+def input_variant(detector: str) -> str:
+    """The inputs (``model.ALL_VARIANTS``) of a trained detector."""
+    return INPUTS.get(detector, "fused") if detector in TRAINED_ON else detector
 
 
 def val_threshold(detector: str, model=None, val_split: str | None = None) -> float:
@@ -689,6 +709,8 @@ def simulate(
             continue  # never trained or calibrated on the estimated noise power
         if det == "fused_gen" and unet == "general" and not set(only or ()) & GEN_RECEIVERS:
             continue  # the p_r_e_* receivers already use the general U-Net
+        if det in ON_REQUEST and not set(only or ()) & ON_REQUEST[det]:
+            continue
         val_split = NEST_DETECTORS[det] if nest else None
         if det in NO_MODEL:
             model = None
@@ -712,11 +734,11 @@ def simulate(
             model = load_model("fused", seed, **options)
         elif det in TRAINED_ON:
             options, val_split = TRAINED_ON[det]
-            if not checkpoint_path("fused", seed, **options).is_file():
+            if not checkpoint_path(input_variant(det), seed, **options).is_file():
                 continue  # not trained: its receiver is left out
             if not (data_dir() / f"{val_split}.npz").is_file():
                 continue
-            model = load_model("fused", seed, **options)
+            model = load_model(input_variant(det), seed, **options)
         else:
             model = load_model(det, seed)
         detectors[det] = (model, val_threshold(det, model, val_split))
@@ -732,7 +754,7 @@ def simulate(
         whole += ("p_r_e_cell", "true_cell", "p_r_e_shrink", "true_shrink", "cell_shrink")
         whole += RESOLUTION
         whole += tuple(DATA_AIDED)
-        whole += ("gen_soft", "gen_shrink")
+        whole += ("gen_soft", "gen_shrink", "pr_shrink", "resnet_shrink")
         cases.append(("pilot", True, whole))  # per PRB = exact here
     else:  # a pulsed or hopping pilot attack is the nominal one (it has a single OFDM symbol)
         cases = [(attack, False, tuple(RECEIVERS)) for attack in ("data", "partial")]
