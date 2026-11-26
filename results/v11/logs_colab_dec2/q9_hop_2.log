@@ -1,0 +1,3 @@
+[C hopping true seed 2] data                   JSR  +9.0 dB: standard 0.570  true_soft 0.020  true_prb_soft 0.586  p_r_e_shrink 0.020  true_shrink 0.020  nomap_prb 0.586  nomap_cell 0.024  nomap_shrink 0.027  evm_shrink 0.244
+[C hopping true seed 2] partial                JSR  +9.0 dB: standard 0.773  true_soft 0.078  true_prb_soft 0.656  p_r_e_shrink 0.080  true_shrink 0.079  nomap_prb 0.648  nomap_cell 0.096  nomap_shrink 0.099  evm_shrink 0.448
+Wrote /content/dec2/q9_hop/recovery/recovery_C_hopping_snr8.csv and the main, ablation and map-source figures (.pdf/.png)
