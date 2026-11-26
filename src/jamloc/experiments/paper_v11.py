@@ -87,19 +87,19 @@ def _link_models(folder: Path, models: Path) -> None:
         shutil.copytree(models, link)
 
 
-def commands(root: Path, cases) -> list[tuple[Path, list[str], Path]]:
+def commands(root: Path, cases, seeds=SEEDS) -> list[tuple[Path, list[str], Path]]:
     """(results folder, command, log file) of every case and seed."""
     out = []
     for case in cases:
         options, receivers = CASES[case]
-        for seed in SEEDS:
+        for seed in seeds:
             cmd = [sys.executable, "-m", "jamloc.experiments.recovery", *COMMON, *options]
             cmd += ["--seeds", str(seed), "--receivers", *receivers]
             out.append((root / case, cmd, root / "logs" / f"{case}_{seed}.log"))
     return out
 
 
-def run(root: Path, cases, parallel: int, models: Path) -> list[int]:
+def run(root: Path, cases, parallel: int, models: Path, seeds=SEEDS) -> list[int]:
     """Run every case and seed, ``parallel`` processes at a time with one thread each. Returns
     the exit codes."""
     (root / "logs").mkdir(parents=True, exist_ok=True)
@@ -122,7 +122,7 @@ def run(root: Path, cases, parallel: int, models: Path) -> list[int]:
         return code
 
     with ThreadPoolExecutor(parallel) as pool:
-        return list(pool.map(one, commands(root, cases)))
+        return list(pool.map(one, commands(root, cases, seeds)))
 
 
 def pool(root: Path, cases) -> None:
@@ -228,9 +228,10 @@ def main(argv=None):
         if name == "run":
             s.add_argument("--parallel", type=int, default=os.cpu_count() or 1)
             s.add_argument("--models", type=Path, default=results_dir() / "models")
+            s.add_argument("--seeds", type=int, nargs="+", default=list(SEEDS))
     args = p.parse_args(argv)
     if args.command == "run":
-        codes = run(args.root, args.cases, args.parallel, args.models)
+        codes = run(args.root, args.cases, args.parallel, args.models, args.seeds)
         print(f"{sum(c != 0 for c in codes)} of {len(codes)} runs failed")
     elif args.command == "pool":
         pool(args.root, args.cases)

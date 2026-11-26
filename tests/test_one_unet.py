@@ -173,3 +173,11 @@ def test_paper_v11_cases_build_recovery_commands_and_numbers(tmp_path):
     text = paper_v11.numbers(tmp_path, ["q9"])
     assert "| pilot 9.0 | 1 | 0/1000 |" in text
     assert "p_r_e_shrink - nomap_shrink -1.00 (-1.60 to -0.40)" in text
+
+
+def test_paper_v11_runs_only_the_seeds_asked_for(tmp_path):
+    from jamloc.experiments import paper_v11
+
+    jobs = paper_v11.commands(tmp_path, ["q9"], [1, 2])
+    assert [log.name for _, _, log in jobs] == ["q9_1.log", "q9_2.log"]
+    assert [cmd[cmd.index("--seeds") + 1] for _, cmd, _ in jobs] == ["1", "2"]
