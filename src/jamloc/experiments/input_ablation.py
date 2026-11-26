@@ -207,7 +207,8 @@ def decoding_table(root: Path) -> str:
                     )
                     lo, hi = min(lo, hi), max(lo, hi)
                     cells.append(f"{d:+.2f} ({lo:+.2f} to {hi:+.2f})")
-                point = "no jammer" if jsr == "nan" else f"{attack} {float(jsr):+g} dB"
+                name = "every pilot" if attack == "pilot_whole_allocation" else attack
+                point = "no jammer" if jsr == "nan" else f"{name} {float(jsr):+g} dB"
                 lines.append(f"| {title} | {point} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 

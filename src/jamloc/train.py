@@ -149,6 +149,8 @@ def train(
     path = checkpoint_path(variant, seed, width, data, arch, jitter, hidden)
     path.parent.mkdir(parents=True, exist_ok=True)
     best = float("inf")
+    # how the log names the network (only the U-Net has a width)
+    net = f"unet width {width}" if arch == "unet" else arch
     gen = torch.Generator().manual_seed(seed)
     history = []  # one row per epoch, saved next to the checkpoint for the training-curve figure
     for epoch in range(epochs):
@@ -195,7 +197,7 @@ def train(
             {"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss, "lr": lr_used}
         )
         print(
-            f"[{variant}, {arch} width {width}, seed {seed}] epoch {epoch + 1}/{epochs}  "
+            f"[{variant}, {net}, seed {seed}] epoch {epoch + 1}/{epochs}  "
             f"train loss {train_loss:.4f}  val loss {val_loss:.4f}  lr {lr_used:.2e}  "
             f"({time.perf_counter() - start:.1f} s)",
             flush=True,
