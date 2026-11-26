@@ -1,0 +1,3 @@
+[C hopping true seed 1] data                   JSR  +9.0 dB: p_r_e_shrink 0.005  true_shrink 0.004  nomap_shrink 0.020  pr_shrink 0.012  resnet_shrink 0.004
+[C hopping true seed 1] partial                JSR  +9.0 dB: p_r_e_shrink 0.092  true_shrink 0.074  nomap_shrink 0.247  pr_shrink 0.109  resnet_shrink 0.089
+Wrote /content/dec/qamhop/recovery/recovery_C_hopping_snr18_mcs13.csv and recovery_C_hopping_snr18_mcs13_paired.csv (no figure)

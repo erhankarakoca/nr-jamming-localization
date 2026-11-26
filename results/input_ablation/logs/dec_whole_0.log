@@ -1,0 +1,3 @@
+[C nominal true seed 0] pilot_whole_allocation JSR  +3.0 dB: p_r_e_shrink 0.046  true_shrink 0.047  nomap_shrink 0.057  pr_shrink 0.047  resnet_shrink 0.047
+[C nominal true seed 0] pilot_whole_allocation JSR  +9.0 dB: p_r_e_shrink 0.385  true_shrink 0.370  nomap_shrink 0.422  pr_shrink 0.375  resnet_shrink 0.370
+Wrote /content/dec/whole/recovery/recovery_C.csv and recovery_C_paired.csv (no figure)

@@ -1,0 +1,5 @@
+[C nominal true seed 0] none                   JSR  +9.0 dB: p_r_e_shrink 0.000  true_shrink 0.000  nomap_shrink 0.000  pr_shrink 0.000  resnet_shrink 0.000
+[C nominal true seed 0] pilot                  JSR  +9.0 dB: p_r_e_shrink 0.000  true_shrink 0.000  nomap_shrink 0.000  pr_shrink 0.000  resnet_shrink 0.000
+[C nominal true seed 0] data                   JSR  +9.0 dB: p_r_e_shrink 0.001  true_shrink 0.001  nomap_shrink 0.001  pr_shrink 0.001  resnet_shrink 0.001
+[C nominal true seed 0] partial                JSR  +9.0 dB: p_r_e_shrink 0.001  true_shrink 0.001  nomap_shrink 0.002  pr_shrink 0.002  resnet_shrink 0.001
+Wrote /content/dec/nom/recovery/recovery_C.csv and the main, ablation and map-source figures (.pdf/.png)
