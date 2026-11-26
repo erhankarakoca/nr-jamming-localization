@@ -2163,8 +2163,8 @@ Paired differences in percentage points on common slots, with 95% Newcombe inter
   the jammed pilots.
 
 **Paper v10** (`conference-v10.tex` on Overleaf, seven pages). It adds a TikZ diagram of the link
-and the receiver (Fig. 1), presents the method in the receiver's order (pilot weights, unexplained
-energy, shrinkage), says why the estimate is pooled along the PRB and not along the symbol, and
+and the receiver (Fig. 1), presents the method in the receiver's order (pilot weights, excess power,
+shrinkage), says why the estimate is pooled along the PRB and not along the symbol, and
 explains that the estimate locates the jammer softly. A new subsection describes the U-Net and
 gives its detection F1 on each test grid (section 26), with a figure of the network at work on one
 hopping slot (`figures.unet_process`, its features, blocks drawn to the size of their grid and
@@ -2172,6 +2172,7 @@ channel count, and the score and map). The other method figures are the ones abo
 The subsection on further decoding attempts was left out while the paper had six pages. It stays in v9 and in
 the long version. An independent review checked all 91 table entries and the text against the
 result files and found no mismatch. Its points on wording and precision were applied.
+On 26 Nov the term "unexplained energy" became "excess power" throughout the paper.
 
 ## 29. Which inputs and which network
 
@@ -2258,7 +2259,7 @@ until 70 block errors or 160 batches of 64 slots, and every point has at least 2
   1.3% false alarms against 0.822 with 3.8%). Its seeds also agree more closely. Its one weakness
   is pilot jamming with 16-QAM (pilot F1 0.795 against 0.911). The DMRS is symbol 2, so the data
   cells of the last symbols lie beyond its 19 cells and cannot tell a jammed pilot from jammed data.
-  These marks do not cost BLER. The unexplained energy of those cells is real, since it comes from
+  These marks do not cost BLER. The excess power of those cells is real, since it comes from
   the wrong channel estimate, and shrinkage probably accounts for it.
 - **In decoding the ResNet's map is as good as the U-Net's or better.** It lowers the BLER by 1.04
   percentage points (0.14 to 1.95) with every pilot jammed at +9 dB, by 0.34 (0.13 to 0.55) at +3
