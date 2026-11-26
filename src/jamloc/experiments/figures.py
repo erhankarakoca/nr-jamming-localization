@@ -40,6 +40,8 @@ from jamloc.train import checkpoint_path, load_model
 
 CFG = SimConfig()
 ALLOC = (6, 12)  # example allocation used by the explanatory figures: PRBs 6-17
+# Training of the U-Net in the attack maps and the U-Net figure (``recovery.UNETS``, --unet)
+UNET = "general"
 JAM = (10, 4)  # example jammer block: PRBs 10-13 (inside the allocation)
 
 # Colours (Okabe-Ito) shared by the explanatory figures
@@ -1499,14 +1501,20 @@ def attack_maps(jsr_db: float = 6.0, snr_db: float = 15.0, seed: int | None = No
     """One slot under each of three attacks, over the allocation: the jamming power that reached
     each cell, the U-Net's map, the map of the EVM threshold, and the jamming power that the
     receiver assigns without a map (shrinkage on the data cells, the pilot residual on the DMRS
-    cells). The U-Net is the general one (``train_gen``), which never saw the pulsed jammer."""
+    cells). The U-Net is the one of ``UNET`` (the general one of ``train_gen`` by default, or the
+    v11 one of ``train_all``); neither saw the pulsed jammer."""
     import dataclasses
 
-    from jamloc.experiments.recovery import detector_cells, unet_source, val_threshold
+    from jamloc.experiments.recovery import (
+        TRAIN_COMMANDS,
+        detector_cells,
+        unet_source,
+        val_threshold,
+    )
 
-    options, val_split = unet_source("general")
+    options, val_split = unet_source(UNET)
     if not checkpoint_path("fused", 0, **options).is_file():
-        raise MissingInput("needs the general U-Net: python -m jamloc.experiments.general_training")
+        raise MissingInput(f"needs the {UNET} U-Net: {TRAIN_COMMANDS[UNET]}")
     for split in (val_split, "val"):
         if not (data_dir() / f"{split}.npz").is_file():
             raise MissingInput(f"needs the {split} split: python -m jamloc.dataset --split {split}")
@@ -1649,12 +1657,17 @@ def unet_process(jsr_db: float = 6.0, snr_db: float = 15.0, seed: int | None = N
 
     from matplotlib.patches import FancyArrowPatch
 
-    from jamloc.experiments.recovery import detector_cells, unet_source, val_threshold
+    from jamloc.experiments.recovery import (
+        TRAIN_COMMANDS,
+        detector_cells,
+        unet_source,
+        val_threshold,
+    )
     from jamloc.features import extract
 
-    options, val_split = unet_source("general")
+    options, val_split = unet_source(UNET)
     if not checkpoint_path("fused", 0, **options).is_file():
-        raise MissingInput("needs the general U-Net: python -m jamloc.experiments.general_training")
+        raise MissingInput(f"needs the {UNET} U-Net: {TRAIN_COMMANDS[UNET]}")
     if not (data_dir() / f"{val_split}.npz").is_file():
         raise MissingInput(
             f"needs the {val_split} split: python -m jamloc.dataset --split {val_split}"
@@ -2077,8 +2090,15 @@ def write_gallery(captions: dict, skipped: dict) -> None:
 
 
 def main(argv=None):
+    global UNET
     p = argparse.ArgumentParser(description="Explanatory figures with captions, and a gallery.")
     p.add_argument("--only", nargs="+", choices=list(FIGURES), help="only these figures")
+    p.add_argument(
+        "--unet",
+        choices=("general", "all"),
+        default="general",
+        help="U-Net of the attack maps and the U-Net figure (all: paper v11)",
+    )
     p.add_argument(
         "--gallery-only",
         action="store_true",
@@ -2086,6 +2106,7 @@ def main(argv=None):
         "unzipping a Colab run, so its reference figures are kept)",
     )
     args = p.parse_args(argv)
+    UNET = args.unet
 
     out = results_dir() / "figures"
     out.mkdir(parents=True, exist_ok=True)

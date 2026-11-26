@@ -126,9 +126,7 @@ def table(rows: list[dict]) -> str:
         cells = []
         for d, n in cols:
             r = by.get((grid, d, n))
-            cells.append(
-                "-" if r is None else f"{r['f1_mean']:.3f} / {100 * r['fa_mean']:.1f}%"
-            )
+            cells.append("-" if r is None else f"{r['f1_mean']:.3f} / {100 * r['fa_mean']:.1f}%")
         lines.append(f"| {grid} | " + " | ".join(cells) + " |")
     lines += [
         "",

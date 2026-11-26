@@ -99,3 +99,77 @@ def test_decoding_with_two_dmrs_symbols_and_the_v11_unet(monkeypatch):
     assert recovery.unet_source("all") == ({"data": "all"}, "val_all")
     assert "all" in recovery.TRAIN_COMMANDS
     assert np.isfinite(SimConfig().num_symbols)
+
+
+def test_v11_sweep_draws_rows_of_panel_groups(tmp_path):
+    import csv
+
+    from jamloc.experiments import resolution
+
+    fields = ["receiver", "attack", "jsr_db", "block_errors", "blocks"]
+    for case in ("a", "b"):
+        folder = tmp_path / case / "recovery"
+        folder.mkdir(parents=True)
+        with (folder / "recovery_X_seed0.csv").open("w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fields)
+            w.writeheader()
+            for jsr in (-3.0, 3.0, 9.0):
+                w.writerow(dict(zip(fields, ["true_soft", "pilot", jsr, 5, 1000])))
+                w.writerow(dict(zip(fields, ["true_shrink", "pilot", jsr, 0, 1000])))
+                w.writerow(dict(zip(fields, ["standard", "partial", jsr, 900, 1000])))
+    layout = [
+        [
+            ("one", [("a", "recovery_X", "pilot", "(a)")]),
+            ("two", [("b", "recovery_X", "pilot", "(b)")]),
+        ],
+        [("three", [("a", "recovery_X", "partial", "(c)"), ("b", "recovery_X", "pilot", "(d)")])],
+    ]
+    resolution.sweep_grid(tmp_path, layout, tmp_path / "fig")
+    assert (tmp_path / "fig.pdf").is_file() and (tmp_path / "fig.png").is_file()
+    # every v11 decoding case has a stem, and the paper layout names only those cases
+    cases = {p[0] for row in resolution.V11_LAYOUT for _, panels in row for p in panels}
+    assert cases <= set(resolution.V11_STEMS)
+    assert "true_soft" in resolution.SWEEP_RECEIVERS_V11
+
+
+def test_paper_v11_cases_build_recovery_commands_and_numbers(tmp_path):
+    import csv
+
+    from jamloc.experiments import paper_v11
+
+    jobs = paper_v11.commands(tmp_path, ["d2_hop", "m64_9"])
+    assert len(jobs) == 6
+    folder, cmd, log = jobs[0]
+    assert folder == tmp_path / "d2_hop" and log.name == "d2_hop_0.log"
+    assert cmd[1:3] == ["-m", "jamloc.experiments.recovery"]
+    assert "--dmrs2" in cmd and cmd[cmd.index("--unet") + 1] == "all"
+    assert cmd[cmd.index("--receivers") + 1 :] == list(paper_v11.FIG)
+    m64 = jobs[3][1]
+    assert m64[m64.index("--mcs") + 1] == "17" and m64[m64.index("--snr-db") + 1] == "22"
+    assert "true_prb_soft" in m64
+    assert paper_v11._naming_options(paper_v11.CASES["d2_hop"][0]) == [
+        "--snr-db",
+        "10",
+        "--dmrs2",
+        "--jammer",
+        "hopping",
+    ]
+    # every sweep case of the figure is a run case
+    from jamloc.experiments import resolution
+
+    assert set(resolution.V11_STEMS) <= set(paper_v11.CASES)
+
+    folder = tmp_path / "q9" / "recovery"
+    folder.mkdir(parents=True)
+    with (folder / "recovery_C_snr10_seed0.csv").open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["receiver", "attack", "jsr_db", "block_errors", "blocks"])
+        w.writerow(["nomap_shrink", "pilot", "9.0", 10, 1000])
+        w.writerow(["p_r_e_shrink", "pilot", "9.0", 0, 1000])
+    with (folder / "recovery_C_snr10_paired.csv").open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["attack", "jsr_db", "first", "second", "delta", "delta_lo", "delta_hi"])
+        w.writerow(["pilot", "9.0", "nomap_shrink", "p_r_e_shrink", 0.01, 0.004, 0.016])
+    text = paper_v11.numbers(tmp_path, ["q9"])
+    assert "| pilot 9.0 | 1 | 0/1000 |" in text
+    assert "p_r_e_shrink - nomap_shrink -1.00 (-1.60 to -0.40)" in text
