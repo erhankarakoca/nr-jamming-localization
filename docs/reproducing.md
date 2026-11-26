@@ -375,5 +375,22 @@ done
 uv run python -m jamloc.experiments.input_ablation --decoding results/input_ablation
 ```
 
+**Paper v11 (section 30).** One U-Net for one and two DMRS symbols and QPSK, 16-QAM and 64-QAM
+(`plan-v11.md`). The experiment generates `train_all` and `val_all` (54 conditions) and the test
+grids with one and two DMRS symbols, trains three seeds and compares the new U-Net with the v10 one.
+`paper_v11` then runs every decoding case of the paper, three seeds each, in parallel processes
+with one thread each, pools the seeds and prints the numbers the text quotes. The training and the
+one-DMRS sweeps ran on a Colab L4 (12 vCPUs), the rest on a 10-core Apple M1 Pro.
+
+```bash
+uv run python -m jamloc.experiments.one_unet --seeds 0 1 2
+uv run python -m jamloc.experiments.paper_v11 run results/v11 --parallel 8
+uv run python -m jamloc.experiments.paper_v11 pool results/v11
+uv run python -m jamloc.experiments.paper_v11 numbers results/v11
+uv run python -m jamloc.experiments.resolution sweep-v11 results/v11   # Fig. 5
+# Fig. 2 and Fig. 4 with the v11 U-Net (Fig. 3 does not use a U-Net)
+uv run python -m jamloc.experiments.figures --unet all --only attack_maps unet_process
+```
+
 The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`, and
-`plan-v10.md` lists what the next revision of the paper should add.
+`plan-v10.md` and `plan-v11.md` list what each revision of the paper adds.

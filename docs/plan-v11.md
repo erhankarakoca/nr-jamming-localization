@@ -27,8 +27,14 @@ to 3 errors in 30 720 slots, so their curves follow chance. A point with one err
 lands below the triangles. More slots would not fix this at a sensible cost, since a BLER of 1e-5
 needs about a million slots per point.
 
-The fix is a harder operating point. Without a jammer, the baseline receiver fails 0.23% of the
-blocks at 10 dB SNR (`results/ber_bler/benign_C.csv`), so every point carries tens of errors.
+The fix is a harder operating point. A first try at 10 dB, where the baseline fails 0.23% of the
+blocks without a jammer on random allocations (`results/ber_bler/benign_C.csv`), still gave 0 to 5
+errors per seed at -9 dB JSR. The decoding runs use a fixed allocation of 12 PRBs, which fails less
+often than the random ones, and the receivers that estimate the jamming power use the LMMSE
+interpolator, which is better than the baseline's linear one. That run was stopped after 20
+minutes. Each modulation now runs where the baseline fails about 0.8% of the blocks without a
+jammer on random allocations, QPSK at 8 dB, 16-QAM at 15 dB and 64-QAM at 18 dB. These are
+points where link adaptation would plausibly use these MCS.
 
 ## Decisions
 
@@ -37,7 +43,7 @@ blocks at 10 dB SNR (`results/ber_bler/benign_C.csv`), so every point carries te
 | U-Net | one U-Net for one and two DMRS symbols and QPSK, 16-QAM and 64-QAM | author |
 | Pulsed jammer | stays out of training, as the one jammer the U-Net never saw | recommended, author did not object |
 | Tables II and III | removed, results that appear only there move into the text with their confidence intervals | author |
-| QPSK operating point | 10 dB SNR instead of 15 dB, MCS 5 as before | ours |
+| Operating points | QPSK at 8 dB (was 15), 16-QAM at 15 dB (was 18), 64-QAM at 18 dB | ours |
 | True map without shrinkage | a new curve, the true map with a plain average over the marked cells of a PRB row (`true_soft`) | author asked, the receiver is ours |
 | Noise power | still known, as in v10 | unchanged |
 
@@ -46,8 +52,16 @@ blocks at 10 dB SNR (`results/ber_bler/benign_C.csv`), so every point carries te
 - Conditions are every combination of the three training jammers (block, hopping block, pilot
   comb), the three channels of v10, three modulations and two DMRS configurations, 54 in all.
 - QPSK draws its SNR from 5 to 25 dB and 16-QAM (MCS 13) from 10 to 25 dB, as in v10. 64-QAM uses
-  one MCS of table 1 and draws its SNR from the range where link adaptation would choose it. Both
-  are set by a no-jammer sweep, see below.
+  MCS 17 (code rate about 0.43) and draws its SNR from 16 to 30 dB, where link adaptation would
+  choose it over 16-QAM. A no-jammer sweep of the baseline receiver on TDL-C (random allocations,
+  3 840 slots per point) chose MCS 17 over MCS 20, whose BLER levels off near 0.5% up to 28 dB.
+
+  | MCS | BLER without a jammer |
+  | --- | --- |
+  | 5 (QPSK) | 0.85% at 8 dB, 0.23% at 10 dB, none at 15 dB (`benign_C.csv`) |
+  | 13 (16-QAM) | 1.1% at 14 dB, 0.42% at 16 dB, 0.08% at 18 dB |
+  | 17 (64-QAM) | 0.78% at 18 dB, 0.31% at 20 dB, 0.10% at 22 dB |
+  | 20 (64-QAM) | 0.73% at 22 dB, 0.52% at 26 dB, 0.36% at 28 dB |
 - The second DMRS symbol is `dmrs_additional_position = 1` (symbol 11, as Sionna places it). A
   pilot attack hits both DMRS symbols.
 - 240 000 training slots and 30 000 validation slots (new splits `train_all` and `val_all`, new
@@ -65,8 +79,9 @@ evaluated on the one-DMRS grids too, which shows what training on more configura
 
 ### Decoding
 
-- Operating points on TDL-C, UE on PRBs 6 to 17, as in v10. QPSK at 10 dB, 16-QAM at 18 dB as in
-  v10, 64-QAM at the SNR where its no-jammer BLER is near that of QPSK at 10 dB.
+- Operating points on TDL-C, UE on PRBs 6 to 17, as in v10. QPSK at 8 dB, 16-QAM at 15 dB and
+  64-QAM (MCS 17) at 18 dB, where the baseline fails about 0.8% of the blocks without a jammer.
+- The cases and their commands are in `jamloc.experiments.paper_v11`.
 - Receivers drawn in Fig. 5 are the baseline, no map with the PRB average, no map with shrinkage,
   the EVM map, the U-Net map, the true map with the PRB average (new) and the true map with
   shrinkage.

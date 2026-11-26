@@ -3,10 +3,11 @@
 Every case is one ``jamloc.experiments.recovery`` run per seed of the v11 U-Net (``--unet all``,
 ``experiments.one_unet``), under the Monte Carlo rule of v9 (70 block errors or 160 batches of 64
 slots). The sweeps decode the receivers of Fig. 5 from -9 to +9 dB JSR. The ``*9`` cases decode
-every receiver of the text at +9 dB (and +3 dB with every pilot jammed). QPSK runs at 10 dB SNR,
-where the no-jammer BLER is about 0.2%, so that the curves rest on tens of errors per point
-rather than on none. 16-QAM (MCS 13) runs at 18 dB and 64-QAM (MCS 17) at 22 dB, where their
-no-jammer BLER is about 0.1%.
+every receiver of the text at +9 dB (and +3 dB with every pilot jammed). Each modulation runs
+at the SNR where the baseline receiver fails on about 0.8% of the blocks without a jammer (random
+allocations, ``docs/plan-v11.md``): QPSK (MCS 5) at 8 dB, 16-QAM (MCS 13) at 15 dB and 64-QAM
+(MCS 17) at 18 dB. At the 15 dB of paper v10, the receivers that estimate the jamming power made
+almost no errors with QPSK, so their curves followed chance.
 
     python -m jamloc.experiments.paper_v11 run ROOT [--cases ...] [--parallel 8]
     python -m jamloc.experiments.paper_v11 pool ROOT        # pooled CSVs and paired differences
@@ -31,22 +32,22 @@ JSR = ("--jsr-db", "-9", "-6", "-3", "0", "3", "6", "9")
 FIG = ("standard", "nomap_prb", "nomap_shrink", "evm_shrink", "p_r_e_shrink", "true_soft")
 FIG += ("true_shrink",)
 ALL = (*FIG, "nomap_cell", "true_prb_soft")
-QPSK = ("--snr-db", "10")
-QAM16 = ("--snr-db", "18", "--mcs", "13")
-QAM64 = ("--snr-db", "22", "--mcs", "17")
+QPSK = ("--snr-db", "8")
+QAM16 = ("--snr-db", "15", "--mcs", "13")
+QAM64 = ("--snr-db", "18", "--mcs", "17")
 HOP = ("--jammer", "hopping")
 WHOLE = ("--attacks", "pilot_whole_allocation")
 BLOCK = ("--attacks", "none", "pilot", "data", "partial")
 # case: (options after COMMON, receivers)
 CASES = {
-    "q_nom": ((*QPSK, "--attacks", "pilot", "partial", *JSR), FIG),
+    "q_nom": ((*QPSK, "--attacks", "pilot", *JSR), FIG),
     "q_hop": ((*QPSK, *HOP, *JSR), FIG),
     "q_whole": ((*QPSK, *WHOLE, *JSR), FIG),
     "m16_nom": ((*QAM16, "--attacks", "partial", *JSR), FIG),
     "m16_hop": ((*QAM16, *HOP, "--attacks", "partial", *JSR), FIG),
     "m64_nom": ((*QAM64, "--attacks", "partial", *JSR), FIG),
     "m64_hop": ((*QAM64, *HOP, "--attacks", "partial", *JSR), FIG),
-    "d2_nom": ((*QPSK, "--dmrs2", "--attacks", "pilot", "partial", *JSR), FIG),
+    "d2_nom": ((*QPSK, "--dmrs2", "--attacks", "pilot", *JSR), FIG),
     "d2_hop": ((*QPSK, "--dmrs2", *HOP, "--attacks", "partial", *JSR), FIG),
     "d2_whole": ((*QPSK, "--dmrs2", *WHOLE, *JSR), FIG),
     "q9": ((*QPSK, *BLOCK, "--jsr-db", "9"), ALL),

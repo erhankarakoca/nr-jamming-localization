@@ -145,11 +145,11 @@ def test_paper_v11_cases_build_recovery_commands_and_numbers(tmp_path):
     assert "--dmrs2" in cmd and cmd[cmd.index("--unet") + 1] == "all"
     assert cmd[cmd.index("--receivers") + 1 :] == list(paper_v11.FIG)
     m64 = jobs[3][1]
-    assert m64[m64.index("--mcs") + 1] == "17" and m64[m64.index("--snr-db") + 1] == "22"
+    assert m64[m64.index("--mcs") + 1] == "17" and m64[m64.index("--snr-db") + 1] == "18"
     assert "true_prb_soft" in m64
     assert paper_v11._naming_options(paper_v11.CASES["d2_hop"][0]) == [
         "--snr-db",
-        "10",
+        "8",
         "--dmrs2",
         "--jammer",
         "hopping",
@@ -161,12 +161,12 @@ def test_paper_v11_cases_build_recovery_commands_and_numbers(tmp_path):
 
     folder = tmp_path / "q9" / "recovery"
     folder.mkdir(parents=True)
-    with (folder / "recovery_C_snr10_seed0.csv").open("w", encoding="utf-8", newline="") as f:
+    with (folder / "recovery_C_snr8_seed0.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["receiver", "attack", "jsr_db", "block_errors", "blocks"])
         w.writerow(["nomap_shrink", "pilot", "9.0", 10, 1000])
         w.writerow(["p_r_e_shrink", "pilot", "9.0", 0, 1000])
-    with (folder / "recovery_C_snr10_paired.csv").open("w", encoding="utf-8", newline="") as f:
+    with (folder / "recovery_C_snr8_paired.csv").open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["attack", "jsr_db", "first", "second", "delta", "delta_lo", "delta_hi"])
         w.writerow(["pilot", "9.0", "nomap_shrink", "p_r_e_shrink", 0.01, 0.004, 0.016])

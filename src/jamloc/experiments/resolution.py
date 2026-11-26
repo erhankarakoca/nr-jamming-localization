@@ -60,7 +60,7 @@ CASES = [
     ("recovery_C", "pilot_whole_allocation", "9.0", "all pilots +9"),
 ]
 QAM_CASES = [
-    ("recovery_C_snr18_mcs13", a, j, f"{a} {float(j):+g}")
+    ("recovery_C_snr15_mcs13", a, j, f"{a} {float(j):+g}")
     for a in ("pilot", "data", "partial")
     for j in ("3.0", "9.0")
 ]
@@ -317,16 +317,16 @@ def sweep_grid(root: Path, layout, out: Path, receivers=SWEEP_RECEIVERS_V11) -> 
 
 # Stems of the v11 decoding cases (folder: file stem), see docs/reproducing.md
 V11_STEMS = {
-    "q_nom": "recovery_C_snr10",
-    "q_hop": "recovery_C_hopping_snr10",
-    "q_whole": "recovery_C_snr10",
-    "m16_nom": "recovery_C_snr18_mcs13",
-    "m16_hop": "recovery_C_hopping_snr18_mcs13",
-    "m64_nom": "recovery_C_snr22_mcs17",
-    "m64_hop": "recovery_C_hopping_snr22_mcs17",
-    "d2_nom": "recovery_C_snr10_dmrs2",
-    "d2_hop": "recovery_C_hopping_snr10_dmrs2",
-    "d2_whole": "recovery_C_snr10_dmrs2",
+    "q_nom": "recovery_C_snr8",
+    "q_hop": "recovery_C_hopping_snr8",
+    "q_whole": "recovery_C_snr8",
+    "m16_nom": "recovery_C_snr15_mcs13",
+    "m16_hop": "recovery_C_hopping_snr15_mcs13",
+    "m64_nom": "recovery_C_snr18_mcs17",
+    "m64_hop": "recovery_C_hopping_snr18_mcs17",
+    "d2_nom": "recovery_C_snr8_dmrs2",
+    "d2_hop": "recovery_C_hopping_snr8_dmrs2",
+    "d2_whole": "recovery_C_snr8_dmrs2",
 }
 
 
@@ -338,7 +338,7 @@ WHOLE = "pilot_whole_allocation"
 V11_LAYOUT = [
     [
         (
-            "QPSK at 10 dB SNR",
+            "QPSK at 8 dB SNR",
             [
                 _panel("q_nom", "pilot", "(a) Block, pilot only"),
                 _panel("q_hop", "data", "(b) Hopping, data only"),
@@ -347,7 +347,7 @@ V11_LAYOUT = [
             ],
         ),
         (
-            "16-QAM at 18 dB SNR",
+            "16-QAM at 15 dB SNR",
             [
                 _panel("m16_nom", "partial", "(e) Block, pilot + data"),
                 _panel("m16_hop", "partial", "(f) Hopping, pilot + data"),
@@ -356,14 +356,14 @@ V11_LAYOUT = [
     ],
     [
         (
-            "64-QAM at 22 dB SNR",
+            "64-QAM at 18 dB SNR",
             [
                 _panel("m64_nom", "partial", "(g) Block, pilot + data"),
                 _panel("m64_hop", "partial", "(h) Hopping, pilot + data"),
             ],
         ),
         (
-            "QPSK at 10 dB SNR, two DMRS symbols",
+            "QPSK at 8 dB SNR, two DMRS symbols",
             [
                 _panel("d2_nom", "pilot", "(i) Block, pilot only"),
                 _panel("d2_hop", "partial", "(j) Hopping, pilot + data"),
