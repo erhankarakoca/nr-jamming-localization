@@ -2173,6 +2173,8 @@ The subsection on further decoding attempts was left out while the paper had six
 the long version. An independent review checked all 91 table entries and the text against the
 result files and found no mismatch. Its points on wording and precision were applied.
 On 26 Nov the term "unexplained energy" became "excess power" throughout the paper.
+The same day Fig. 1 got step numbers in place of equation numbers, the attack-map figure became
+Fig. 2 because the text cites it first, and every float was moved next to the text that cites it.
 
 ## 29. Which inputs and which network
 

@@ -341,7 +341,7 @@ JAMLOC_RESULTS_DIR=results/v10/sweep_qam uv run python -m jamloc.experiments.rec
 JAMLOC_RESULTS_DIR=results/v10/sweep_qamhop uv run python -m jamloc.experiments.recovery --channel C --jammer hopping --snr-db 18 --mcs 13 --plot-only
 uv run python -m jamloc.experiments.resolution sweep results/v9/sweep_nom/recovery results/v9/sweep_hop/recovery \
     results/v10/sweep_qam/recovery results/v10/sweep_qamhop/recovery --with-qam --out results/v10/resolution_sweep
-# Fig. 2 and Fig. 3 (shrinkage example and attack maps)
+# Fig. 2 and Fig. 3 (attack maps and shrinkage example)
 uv run python -m jamloc.experiments.figures --only shrinkage_example attack_maps
 ```
 
