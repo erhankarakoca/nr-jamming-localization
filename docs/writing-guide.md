@@ -52,6 +52,32 @@ Every source below was opened, and every DOI was resolved through Crossref (18 N
 - Mark interpretation as interpretation ("presumably because", "the ablation points to").
 - *IEEE Authorship Series; Halmos; Peyton Jones.*
 
+### Flow and results (27 November 2026)
+
+The author found v12 correct but hard going. Its prose was a run of short facts, and its results
+listed numbers without saying what they meant. `conference-v13.tex` was rewritten for flow with
+these rules.
+
+- **Point first.** Each paragraph opens with what it is for or what it found, never with a figure
+  reference or a step number. The evidence and the conditions follow.
+- **Connected sentences.** Join facts that belong together with "and", "so", "because",
+  "whereas" or "while". Leaving out colons and semicolons does not mean writing only short
+  sentences. A run of short declaratives with the same subject reads as harsh.
+- **Results interpret.** Each result paragraph gives the finding, one or two numbers that show its
+  size, the mechanism behind it and what it implies for the receiver. The figures and tables carry
+  the other numbers. Check every mechanism against the code (for example which pilots a map
+  changes in `MapAwareReceiver._pilots`) and mark it as interpretation when the runs do not
+  isolate it.
+- **Intervals stated once.** The setup says once how differences were tested, and the text quotes
+  them without their intervals. That sentence must stay true. It covers only gains and losses
+  between receivers on the same slots, and every quoted one must have an interval that excludes
+  zero.
+- **Related work leads to the gap.** Group works by what they do for the receiver, and cite each
+  one where it bears on the argument, for example the fine-resolution estimators next to the
+  resolution question.
+- **Scope survives the abstract.** Keep the modulation, JSR, attack and comparator of every number,
+  and keep the abstract near 250 words.
+
 ## 4. Exemplar papers
 
 | Paper | What to copy |
