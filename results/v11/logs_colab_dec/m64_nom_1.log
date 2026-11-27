@@ -1,0 +1,8 @@
+[C nominal true seed 1] partial                JSR  -9.0 dB: standard 0.348  true_soft 0.058  p_r_e_shrink 0.073  true_shrink 0.069  nomap_prb 0.141  nomap_shrink 0.163  evm_shrink 0.277
+[C nominal true seed 1] partial                JSR  -6.0 dB: standard 0.578  true_soft 0.083  p_r_e_shrink 0.088  true_shrink 0.084  nomap_prb 0.172  nomap_shrink 0.183  evm_shrink 0.495
+[C nominal true seed 1] partial                JSR  -3.0 dB: standard 0.844  true_soft 0.088  p_r_e_shrink 0.099  true_shrink 0.095  nomap_prb 0.225  nomap_shrink 0.269  evm_shrink 0.812
+[C nominal true seed 1] partial                JSR  +0.0 dB: standard 0.953  true_soft 0.156  p_r_e_shrink 0.170  true_shrink 0.158  nomap_prb 0.275  nomap_shrink 0.281  evm_shrink 0.930
+[C nominal true seed 1] partial                JSR  +3.0 dB: standard 0.992  true_soft 0.165  p_r_e_shrink 0.185  true_shrink 0.172  nomap_prb 0.375  nomap_shrink 0.396  evm_shrink 0.961
+[C nominal true seed 1] partial                JSR  +6.0 dB: standard 0.992  true_soft 0.167  p_r_e_shrink 0.174  true_shrink 0.172  nomap_prb 0.406  nomap_shrink 0.417  evm_shrink 0.938
+[C nominal true seed 1] partial                JSR  +9.0 dB: standard 1.000  true_soft 0.195  p_r_e_shrink 0.201  true_shrink 0.198  nomap_prb 0.495  nomap_shrink 0.526  evm_shrink 0.938
+Wrote /content/dec/m64_nom/recovery/recovery_C_snr18_mcs17.csv and recovery_C_snr18_mcs17_paired.csv (no figure)

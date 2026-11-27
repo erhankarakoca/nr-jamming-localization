@@ -1,0 +1,8 @@
+[C hopping true seed 0] partial                JSR  -9.0 dB: standard 0.068  true_soft 0.014  p_r_e_shrink 0.017  true_shrink 0.014  nomap_prb 0.051  nomap_shrink 0.034  evm_shrink 0.042
+[C hopping true seed 0] partial                JSR  -6.0 dB: standard 0.188  true_soft 0.023  p_r_e_shrink 0.030  true_shrink 0.025  nomap_prb 0.137  nomap_shrink 0.068  evm_shrink 0.137
+[C hopping true seed 0] partial                JSR  -3.0 dB: standard 0.505  true_soft 0.045  p_r_e_shrink 0.055  true_shrink 0.047  nomap_prb 0.417  nomap_shrink 0.137  evm_shrink 0.391
+[C hopping true seed 0] partial                JSR  +0.0 dB: standard 0.703  true_soft 0.068  p_r_e_shrink 0.079  true_shrink 0.070  nomap_prb 0.656  nomap_shrink 0.190  evm_shrink 0.570
+[C hopping true seed 0] partial                JSR  +3.0 dB: standard 0.914  true_soft 0.091  p_r_e_shrink 0.108  true_shrink 0.101  nomap_prb 0.906  nomap_shrink 0.263  evm_shrink 0.680
+[C hopping true seed 0] partial                JSR  +6.0 dB: standard 0.984  true_soft 0.127  p_r_e_shrink 0.139  true_shrink 0.132  nomap_prb 0.992  nomap_shrink 0.253  evm_shrink 0.797
+[C hopping true seed 0] partial                JSR  +9.0 dB: standard 0.992  true_soft 0.195  p_r_e_shrink 0.211  true_shrink 0.195  nomap_prb 0.992  nomap_shrink 0.348  evm_shrink 0.695
+Wrote /content/dec/m16_hop/recovery/recovery_C_hopping_mcs13.csv and recovery_C_hopping_mcs13_paired.csv (no figure)

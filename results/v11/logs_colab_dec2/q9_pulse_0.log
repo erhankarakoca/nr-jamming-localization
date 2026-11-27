@@ -1,0 +1,3 @@
+[C pulsed true seed 0] data                   JSR  +9.0 dB: standard 0.464  true_soft 0.014  true_prb_soft 0.058  p_r_e_shrink 0.016  true_shrink 0.014  nomap_prb 0.062  nomap_cell 0.018  nomap_shrink 0.017  evm_shrink 0.211
+[C pulsed true seed 0] partial                JSR  +9.0 dB: standard 0.617  true_soft 0.030  true_prb_soft 0.069  p_r_e_shrink 0.036  true_shrink 0.030  nomap_prb 0.080  nomap_cell 0.045  nomap_shrink 0.039  evm_shrink 0.336
+Wrote /content/dec2/q9_pulse/recovery/recovery_C_pulsed_snr8.csv and the main, ablation and map-source figures (.pdf/.png)

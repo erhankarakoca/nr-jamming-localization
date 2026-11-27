@@ -13,6 +13,7 @@ then pools the seeds and writes the paired differences.
     python -m jamloc.experiments.resolution merge OUT DIR [DIR ...]
     python -m jamloc.experiments.resolution table DIR
     python -m jamloc.experiments.resolution sweep DIR [DIR]   # BLER against JSR, one figure
+    python -m jamloc.experiments.resolution sweep-v11 ROOT    # the two rows of paper v11
 """
 
 import argparse
@@ -59,7 +60,7 @@ CASES = [
     ("recovery_C", "pilot_whole_allocation", "9.0", "all pilots +9"),
 ]
 QAM_CASES = [
-    ("recovery_C_snr18_mcs13", a, j, f"{a} {float(j):+g}")
+    ("recovery_C_snr15_mcs13", a, j, f"{a} {float(j):+g}")
     for a in ("pilot", "data", "partial")
     for j in ("3.0", "9.0")
 ]
@@ -250,6 +251,139 @@ def sweep(folders: list[Path], out: Path, panels=SWEEP_PANELS, groups=()) -> Non
     save(fig, out)
 
 
+# Paper v11: the receivers of the v10 figure and the true map without shrinkage (a plain average
+# over the marked cells of a PRB row)
+SWEEP_RECEIVERS_V11 = {
+    **SWEEP_RECEIVERS,
+    "true_soft": ("True map, PRB average", "#CC79A7", "P", "--"),
+}
+
+
+def sweep_grid(root: Path, layout, out: Path, receivers=SWEEP_RECEIVERS_V11) -> None:
+    """BLER against JSR in rows of labelled panel groups. ``layout`` is a list of rows, a row a
+    list of groups ``(label, panels)``, a panel ``(case, stem, attack, title)`` whose per-seed
+    files are in ``root/case/recovery``. Every panel shares one y axis."""
+    data = {}
+    for row in layout:
+        for _, panels in row:
+            for case, stem, _, _ in panels:
+                for key, v in pooled(root / case / "recovery", stem).items():
+                    data[(case, stem, *key)] = v
+    with paper_style():
+        fig = Figure(figsize=(7.16, 1.5 * len(layout) + 0.35), layout="constrained")
+        row_figs = np.atleast_1d(fig.subfigures(len(layout), 1, hspace=0.02))
+        axes, specs = [], []
+        for row_fig, row in zip(row_figs, layout, strict=True):
+            widths = [len(panels) for _, panels in row]
+            group_figs = np.atleast_1d(
+                row_fig.subfigures(1, len(row), width_ratios=widths, wspace=0.01)
+            )
+            for sub, width, (label, panels) in zip(group_figs, widths, row, strict=True):
+                sub.suptitle(label, fontsize=7)
+                axes += list(np.atleast_1d(sub.subplots(1, width, sharey=True)))
+                specs += panels
+        for ax, (case, stem, attack, title) in zip(axes, specs, strict=True):
+            for rx, (label, color, marker, ls) in receivers.items():
+                points = sorted(
+                    (float(k[4]), v)
+                    for k, v in data.items()
+                    if k[:4] == (case, stem, rx, attack) and k[4] != "nan"
+                )
+                if not points:
+                    continue
+                style = {"color": color, "marker": marker, "ls": ls, "ms": 3, "lw": 1}
+                x = [p[0] for p in points]
+                plot_bler(ax, x, [p[1][0] for p in points], [p[1][1] for p in points], style, label)
+            ax.set_yscale("log")
+            ax.set_xlabel("JSR per jammed RE [dB]", fontsize=6)
+            ax.set_title(title, fontsize=7)
+        drawn = [y for ax in axes for line in ax.get_lines() for y in line.get_ydata() if y > 0]
+        # the decade below the lowest point drawn (bler_floor would keep the axis down to 1e-4)
+        floor = 10.0 ** np.floor(np.log10(min(drawn, default=1e-4)))
+        # a hollow triangle (no block error) is drawn without a line style
+        zero_points = any(
+            line.get_linestyle() == "None" and len(line.get_ydata())
+            for ax in axes
+            for line in ax.get_lines()
+        )
+        first = {id(ax.figure): ax for ax in axes[::-1]}  # first panel of each group
+        for ax in axes:
+            ax.set_ylim(floor, 1.2)
+            if first[id(ax.figure)] is ax:
+                ax.set_ylabel("BLER")
+        legend = {}
+        for ax in axes:
+            for handle, label in zip(*ax.get_legend_handles_labels(), strict=True):
+                legend.setdefault(label, handle)
+        labels = [s[0] for s in receivers.values() if s[0] in legend]
+        handles = [legend[label] for label in labels]
+        if zero_points:
+            handles.append(zero_error_handle())
+            labels.append(handles[-1].get_label())
+        fig.legend(handles, labels, loc="outside lower center", ncols=4, fontsize=6)
+    save(fig, out)
+
+
+# Stems of the v11 decoding cases (folder: file stem), see docs/reproducing.md
+V11_STEMS = {
+    "q_nom": "recovery_C_snr8",
+    "q_hop": "recovery_C_hopping_snr8",
+    "q_whole": "recovery_C_snr8",
+    # recovery leaves its default SNR, 15 dB, out of the file name
+    "m16_nom": "recovery_C_mcs13",
+    "m16_hop": "recovery_C_hopping_mcs13",
+    "m64_nom": "recovery_C_snr18_mcs17",
+    "m64_hop": "recovery_C_hopping_snr18_mcs17",
+    "d2_nom": "recovery_C_snr8_dmrs2",
+    "d2_hop": "recovery_C_hopping_snr8_dmrs2",
+    "d2_whole": "recovery_C_snr8_dmrs2",
+}
+
+
+def _panel(case: str, attack: str, title: str) -> tuple:
+    return (case, V11_STEMS[case], attack, title)
+
+
+WHOLE = "pilot_whole_allocation"
+V11_LAYOUT = [
+    [
+        (
+            "QPSK at 8 dB SNR",
+            [
+                _panel("q_nom", "pilot", "(a) Block, pilot only"),
+                _panel("q_hop", "data", "(b) Hopping, data only"),
+                _panel("q_hop", "partial", "(c) Hopping, pilot + data"),
+                _panel("q_whole", WHOLE, "(d) Every pilot"),
+            ],
+        ),
+        (
+            "16-QAM at 15 dB SNR",
+            [
+                _panel("m16_nom", "partial", "(e) Block, pilot + data"),
+                _panel("m16_hop", "partial", "(f) Hopping, pilot + data"),
+            ],
+        ),
+    ],
+    [
+        (
+            "64-QAM at 18 dB SNR",
+            [
+                _panel("m64_nom", "partial", "(g) Block, pilot + data"),
+                _panel("m64_hop", "partial", "(h) Hopping, pilot + data"),
+            ],
+        ),
+        (
+            "QPSK at 8 dB SNR, two DMRS symbols",
+            [
+                _panel("d2_nom", "pilot", "(i) Block, pilot only"),
+                _panel("d2_hop", "partial", "(j) Hopping, pilot + data"),
+                _panel("d2_whole", WHOLE, "(k) Every pilot"),
+            ],
+        ),
+    ],
+]
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="command", required=True)
@@ -263,10 +397,17 @@ def main(argv=None):
     s.add_argument("folders", type=Path, nargs="+")
     s.add_argument("--out", type=Path, default=None)
     s.add_argument("--with-qam", action="store_true", help="the panels of paper v10, with 16-QAM")
+    g = sub.add_parser("sweep-v11", help="BLER against JSR, the two rows of paper v11")
+    g.add_argument("root", type=Path, help="folder with one subfolder per decoding case")
+    g.add_argument("--out", type=Path, default=None)
     args = p.parse_args(argv)
     if args.command == "merge":
         problems = merge(args.out, args.folders)
         print("\n".join(problems) or "every receiver found twice has the same counts")
+    elif args.command == "sweep-v11":
+        out = args.out or args.root / "resolution_sweep"
+        sweep_grid(args.root, V11_LAYOUT, out)
+        print(f"Wrote {out}.pdf/.png")
     elif args.command == "table":
         cases = QAM_CASES if args.qam else CASES
         print(markdown(table(args.folder, cases), cases))

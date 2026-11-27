@@ -1,0 +1,8 @@
+[C hopping true seed 2] partial                JSR  -9.0 dB: standard 0.008  true_soft 0.002  p_r_e_shrink 0.003  true_shrink 0.002  nomap_prb 0.003  nomap_shrink 0.003  evm_shrink 0.003
+[C hopping true seed 2] partial                JSR  -6.0 dB: standard 0.013  true_soft 0.003  p_r_e_shrink 0.004  true_shrink 0.003  nomap_prb 0.005  nomap_shrink 0.004  evm_shrink 0.006
+[C hopping true seed 2] partial                JSR  -3.0 dB: standard 0.039  true_soft 0.004  p_r_e_shrink 0.005  true_shrink 0.004  nomap_prb 0.011  nomap_shrink 0.006  evm_shrink 0.018
+[C hopping true seed 2] partial                JSR  +0.0 dB: standard 0.119  true_soft 0.006  p_r_e_shrink 0.007  true_shrink 0.006  nomap_prb 0.039  nomap_shrink 0.009  evm_shrink 0.071
+[C hopping true seed 2] partial                JSR  +3.0 dB: standard 0.297  true_soft 0.008  p_r_e_shrink 0.010  true_shrink 0.008  nomap_prb 0.107  nomap_shrink 0.014  evm_shrink 0.203
+[C hopping true seed 2] partial                JSR  +6.0 dB: standard 0.586  true_soft 0.012  p_r_e_shrink 0.013  true_shrink 0.012  nomap_prb 0.324  nomap_shrink 0.018  evm_shrink 0.332
+[C hopping true seed 2] partial                JSR  +9.0 dB: standard 0.789  true_soft 0.013  p_r_e_shrink 0.014  true_shrink 0.013  nomap_prb 0.609  nomap_shrink 0.018  evm_shrink 0.396
+Wrote results/v11/d2_hop/recovery/recovery_C_hopping_snr8_dmrs2.csv and the main, ablation and map-source figures (.pdf/.png)

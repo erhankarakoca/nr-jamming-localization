@@ -65,6 +65,7 @@ stopped early (100 block errors) is compared on the slots both receivers decoded
     python -m jamloc.experiments.recovery --channel C --jammer pulsed --seeds 0 1 2
     python -m jamloc.experiments.recovery --channel C --noise-estimate comb --seeds 0 1 2
     python -m jamloc.experiments.recovery --channel C --jam-prb 8 --jsr-db 3 9  # wider jammer
+    python -m jamloc.experiments.recovery --channel C --dmrs2 --unet all  # two DMRS symbols
 
 ``--replay DIR`` repeats an earlier run whose per-seed CSVs are in ``DIR`` on exactly the same
 slots, but decodes only the points and receivers the paper quotes (``QUOTED``), so that their
@@ -77,7 +78,8 @@ CSV, which ``check_replay`` verifies.
         --replay results/recovery_pr9
 
 The U-Net map comes from the general U-Net by default. Runs made before the paper v9 runs used
-the U-Net trained on the nominal mix, and ``--unet nominal`` repeats them.
+the U-Net trained on the nominal mix, and ``--unet nominal`` repeats them. The runs of paper v11
+use ``--unet all``, the U-Net trained on one and two DMRS symbols and three modulations.
 """
 
 import argparse
@@ -242,12 +244,19 @@ ON_REQUEST = {"no_evm_gen": {"pr_shrink"}, "resnet_gen": {"resnet_shrink"}}
 # Which training the U-Net of the p_r_e_* receivers ("fused") comes from: (load_model options,
 # validation split of its threshold). The general one (experiments/general_training) is the
 # default; the nominal one reproduces the results before section 26 of docs/results.md.
-UNETS = {"general": ({"data": "gen"}, "val_gen"), "nominal": ({}, "val")}
+# "all" is the U-Net of paper v11, trained on one and two DMRS symbols and three modulations
+# (experiments/one_unet).
+UNETS = {
+    "general": ({"data": "gen"}, "val_gen"),
+    "nominal": ({}, "val"),
+    "all": ({"data": "all"}, "val_all"),
+}
 # Receivers of the general U-Net under its own name, which repeat p_r_e_* with --unet general
 GEN_RECEIVERS = {"gen_soft", "gen_shrink"}
 TRAIN_COMMANDS = {
     "general": "python -m jamloc.experiments.general_training",
     "nominal": "python -m jamloc.train --variant fused",
+    "all": "python -m jamloc.experiments.one_unet",
 }
 
 
@@ -691,16 +700,20 @@ def simulate(
     jam_size=JAM_SIZE,
     mcs_index=None,
     unet="general",
+    dmrs2=False,
 ):
     """Rows of block-error counts (one per receiver and point), and the per-slot outcomes keyed by
     ``slot_key``. ``replay = (batches, decode)``: simulate every point with ``batches[point]``
     batches, decoding only the receivers ``decode[point]``. ``attacks``: simulate only these cases
     (``"none"``, ``"pilot"``, ``"data"``, ``"partial"``, ``"pilot_whole_allocation"``).
     ``jam_size``: PRBs of the pilot, data and partial-band attacks (inside the allocation).
-    ``unet``: the training of the ``p_r_e_*`` receivers' U-Net (``UNETS``)."""
+    ``unet``: the training of the ``p_r_e_*`` receivers' U-Net (``UNETS``). ``dmrs2``: a second
+    DMRS symbol in every slot (symbol 11), which every pilot attack also jams."""
     cfg = dataclasses.replace(SimConfig(), noise_estimate=noise_estimate, **JAMMERS[jammer])
     if mcs_index is not None:  # another MCS: the detectors were trained on the default one
         cfg = dataclasses.replace(cfg, mcs_index=mcs_index)
+    if dmrs2:
+        cfg = dataclasses.replace(cfg, dmrs_additional_position=1)
     link = JammedPUSCHLink(cfg)
     nest = noise_estimate != "true"
     detectors = {}
@@ -1111,6 +1124,11 @@ def main(argv=None):
     p.add_argument(
         "--mcs", type=int, default=None, help="MCS index (table 1) instead of the default"
     )
+    p.add_argument(
+        "--dmrs2",
+        action="store_true",
+        help="two DMRS symbols per slot (files get a _dmrs2 suffix)",
+    )
     args = p.parse_args(argv)
 
     out = results_dir() / "recovery"
@@ -1126,6 +1144,8 @@ def main(argv=None):
         stem = stem.with_name(f"{stem.name}_jam{args.jam_prb}")
     if args.mcs is not None:
         stem = stem.with_name(f"{stem.name}_mcs{args.mcs}")
+    if args.dmrs2:
+        stem = stem.with_name(f"{stem.name}_dmrs2")
     original = stem  # the name of the run a replay repeats
     if args.replay:
         stem = stem.with_name(f"{stem.name}_replay")
@@ -1167,6 +1187,7 @@ def main(argv=None):
                 JAM_SIZE if args.jam_prb is None else args.jam_prb,
                 args.mcs,
                 args.unet,
+                args.dmrs2,
             )
             if args.replay:
                 bad = check_replay(rows, before)

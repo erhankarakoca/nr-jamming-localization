@@ -2272,3 +2272,174 @@ until 70 block errors or 160 batches of 64 slots, and every point has at least 2
   (F1 0.694 against 0.951 with nominal training). The U-Net can stay as the detector with this
   ablation as its justification, or the ResNet can replace it, which means running the decoding
   behind every table and figure again.
+
+## 30. One U-Net for every configuration (paper v11)
+
+Round of 26-27 Nov 2026 (branch `paper-v11`). The author asked for two DMRS symbols, 64-QAM,
+fewer tables, smoother BLER curves and the true map without shrinkage (`plan-v11.md`). The
+commands are under "Paper v11" in `reproducing.md`. Training and most decoding ran on a Colab L4
+(12 vCPUs), the rest on the Mac.
+
+**Training.** One U-Net (66 553 parameters, as before) on `train_all`, 240 000 slots cycling
+through 54 conditions, the 18 of the general training times three modulations (QPSK, 16-QAM MCS 13,
+64-QAM MCS 17 at 16-30 dB SNR) times one or two DMRS symbols. Same schedule as section 26 (plateau
+halving, early stopping after 10 epochs). The three seeds stopped after 27 or 28 epochs at a
+validation loss of 0.097 to 0.098 (`results/one_unet/logs`). One threshold from `val_all`.
+
+**Detection.** F1 / false alarms on scored cells, mean of three seeds, v10 U-Net (`train_gen`,
+threshold from `val_gen`) against the v11 one, on test grids with one and two DMRS symbols
+(`results/one_unet/one_unet.csv`, `python -m jamloc.experiments.one_unet --table-only`).
+
+| Grid | v10 U-Net, 1 DMRS | v11 U-Net, 1 DMRS | v10 U-Net, 2 DMRS | v11 U-Net, 2 DMRS |
+| --- | --- | --- | --- | --- |
+| QPSK block | 0.954 / 0.7% | 0.951 / 0.9% | 0.927 / 1.8% | 0.954 / 0.9% |
+| QPSK hopping | 0.923 / 1.5% | 0.921 / 1.8% | 0.908 / 1.9% | 0.919 / 1.8% |
+| QPSK pilot comb | 0.954 / 0.7% | 0.951 / 0.9% | 0.920 / 1.8% | 0.949 / 1.0% |
+| QPSK 1000 ns | 0.924 / 1.5% | 0.919 / 1.7% | 0.873 / 3.9% | 0.914 / 2.0% |
+| QPSK 30 m/s | 0.949 / 0.8% | 0.946 / 1.0% | 0.924 / 1.8% | 0.951 / 0.9% |
+| 16-QAM block | 0.966 / 0.4% | 0.964 / 0.6% | 0.946 / 1.1% | 0.969 / 0.5% |
+| 16-QAM hopping | 0.940 / 1.2% | 0.935 / 1.6% | 0.933 / 1.3% | 0.942 / 1.4% |
+| 64-QAM block | 0.952 / 0.1% | 0.979 / 0.3% | 0.931 / 0.8% | 0.981 / 0.3% |
+| 64-QAM hopping | 0.947 / 0.4% | 0.959 / 0.9% | 0.934 / 0.7% | 0.962 / 0.8% |
+| QPSK pulsed (unseen) | 0.822 / 3.8% | 0.774 / 5.6% | 0.814 / 4.0% | 0.785 / 5.1% |
+
+| Grid | Detector | DMRS | F1 pilot | Pilot Pd at -15 dB | Same at 1% FA |
+| --- | --- | --- | --- | --- | --- |
+| QPSK block | v10 U-Net | 1 | 0.871 | 0.451 | 0.495 |
+| QPSK block | v11 U-Net | 1 | 0.861 | 0.501 | 0.519 |
+| QPSK block | v10 U-Net | 2 | 0.758 | 0.295 | 0.226 |
+| QPSK block | v11 U-Net | 2 | 0.905 | 0.575 | 0.586 |
+| 16-QAM block | v10 U-Net | 1 | 0.911 | 0.624 | 0.712 |
+| 16-QAM block | v11 U-Net | 1 | 0.877 | 0.662 | 0.717 |
+| 16-QAM block | v10 U-Net | 2 | 0.823 | 0.402 | 0.383 |
+| 16-QAM block | v11 U-Net | 2 | 0.933 | 0.725 | 0.788 |
+| 64-QAM block | v10 U-Net | 1 | 0.968 | 0.870 | 0.958 |
+| 64-QAM block | v11 U-Net | 1 | 0.927 | 0.877 | 0.931 |
+| 64-QAM block | v10 U-Net | 2 | 0.875 | 0.641 | 0.683 |
+| 64-QAM block | v11 U-Net | 2 | 0.972 | 0.900 | 0.962 |
+
+Reading of the detection results.
+- **Two DMRS symbols need training.** The v10 U-Net, which never saw a second DMRS symbol, falls to
+  pilot F1 0.758 on the QPSK block grid with two DMRS symbols (0.905 for the v11 one) and doubles
+  its false alarms (1.8% against 0.9%). Its F1 over all attacks drops from 0.954 to 0.927.
+- **Training on every configuration costs little.** With one DMRS symbol and QPSK or 16-QAM the
+  v11 U-Net is within 0.005 F1 of the v10 one and marks slightly more clean cells (0.9% against
+  0.7% on the QPSK block grid). With 64-QAM it gains (0.979 against 0.952 on the block grid),
+  although its pilot F1 there is lower (0.927 against 0.968).
+- **The unseen pulsed jammer suffers.** F1 0.774 against 0.822 with 5.6% false alarms against
+  3.8%. The ResNet of section 29 did much better on this grid (0.907), so this is the main cost of
+  keeping the U-Net.
+
+**Operating points.** QPSK at 15 dB made the receivers that estimate the jamming power fail on 0 to
+3 of 30 720 blocks, so the v10 curves followed chance and zero-error points sat at the 95% upper
+bound of 1.2e-4. A first run at 10 dB still gave 0 to 5 errors per seed and was stopped. Each
+modulation now runs where the baseline receiver fails about 0.8% of the blocks without a jammer on
+random allocations. That is QPSK at 8 dB, 16-QAM at 15 dB and 64-QAM (MCS 17) at 18 dB
+(`plan-v11.md` has the no-jammer sweep). With the fixed 12-PRB allocation, the receivers with the
+U-Net map or the true map fail on 0.26% (QPSK), 0.26% (16-QAM) and 0.16% (64-QAM) of the blocks
+without a jammer, so every point of the new figure rests on tens to hundreds of errors.
+
+**Decoding at +9 dB JSR.** BLER in percent, three seeds pooled (`python -m
+jamloc.experiments.paper_v11 numbers results/v11`). A block covers 4 PRBs inside the allocation,
+hop is the hopping block, and every pilot is jammed at +3 and +9 dB.
+
+| Case | Baseline | No map, PRB avg. | No map, cell | No map, shrinkage | EVM map | U-Net map | True map, PRB avg. | True map | PRB-res. true map |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| QPSK, no jammer | 0.57 | 0.31 | 0.32 | 0.30 | 0.26 | 0.26 | 0.26 | 0.26 | 0.26 |
+| QPSK block, pilot | 47.1 | 3.59 | 3.81 | 3.55 | 20.0 | 2.65 | 2.62 | 2.62 | 2.62 |
+| QPSK block, data | 86.5 | 9.12 | 10.2 | 9.20 | 66.1 | 8.40 | 8.16 | 8.19 | 8.16 |
+| QPSK block, pilot + data | 93.8 | 11.4 | 13.0 | 11.4 | 83.9 | 10.0 | 9.82 | 9.96 | 9.82 |
+| QPSK hop, data | 62.5 | 60.9 | 2.25 | 2.43 | 26.2 | 1.87 | 1.82 | 1.84 | 60.9 |
+| QPSK hop, pilot + data | 78.6 | 66.4 | 7.63 | 7.96 | 48.4 | 6.65 | 6.40 | 6.46 | 65.6 |
+| QPSK pulsed, data | 50.4 | 5.95 | 1.95 | 1.83 | 19.7 | 1.76 | 1.52 | 1.59 | 5.55 |
+| QPSK pulsed, pilot + data | 63.5 | 8.85 | 4.34 | 4.02 | 35.9 | 3.83 | 3.08 | 3.11 | 7.57 |
+| QPSK every pilot +3 | 41.1 | 14.4 | 14.4 | 14.3 | 15.8 | 12.1 | 11.9 | 11.9 | - |
+| QPSK every pilot +9 | 93.2 | 56.5 | 56.5 | 56.8 | 66.7 | 50.7 | 50.9 | 50.9 | - |
+| 16-QAM, no jammer | 0.59 | 0.44 | 0.72 | 0.45 | 0.26 | 0.26 | 0.26 | 0.26 | 0.26 |
+| 16-QAM block, pilot | 94.8 | 11.0 | 13.5 | 11.1 | 76.8 | 5.22 | 5.17 | 5.17 | 5.17 |
+| 16-QAM block, data | 99.5 | 28.4 | 41.0 | 29.2 | 64.8 | 23.8 | 23.0 | 23.7 | 23.0 |
+| 16-QAM block, pilot + data | 99.7 | 39.8 | 52.1 | 40.3 | 93.0 | 26.9 | 26.3 | 26.5 | 26.3 |
+| 16-QAM hop, data | 96.9 | 99.5 | 9.87 | 9.97 | 30.3 | 4.85 | 4.64 | 4.71 | 99.2 |
+| 16-QAM hop, pilot + data | 99.5 | 99.5 | 33.2 | 34.2 | 73.4 | 17.7 | 16.6 | 16.8 | 99.2 |
+| 64-QAM, no jammer | 0.56 | 0.56 | 1.19 | 0.56 | 0.16 | 0.16 | 0.16 | 0.16 | 0.16 |
+| 64-QAM block, pilot | 96.9 | 20.2 | 28.1 | 20.1 | 87.2 | 4.71 | 4.56 | 4.56 | 4.56 |
+| 64-QAM block, data | 99.7 | 35.8 | 60.4 | 36.9 | 55.6 | 20.9 | 20.3 | 20.5 | 20.3 |
+| 64-QAM block, pilot + data | 100 | 54.0 | 78.4 | 55.8 | 95.3 | 22.4 | 21.6 | 22.0 | 21.6 |
+| 64-QAM hop, data | 98.4 | 99.7 | 14.7 | 17.2 | 21.0 | 3.48 | 3.23 | 3.31 | 99.7 |
+| 64-QAM hop, pilot + data | 99.5 | 99.5 | 50.7 | 52.7 | 73.4 | 17.7 | 15.4 | 15.8 | 99.0 |
+| QPSK two DMRS, no jammer | 0.44 | 0.14 | 0.15 | 0.14 | 0.13 | 0.13 | 0.13 | 0.13 | 0.13 |
+| QPSK two DMRS block, pilot | 35.1 | 1.41 | 1.53 | 1.40 | 7.96 | 1.25 | 1.23 | 1.23 | 1.23 |
+| QPSK two DMRS block, data | 82.0 | 5.92 | 6.76 | 6.13 | 63.5 | 5.41 | 5.42 | 5.41 | 5.42 |
+| QPSK two DMRS block, pilot + data | 92.4 | 7.43 | 8.31 | 7.56 | 79.7 | 6.91 | 6.84 | 6.88 | 6.84 |
+
+Paired differences quoted in the paper, in percentage points with their 95% intervals, all at
++9 dB unless stated.
+
+- U-Net map minus shrinkage without a map. QPSK block pilot -0.81 (-1.08 to -0.55), block pilot +
+  data -1.61 (-2.28 to -0.99), hop pilot + data -1.34 (-1.86 to -0.87), every pilot +3 dB -2.15
+  (-3.06 to -1.27), +9 dB -7.81 (-10.69 to -4.89), pulsed data -0.14 (-0.25 to -0.03). 16-QAM
+  block pilot + data -11.88 (-14.50 to -9.24), hop -16.90 (-19.76 to -14.07). 64-QAM block -34.38
+  (-38.66 to -29.84), hop -36.52 (-40.61 to -32.24). Two DMRS block pilot -0.21 (-0.30 to -0.11),
+  block pilot + data -0.57 (-0.90 to -0.26), every pilot (sweep run) -2.99 (-4.65 to -1.35).
+- U-Net map minus true map. At most +0.15 with QPSK, +0.56 (0.36 to 0.78) under pulsed pilot +
+  data, +0.89 (0.31 to 1.50) under 16-QAM hop, +1.72 (0.99 to 2.49) under 64-QAM hop. In the sweeps
+  up to +2.9 (64-QAM hop at 0 dB).
+- Shrinkage minus cell estimate without a map. Block data -0.99 (-1.47 to -0.56) with QPSK, -12.15
+  (-14.83 to -9.46) with 16-QAM, -24.22 (-28.41 to -19.82) with 64-QAM. Hop pilot + data +0.25
+  (0.03 to 0.49) with QPSK, +1.56 (0.38 to 2.75) with 16-QAM, +1.95 (0.13 to 3.77) with 64-QAM.
+- True map with the PRB average minus true map with shrinkage. QPSK hop pilot + data -0.06 (-0.21
+  to 0.08), 16-QAM block data -0.68 (-1.27 to -0.12), 64-QAM hop pilot + data -0.43 (-0.85 to
+  -0.02). In the sweeps up to 1.2 points lower with 16-QAM and 64-QAM.
+- EVM map minus shrinkage without a map. QPSK block pilot +16.84 (14.74 to 19.09), block pilot +
+  data +71.88 (66.89 to 75.94).
+- Shrinkage without a map minus the U-Net map without a jammer. +0.19 (0.14 to 0.24) with 16-QAM,
+  +0.40 (0.33 to 0.47) with 64-QAM.
+
+**BLER against JSR** (`results/v11/resolution_sweep.pdf`, Fig. 5 of v11). Eleven panels in two
+rows. QPSK at 8 dB has (a) a block on the pilots, (b) hopping data, (c) hopping pilots + data and
+(d) every pilot. 16-QAM at 15 dB has (e) a block and (f) hopping, both on pilots + data. 64-QAM at
+18 dB has (g) a block and (h) hopping. QPSK with two DMRS symbols has (i) a block on the pilots,
+(j) hopping pilots + data and (k) every pilot. The receivers are those of v10 plus the true map
+with a plain PRB average over its marked cells (`true_soft`). Every point has at least tens of
+block errors, so no zero-error triangles remain. The two-DMRS block sweep ran on the L4 after the
+Mac proved too slow (about 28 minutes per point with seven processes). The two-DMRS hopping sweep
+ran on both. The Mac's copy is used, and the L4 copy, on other slots, agrees within its intervals
+(2.21% against 2.17% for shrinkage without a map at +9 dB, 1.72% against 1.73% for the U-Net map).
+
+Reading of the decoding results.
+- **The new operating points fix Fig. 5.** The curves are smooth, and the bands are narrow enough
+  to separate the receivers that the v10 figure could not.
+- **A map now helps with QPSK too.** At 15 dB the U-Net map was within 0.22 points of shrinkage
+  without a map. At 8 dB it is 0.8 to 1.6 points better at +9 dB and 2.2 and 7.8 points better
+  with every pilot jammed, within 0.15 points of the true map (0.56 under the unseen pulsed
+  jammer).
+- **64-QAM is where the map matters most.** Under pilot + data jamming at +9 dB, shrinkage without
+  a map fails on 52.7% to 55.8% of the blocks, the U-Net map on 17.7% to 22.4% and the true map on
+  15.8% to 22.0%. Without a
+  jammer, shrinkage without a map costs 0.40 points, because the varying symbol energy of 64-QAM
+  looks like jamming, and the U-Net map costs nothing.
+- **The true map does not need shrinkage.** A plain average over the marked cells is as good with
+  QPSK and up to 1.2 points better with 16-QAM and 64-QAM. With a perfect map the marked cells of a
+  row share the same jamming power, so the cell-level part of shrinkage only adds noise.
+- **A second DMRS symbol makes pilot jamming less harmful** at the same JSR per resource element
+  (baseline 35.1% instead of 47.1%, shrinkage 1.40% instead of 3.55% at +9 dB) and makes every
+  estimate better with every pilot jammed (30.7% instead of 51.8% for shrinkage at +9 dB). The
+  U-Net map still lowers the BLER, by 0.2 to 3.0 points, within 0.6 points of the true map.
+
+Two-DMRS sweeps (BLER in percent, one row per JSR from -9 to +9 dB).
+
+| Case | JSR | Baseline | No map, PRB avg. | No map, shrinkage | EVM map | U-Net map | True map, PRB avg. | True map |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| block, pilot | -9 | 0.62 | 0.16 | 0.16 | 0.15 | 0.15 | 0.15 | 0.15 |
+| block, pilot | 0 | 2.54 | 0.30 | 0.30 | 0.39 | 0.27 | 0.27 | 0.27 |
+| block, pilot | +9 | 36.1 | 1.66 | 1.65 | 8.87 | 1.33 | 1.33 | 1.33 |
+| hop, pilot + data | -9 | 0.83 | 0.29 | 0.28 | 0.27 | 0.27 | 0.23 | 0.23 |
+| hop, pilot + data | 0 | 11.4 | 3.71 | 0.83 | 6.72 | 0.63 | 0.57 | 0.57 |
+| hop, pilot + data | +9 | 74.5 | 58.6 | 2.21 | 36.4 | 1.72 | 1.64 | 1.66 |
+| every pilot | -9 | 1.12 | 0.23 | 0.23 | 0.19 | 0.20 | 0.21 | 0.21 |
+| every pilot | 0 | 10.9 | 1.54 | 1.55 | 1.30 | 1.29 | 1.28 | 1.28 |
+| every pilot | +9 | 92.4 | 31.0 | 30.7 | 34.1 | 27.6 | 27.0 | 27.0 |
+
+**For the paper.** `conference-v11.tex` on Overleaf drops Tables II and III, moves their results into
+the text with paired intervals, and shows Fig. 5 in two rows. Table I gives F1 and false alarms with
+one and two DMRS symbols for QPSK, 16-QAM and 64-QAM. The Times build is six pages.

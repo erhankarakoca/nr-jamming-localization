@@ -1,0 +1,17 @@
+receiver,jammer,noise_estimate,seed,attack,jsr_db,snr_db,ber,bler,block_errors,blocks
+standard,nominal,true,0,pilot_whole_allocation,3.0,8.0,0.12511402424670434,0.4583333333333333,88,192
+true_soft,nominal,true,0,pilot_whole_allocation,3.0,8.0,0.0287586315128688,0.1267361111111111,73,576
+p_r_e_shrink,nominal,true,0,pilot_whole_allocation,3.0,8.0,0.028962158662900188,0.13020833333333334,75,576
+true_shrink,nominal,true,0,pilot_whole_allocation,3.0,8.0,0.0287586315128688,0.1267361111111111,73,576
+nomap_prb,nominal,true,0,pilot_whole_allocation,3.0,8.0,0.03102930790960452,0.1484375,76,512
+nomap_cell,nominal,true,0,pilot_whole_allocation,3.0,8.0,0.030790684586864406,0.1484375,76,512
+nomap_shrink,nominal,true,0,pilot_whole_allocation,3.0,8.0,0.031033445886299436,0.1484375,76,512
+evm_shrink,nominal,true,0,pilot_whole_allocation,3.0,8.0,0.043370724878934626,0.171875,77,448
+standard,nominal,true,0,pilot_whole_allocation,9.0,8.0,0.3152034781073446,0.9296875,119,128
+true_soft,nominal,true,0,pilot_whole_allocation,9.0,8.0,0.1299766066384181,0.5104166666666666,98,192
+p_r_e_shrink,nominal,true,0,pilot_whole_allocation,9.0,8.0,0.13055040607344634,0.515625,99,192
+true_shrink,nominal,true,0,pilot_whole_allocation,9.0,8.0,0.1299766066384181,0.5104166666666666,98,192
+nomap_prb,nominal,true,0,pilot_whole_allocation,9.0,8.0,0.1489506091101695,0.5625,72,128
+nomap_cell,nominal,true,0,pilot_whole_allocation,9.0,8.0,0.1484761211158192,0.5625,72,128
+nomap_shrink,nominal,true,0,pilot_whole_allocation,9.0,8.0,0.1486416401836158,0.5546875,71,128
+evm_shrink,nominal,true,0,pilot_whole_allocation,9.0,8.0,0.2043553584039548,0.65625,84,128

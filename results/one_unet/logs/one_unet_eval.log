@@ -1,0 +1,47 @@
+QPSK block, 1 DMRS: done
+QPSK hopping, 1 DMRS: done
+QPSK pilot comb, 1 DMRS: done
+QPSK 1000 ns, 1 DMRS: done
+QPSK 30 m/s, 1 DMRS: done
+16-QAM block, 1 DMRS: done
+16-QAM hopping, 1 DMRS: done
+64-QAM block, 1 DMRS: done
+64-QAM hopping, 1 DMRS: done
+QPSK pulsed (unseen), 1 DMRS: done
+QPSK block, 2 DMRS: done
+QPSK hopping, 2 DMRS: done
+QPSK pilot comb, 2 DMRS: done
+QPSK 1000 ns, 2 DMRS: done
+QPSK 30 m/s, 2 DMRS: done
+16-QAM block, 2 DMRS: done
+16-QAM hopping, 2 DMRS: done
+64-QAM block, 2 DMRS: done
+64-QAM hopping, 2 DMRS: done
+QPSK pulsed (unseen), 2 DMRS: done
+| Grid | v10 U-Net, 1 DMRS | v11 U-Net, 1 DMRS | v10 U-Net, 2 DMRS | v11 U-Net, 2 DMRS |
+| --- | --- | --- | --- | --- |
+| QPSK block | 0.954 / 0.7% | 0.951 / 0.9% | 0.927 / 1.8% | 0.954 / 0.9% |
+| QPSK hopping | 0.923 / 1.5% | 0.921 / 1.8% | 0.908 / 1.9% | 0.919 / 1.8% |
+| QPSK pilot comb | 0.954 / 0.7% | 0.951 / 0.9% | 0.920 / 1.8% | 0.949 / 1.0% |
+| QPSK 1000 ns | 0.924 / 1.5% | 0.919 / 1.7% | 0.873 / 3.9% | 0.914 / 2.0% |
+| QPSK 30 m/s | 0.949 / 0.8% | 0.946 / 1.0% | 0.924 / 1.8% | 0.951 / 0.9% |
+| 16-QAM block | 0.966 / 0.4% | 0.964 / 0.6% | 0.946 / 1.1% | 0.969 / 0.5% |
+| 16-QAM hopping | 0.940 / 1.2% | 0.935 / 1.6% | 0.933 / 1.3% | 0.942 / 1.4% |
+| 64-QAM block | 0.952 / 0.1% | 0.979 / 0.3% | 0.931 / 0.8% | 0.981 / 0.3% |
+| 64-QAM hopping | 0.947 / 0.4% | 0.959 / 0.9% | 0.934 / 0.7% | 0.962 / 0.8% |
+| QPSK pulsed (unseen) | 0.822 / 3.8% | 0.774 / 5.6% | 0.814 / 4.0% | 0.785 / 5.1% |
+
+| Grid | Detector | DMRS | F1 pilot | Pilot Pd at -15 dB | Same at 1% FA |
+| --- | --- | --- | --- | --- | --- |
+| QPSK block | v10 U-Net | 1 | 0.871 | 0.451 | 0.495 |
+| QPSK block | v11 U-Net | 1 | 0.861 | 0.501 | 0.519 |
+| QPSK block | v10 U-Net | 2 | 0.758 | 0.295 | 0.226 |
+| QPSK block | v11 U-Net | 2 | 0.905 | 0.575 | 0.586 |
+| 16-QAM block | v10 U-Net | 1 | 0.911 | 0.624 | 0.712 |
+| 16-QAM block | v11 U-Net | 1 | 0.877 | 0.662 | 0.717 |
+| 16-QAM block | v10 U-Net | 2 | 0.823 | 0.402 | 0.383 |
+| 16-QAM block | v11 U-Net | 2 | 0.933 | 0.725 | 0.788 |
+| 64-QAM block | v10 U-Net | 1 | 0.968 | 0.870 | 0.958 |
+| 64-QAM block | v11 U-Net | 1 | 0.927 | 0.877 | 0.931 |
+| 64-QAM block | v10 U-Net | 2 | 0.875 | 0.641 | 0.683 |
+| 64-QAM block | v11 U-Net | 2 | 0.972 | 0.900 | 0.962 |

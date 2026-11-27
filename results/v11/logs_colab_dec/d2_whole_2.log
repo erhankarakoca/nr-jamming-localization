@@ -1,0 +1,8 @@
+[C nominal true seed 2] pilot_whole_allocation JSR  -9.0 dB: standard 0.010  true_soft 0.002  p_r_e_shrink 0.002  true_shrink 0.002  nomap_prb 0.002  nomap_shrink 0.002  evm_shrink 0.002
+[C nominal true seed 2] pilot_whole_allocation JSR  -6.0 dB: standard 0.018  true_soft 0.002  p_r_e_shrink 0.002  true_shrink 0.002  nomap_prb 0.002  nomap_shrink 0.003  evm_shrink 0.002
+[C nominal true seed 2] pilot_whole_allocation JSR  -3.0 dB: standard 0.048  true_soft 0.005  p_r_e_shrink 0.005  true_shrink 0.005  nomap_prb 0.006  nomap_shrink 0.006  evm_shrink 0.005
+[C nominal true seed 2] pilot_whole_allocation JSR  +0.0 dB: standard 0.099  true_soft 0.013  p_r_e_shrink 0.013  true_shrink 0.013  nomap_prb 0.015  nomap_shrink 0.015  evm_shrink 0.014
+[C nominal true seed 2] pilot_whole_allocation JSR  +3.0 dB: standard 0.328  true_soft 0.039  p_r_e_shrink 0.041  true_shrink 0.039  nomap_prb 0.049  nomap_shrink 0.048  evm_shrink 0.042
+[C nominal true seed 2] pilot_whole_allocation JSR  +6.0 dB: standard 0.648  true_soft 0.101  p_r_e_shrink 0.104  true_shrink 0.101  nomap_prb 0.109  nomap_shrink 0.109  evm_shrink 0.122
+[C nominal true seed 2] pilot_whole_allocation JSR  +9.0 dB: standard 0.914  true_soft 0.266  p_r_e_shrink 0.269  true_shrink 0.266  nomap_prb 0.301  nomap_shrink 0.297  evm_shrink 0.328
+Wrote /content/dec/d2_whole/recovery/recovery_C_snr8_dmrs2.csv and recovery_C_snr8_dmrs2_paired.csv (no figure)

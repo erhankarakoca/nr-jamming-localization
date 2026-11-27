@@ -1,0 +1,5 @@
+[C nominal true seed 1] none                   JSR  +9.0 dB: standard 0.007  true_soft 0.003  true_prb_soft 0.003  p_r_e_shrink 0.003  true_shrink 0.003  nomap_prb 0.004  nomap_cell 0.004  nomap_shrink 0.003  evm_shrink 0.003
+[C nominal true seed 1] pilot                  JSR  +9.0 dB: standard 0.417  true_soft 0.025  true_prb_soft 0.025  p_r_e_shrink 0.025  true_shrink 0.025  nomap_prb 0.032  nomap_cell 0.034  nomap_shrink 0.032  evm_shrink 0.185
+[C nominal true seed 1] data                   JSR  +9.0 dB: standard 0.844  true_soft 0.073  true_prb_soft 0.073  p_r_e_shrink 0.074  true_shrink 0.074  nomap_prb 0.083  nomap_cell 0.098  nomap_shrink 0.084  evm_shrink 0.648
+[C nominal true seed 1] partial                JSR  +9.0 dB: standard 0.945  true_soft 0.092  true_prb_soft 0.092  p_r_e_shrink 0.095  true_shrink 0.095  nomap_prb 0.107  nomap_cell 0.125  nomap_shrink 0.107  evm_shrink 0.812
+Wrote /content/dec2/q9/recovery/recovery_C_snr8.csv and the main, ablation and map-source figures (.pdf/.png)

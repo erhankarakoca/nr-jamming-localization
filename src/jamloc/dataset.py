@@ -26,6 +26,9 @@ independently too, but only 190 exist on a 24-PRB carrier, so they do repeat):
   scheduled PRBs (``ATTACK_CONDITIONS_SPOOF``).
 * ``train_gen`` / ``val_gen`` - every combination of those jammers, those channels and two
   modulations, QPSK and 16-QAM (``GENERAL_CONDITIONS``, 18 conditions).
+* ``train_all`` / ``val_all`` - the same with 64-QAM as a third modulation, each with one and with
+  two DMRS symbols (``ALL_CONDITIONS``, 54 conditions); ``test_qam64`` / ``hopjam_qam64`` and
+  ``<grid>_dmrs2`` (``DMRS2_GRIDS``) are the matching test grids.
 * ``margin`` - the jammer hits exactly the scheduled PRBs, as in the BLER experiment, at a fixed
   SNR of 15 dB and down to JSR -30 dB (``experiments/detection_margin``); ``margin_snr<x>`` the
   same at another SNR.
@@ -159,6 +162,20 @@ GENERALIZATION = {
         "snr_db": (10.0, 25.0),
         "title": "16-QAM with the hopping jammer, SNR 10-25 dB",
     },
+    # The same with 64-QAM (MCS 17), at the SNRs where link adaptation would choose it
+    # (experiments/one_unet)
+    "test_qam64": {
+        "seed": 62_000_000,
+        "cfg": {"mcs_index": 17},
+        "snr_db": (16.0, 30.0),
+        "title": "64-QAM (MCS 17), SNR 16-30 dB",
+    },
+    "hopjam_qam64": {
+        "seed": 63_000_000,
+        "cfg": {"mcs_index": 17, "jammer_hopping": True},
+        "snr_db": (16.0, 30.0),
+        "title": "64-QAM with the hopping jammer, SNR 16-30 dB",
+    },
     # Legitimate interference: a synchronized UE of a neighboring cell (experiments/neighbor)
     "neighbor": {
         "seed": 19_000_000,
@@ -227,6 +244,50 @@ SPLITS["train_gen_short"] = {
     "mix": GENERAL_SHORT_CONDITIONS,
 }
 SPLITS["val_gen_short"] = {"seed": 55_000_000, "num_slots": 15_000, "mix": GENERAL_SHORT_CONDITIONS}
+
+# One U-Net for every configuration (paper v11, experiments/one_unet): the general conditions with
+# 64-QAM (MCS 17, SNR 16-30 dB) as a third modulation, each with one and with two DMRS symbols
+# (54 conditions). Twice the slots of train_gen, so each condition keeps about 4 400 of them.
+QAM64_MCS = 17
+QAM64_SNR_DB = (16.0, 30.0)
+ALL_MODULATIONS = (*MODULATION_CONDITIONS, {"mcs_index": QAM64_MCS, "_snr_db": QAM64_SNR_DB})
+DMRS_CONDITIONS = ({}, {"dmrs_additional_position": 1})
+ALL_CONDITIONS = tuple(
+    {**jammer, **channel, **modulation, **dmrs}
+    for jammer in ATTACK_CONDITIONS
+    for channel in MIXED_CONDITIONS
+    for modulation in ALL_MODULATIONS
+    for dmrs in DMRS_CONDITIONS
+)
+SPLITS["train_all"] = {"seed": 60_000_000, "num_slots": 240_000, "mix": ALL_CONDITIONS}
+SPLITS["val_all"] = {"seed": 61_000_000, "num_slots": 30_000, "mix": ALL_CONDITIONS}
+# Test grids with two DMRS symbols: the grids of the general training and the 64-QAM ones, each
+# with a second DMRS symbol (``test_dmrs2`` already exists among the nominal two-DMRS splits)
+DMRS2_GRIDS = (
+    "hopjam",
+    "combjam",
+    "longdelay",
+    "fast",
+    "test_qam16",
+    "hopjam_qam16",
+    "test_qam64",
+    "hopjam_qam64",
+    "pulsejam",
+)
+
+
+def dmrs2_split(split: str) -> str:
+    """Name of a test grid with two DMRS symbols, e.g. ``hopjam_dmrs2``."""
+    return f"{split}_dmrs2"
+
+
+for _k, _split in enumerate(DMRS2_GRIDS):
+    SPLITS[dmrs2_split(_split)] = {
+        **SPLITS[_split],
+        "seed": 64_000_000 + 1_000_000 * _k,
+        "cfg": {**SPLITS[_split].get("cfg", {}), "dmrs_additional_position": 1},
+        "title": SPLITS[_split]["title"] + ", two DMRS symbols",
+    }
 SPLITS["val_atk2"] = {"seed": 26_000_000, "num_slots": 5_000, "mix": ATTACK_CONDITIONS_SPOOF}
 
 # Noise power: the whole receiver chain with a fixed error of the noise power it assumes
