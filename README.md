@@ -25,7 +25,8 @@ the map.</sub>
 2. **A small U-Net** (66,553 parameters), trained on block, hopping and pilot-comb jammers, three
    channel conditions and QPSK and 16-QAM, turns the clues into a 24 PRB × 14 symbol jamming map.
 3. **Decoding through the attack**: the receiver estimates the jamming power of every cell from
-   the energy that the user's signal and the noise do not explain, shrinks it towards the mean of
+   its excess power (the received power minus the expected power of the user's signal and the
+   noise), shrinks it towards the mean of
    its PRB (empirical Bayes, nothing to tune), gives the cell's bits less weight, and weights
    jammed pilots down by their residual. A map, when there is one, restricts the estimate to the
    flagged cells. When a block fails its CRC, data-aided passes use the decoder's output to refine

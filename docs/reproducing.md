@@ -392,5 +392,17 @@ uv run python -m jamloc.experiments.resolution sweep-v11 results/v11   # Fig. 5
 uv run python -m jamloc.experiments.figures --unet all --only attack_maps unet_process
 ```
 
+**Paper v12 (section 31).** Pictures of the method, the cost of every step and the detection rate
+against the JSR (`plan-v12.md`). The cost table must run on an idle machine, on one core. The
+figures go into `results/v12`, which links to the trained models.
+
+```bash
+mkdir -p results/v12 && ln -sfn ../models results/v12/models
+export JAMLOC_RESULTS_DIR="$PWD/results/v12"
+uv run python -m jamloc.experiments.complexity --reps 200          # Table II
+uv run python -m jamloc.experiments.figures --only pilot_weights shrinkage_example   # Figs. 3 and 4
+uv run python -m jamloc.experiments.detection_curves               # Fig. 7
+```
+
 The plans behind each round of studies are in `plan-v2.md` to `plan-v6.md` and `review-v6.md`, and
-`plan-v10.md` and `plan-v11.md` list what each revision of the paper adds.
+`plan-v10.md` to `plan-v12.md` list what each revision of the paper adds.

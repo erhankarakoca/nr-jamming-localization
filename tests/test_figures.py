@@ -10,7 +10,13 @@ from matplotlib.figure import Figure
 from jamloc.experiments import figures
 from jamloc.paths import REPO_ROOT
 
-MODEL_FREE = ["attack_patterns", "residual_explained", "constellations", "shrinkage_example"]
+MODEL_FREE = [
+    "attack_patterns",
+    "residual_explained",
+    "constellations",
+    "shrinkage_example",
+    "pilot_weights",
+]
 
 
 def test_drawio_sources_are_xml():
