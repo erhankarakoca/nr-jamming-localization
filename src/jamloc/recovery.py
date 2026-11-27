@@ -66,6 +66,7 @@ across frequency. The slot is equalized and decoded again. A block keeps the fir
 CRC passes, as a real receiver can, since the CRC tells it which attempt succeeded.
 """
 
+import functools
 import math
 
 import numpy as np
@@ -135,6 +136,61 @@ def lmmse_interpolation(
     # err_k = R_kk - R_kc (R_cc + s2 I)^-1 R_ck, with R_kk = 1
     z = torch.linalg.solve(a, g.conj().transpose(1, 2))  # [B, N_p, num_sc]
     err_var = 1 - (g * z.transpose(1, 2)).sum(-1).real
+    h_hat = h_hat.to(device=device, dtype=h_ls.dtype)
+    return h_hat, err_var.clamp(0, 1).to(device=device, dtype=torch.float32)
+
+
+@functools.cache
+def _prior_basis(num_sc: int, scs: float, tau_max: float, energy: float):
+    """Eigenvectors ``[num_sc, D]`` and eigenvalues ``[D]`` of the frequency correlation of
+    ``lmmse_interpolation`` that hold all but ``1 - energy`` of its trace. Computed once per
+    allocation size, as a gNB would."""
+    k = torch.arange(num_sc, dtype=torch.float64)
+    x = (k[:, None] - k[None, :]) * scs * tau_max
+    corr = torch.exp(-1j * math.pi * x) * torch.sinc(x)
+    eigval, eigvec = torch.linalg.eigh(corr)
+    eigval, eigvec = eigval.flip(0), eigvec.flip(1)  # largest first
+    num = int(torch.searchsorted(eigval.cumsum(0) / eigval.sum(), energy)) + 1
+    return eigvec[:, :num], eigval[:num]
+
+
+def lmmse_lowrank(
+    h_ls: torch.Tensor,
+    pilot_sc: torch.Tensor,
+    clean: torch.Tensor,
+    s2: torch.Tensor,
+    num_sc: int,
+    scs: float,
+    tau_max: float,
+    energy: float = 1 - 1e-9,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """The estimate of ``lmmse_interpolation``, computed in the delay subspace.
+
+    The prior correlation is close to ``V diag(lam) V^H`` with ``V`` ``[num_sc, D]`` and ``D``
+    much smaller than the number of pilots. The channel is then ``V c`` with ``c`` of covariance
+    ``diag(lam)``, and with ``W`` the inverse noise variance of each pilot (zero for a pilot that
+    is not clean) and ``V_p`` the rows of ``V`` at the pilots, the LMMSE estimate and its error
+    variance are
+
+        h_hat = V M^-1 V_p^H W h_ls,    err_k = v_k^H M^-1 v_k,    M = diag(1/lam) + V_p^H W V_p.
+
+    This takes about ``N_p D^2 + num_sc D^2`` operations instead of ``N_p^3 + N_p^2 num_sc``.
+    Inputs and outputs are those of ``lmmse_interpolation``.
+    """
+    device = h_ls.device
+    basis, lam = _prior_basis(num_sc, float(scs), float(tau_max), energy)
+    v_p = basis[pilot_sc.cpu()]  # [N_p, D]
+    s2 = s2.cpu().to(torch.float64)
+    s2 = s2[:, None].expand(clean.shape) if s2.dim() == 1 else s2
+    w = torch.where(clean.cpu(), 1 / s2, torch.zeros_like(s2)).to(torch.complex128)  # [B, N_p]
+    observed = torch.where(clean.cpu(), h_ls.cpu().to(torch.complex128), 0)
+    gram = (v_p.conj().T[None] * w[:, None, :]) @ v_p  # V_p^H W V_p, [B, D, D]
+    m = gram + torch.diag_embed((1 / lam).to(torch.complex128))[None]
+    rhs = v_p.conj().T[None] @ (w * observed)[..., None]  # [B, D, 1]
+    coef = torch.linalg.solve(m, rhs)[..., 0]  # [B, D]
+    h_hat = coef @ basis.T  # [B, num_sc]
+    z = torch.linalg.solve(m, basis.conj().T[None].expand(m.shape[0], -1, -1))  # [B, D, num_sc]
+    err_var = (basis.T[None] * z).sum(1).real
     h_hat = h_hat.to(device=device, dtype=h_ls.dtype)
     return h_hat, err_var.clamp(0, 1).to(device=device, dtype=torch.float32)
 
@@ -801,25 +857,35 @@ class MapAwareReceiver(Block):
         count = self._prb_sum(flagged.to(excess.dtype))
         pooled = (total / count.clamp_min(1))[:, data_prb]
         if self._cellwise == "shrink":
-            # Random-effects shrinkage: each flagged cell's own estimate is pulled towards the
-            # mean of its PRB row by the share of its sampling variance in the total. The spread
-            # of the true powers across the row's cells (tau2) is the spread of the cell
-            # estimates minus their mean sampling variance. A jammer that fills the row gives
-            # tau2 = 0 and the row mean, cells of a jammer that moves keep about their own power.
-            per_cell = self._cell_sum(torch.ones_like(excess[:1]))
-            own = self._cell_mean(excess)
-            se2 = (self._cell_mean(excess**2) - own**2).clamp_min(0) / (per_cell - 1).clamp_min(1)
-
-            def row_mean(values):
-                sums = self._prb_sum(torch.where(flagged, values, torch.zeros_like(values)))
-                return (sums / count.clamp_min(1))[:, data_prb]
-
-            num_cells = count[:, data_prb] / per_cell
-            spread = row_mean((own - pooled) ** 2) * num_cells / (num_cells - 1).clamp_min(1)
-            tau2 = (spread - row_mean(se2)).clamp_min(0)
-            weight = tau2 / (tau2 + se2).clamp_min(torch.finfo(excess.dtype).tiny)
-            pooled = pooled + weight * (own - pooled)
+            pooled = self._shrinkage(excess, flagged, pooled, count)["shrunk"]
         return torch.where(flagged, pooled.clamp_min(0), torch.zeros_like(excess))
+
+    def _shrinkage(self, excess, flagged, pooled, count) -> dict:
+        """Random-effects shrinkage of the flagged cells of every PRB row, ``[B, num_data]`` each.
+
+        Each flagged cell's own estimate (``"own"``) is pulled towards the mean of its row
+        (``pooled``) by the share of its sampling variance (``"se2"``) in the total. The spread of
+        the true powers across the row's cells (``"tau2"``) is the spread of the cell estimates
+        minus their mean sampling variance. A jammer that fills the row gives tau2 = 0 and the row
+        mean, cells of a jammer that moves keep about their own power. ``"weight"`` is the share
+        of its own estimate that a cell keeps and ``"shrunk"`` the result, before clipping at 0.
+        ``count`` is the number of flagged resource elements of each PRB, ``[B, num_prb]``.
+        """
+        data_prb = self.data_sc // 12
+        per_cell = self._cell_sum(torch.ones_like(excess[:1]))
+        own = self._cell_mean(excess)
+        se2 = (self._cell_mean(excess**2) - own**2).clamp_min(0) / (per_cell - 1).clamp_min(1)
+
+        def row_mean(values):
+            sums = self._prb_sum(torch.where(flagged, values, torch.zeros_like(values)))
+            return (sums / count.clamp_min(1))[:, data_prb]
+
+        num_cells = count[:, data_prb] / per_cell
+        spread = row_mean((own - pooled) ** 2) * num_cells / (num_cells - 1).clamp_min(1)
+        tau2 = (spread - row_mean(se2)).clamp_min(0)
+        weight = tau2 / (tau2 + se2).clamp_min(torch.finfo(excess.dtype).tiny)
+        shrunk = pooled + weight * (own - pooled)
+        return {"own": own, "se2": se2, "tau2": tau2, "weight": weight, "shrunk": shrunk}
 
     def _excess_energy(self, y, no, h_sc, err_sc):
         """``[B, num_data]``: received energy of each data symbol minus what the UE's signal (unit

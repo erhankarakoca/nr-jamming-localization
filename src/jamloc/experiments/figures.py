@@ -58,12 +58,13 @@ def _example_batch(
     seed: int = 7,
     decode: bool = False,
     cfg: SimConfig = CFG,
+    keep_channel: bool = False,
 ):
     """One slot with the example allocation and jammer block.
 
     Re-seeding before every call gives the same UE channel and noise for every attack, so the
     figures compare attacks on otherwise identical slots. ``cfg`` sets the jammer's kind (for
-    example ``jammer_hopping``).
+    example ``jammer_hopping``). ``keep_channel`` keeps the UE's true channel in ``h_ue``.
     """
     seed_everything(seed)
     sc = Scenario(
@@ -76,7 +77,7 @@ def _example_batch(
         jsr_db=torch.tensor([jsr_db]),
         snr_db=torch.tensor([snr_db]),
     )
-    return JammedPUSCHLink(cfg)(sc, decode=decode)
+    return JammedPUSCHLink(cfg)(sc, decode=decode, keep_channel=keep_channel)
 
 
 def _jamming_power(out, cfg: SimConfig, jsr_db: float) -> np.ndarray:
@@ -1302,6 +1303,8 @@ def _soft_estimates(out, cfg, jsr_db: float) -> dict:
     14]`` with nan on the DMRS symbols. ``"pilot"`` holds the shrinkage estimate on the data cells
     and, on the DMRS cells, the jamming power implied by the pilot weights, ``(R_b - 1) N0``.
     ``"truth"`` marks the jammed cells and ``"power"`` is the jamming power that reached them.
+    ``"weight"`` is the share of its own estimate that each data cell keeps under shrinkage, and
+    ``"se"`` the standard error of that estimate, in the same units as the estimates.
     """
     from jamloc.recovery import MapAwareReceiver, lmmse_interpolation
 
@@ -1328,6 +1331,20 @@ def _soft_estimates(out, cfg, jsr_db: float) -> dict:
         grid[:, rx.data_sym, rx.data_sc] = v
         cells = grid.reshape(batch, cfg.num_symbols, n, 12).mean(-1).transpose(1, 2)
         estimates[key] = (cells / power).cpu().numpy()
+
+    # Inside shrinkage (no map, every data cell of a row pooled): the weight each cell keeps of
+    # its own estimate and that estimate's standard error, both constant over the cell's REs
+    with torch.no_grad():
+        excess = rx._excess_energy(y, no, h_sc, err_sc)
+        flagged = torch.ones_like(excess, dtype=torch.bool)
+        count = rx._prb_sum(flagged.to(excess.dtype))
+        pooled = (rx._prb_sum(excess) / count.clamp_min(1))[:, rx.data_sc // 12]
+        parts = rx._shrinkage(excess, flagged, pooled, count)
+    for key, values in (("weight", parts["weight"]), ("se", parts["se2"].sqrt() / power)):
+        grid = torch.full((batch, cfg.num_symbols, y.shape[-1]), float("nan"), device=values.device)
+        grid[:, rx.data_sym, rx.data_sc] = values.to(grid.dtype)
+        cells = grid.reshape(batch, cfg.num_symbols, n, 12).mean(-1).transpose(1, 2)
+        estimates[key] = cells.cpu().numpy()
     # On the DMRS cells: an LS value with the noise variance sigma^2 R_b carries the jamming
     # power (R_b - 1) N0, since sigma^2 = N0 / E_p and jamming of power S on a pilot of energy
     # E_p adds S / E_p to the variance of its LS value
@@ -1413,6 +1430,144 @@ def jamming_estimates(jsr_db: float = 9.0, seed: int = 7, slot: int = 0):
     return fig, caption
 
 
+def _pilot_weight_example(jsr_db: float, snr_db: float) -> dict:
+    """One slot with pilot-only jamming of PRBs ``JAM`` (TDL-C, the example seed).
+
+    ``"ls"`` and ``"smooth"`` are the LS value of every pilot and its projection onto the delay
+    subspace, at the subcarriers ``"sc"``. ``"r_db"`` is the residual of each PRB in dB and
+    ``"jammed_prb"`` marks the jammed PRBs. ``"true"``, ``"alike"`` and ``"weighted"`` are the
+    true channel and the LMMSE estimates with every pilot trusted alike and with the pilot weights
+    of the receiver without a map, on every subcarrier of the allocation. ``"nmse"`` gives their
+    normalized squared errors in dB as {(estimate, "jammed" or "clean"): value}.
+    """
+    from jamloc.features import dmrs_residuals
+    from jamloc.recovery import MapAwareReceiver, lmmse_interpolation
+
+    a0, n = ALLOC
+    out = _example_batch("pilot", jsr_db, snr_db, "C", _example_seed("C"), keep_channel=True)
+    y, no = out.y_alloc, out.no
+    h_ls, pilot_sc, pilot_power = dmrs_ls(y, out.tx)
+    num_sc = y.shape[-1]
+
+    # The receiver's own pilot weights (every pilot by its residual) and, for comparison, the
+    # same LMMSE interpolator with the noise variance of a clean pilot on every pilot
+    rx = MapAwareReceiver(out.tx, CFG)
+    rx._pilot_weights = "all"
+    clean, pilot_var, _, _ = rx._pilots(h_ls, pilot_sc, pilot_power, no, None, "cell")
+    interp = {"num_sc": num_sc, "scs": CFG.scs, "tau_max": CFG.tau_max}
+    weighted = lmmse_interpolation(h_ls, pilot_sc, clean, pilot_var, **interp)[0][0]
+    alike = lmmse_interpolation(h_ls, pilot_sc, clean, no / pilot_power, **interp)[0][0]
+    basis = delay_subspace(pilot_sc, CFG.scs, CFG.tau_max).to(h_ls.dtype)
+    smooth = ((h_ls @ basis.conj()) @ basis.T)[0]
+    residual = dmrs_residuals(h_ls, pilot_sc, no, pilot_power, CFG, 1)[0, 0]
+    true = out.h_ue[0, CFG.dmrs_symbol]
+
+    true, weighted, alike = (v.cpu().numpy() for v in (true, weighted, alike))
+    ls, smooth, sc = h_ls[0].cpu().numpy(), smooth.cpu().numpy(), pilot_sc.cpu().numpy()
+    r_db = 10 * np.log10(residual.cpu().numpy())
+    numbers = np.arange(a0, a0 + n)
+    jammed_prb = (numbers >= JAM[0]) & (numbers < sum(JAM))
+    jammed_sc = jammed_prb[np.arange(num_sc) // 12]
+    power = np.mean(np.abs(true) ** 2)
+    nmse = {
+        (name, part): 10 * np.log10(np.mean(np.abs(h_hat[cells] - true[cells]) ** 2) / power)
+        for name, h_hat in (("alike", alike), ("weighted", weighted))
+        for part, cells in (("jammed", jammed_sc), ("clean", ~jammed_sc))
+    }
+    return {
+        "ls": ls,
+        "smooth": smooth,
+        "sc": sc,
+        "r_db": r_db,
+        "jammed_prb": jammed_prb,
+        "true": true,
+        "alike": alike,
+        "weighted": weighted,
+        "nmse": nmse,
+    }
+
+
+def pilot_weights(jsr_db: float = 6.0, snr_db: float = 15.0):
+    """One slot with pilot jamming on PRBs ``JAM``: the LS value of every pilot against the
+    smooth fit, the residual of each PRB, and the channel estimate with every pilot trusted alike
+    and with the pilot weights of the receiver without a map."""
+    a0, n = ALLOC
+    ex = _pilot_weight_example(jsr_db, snr_db)
+    ls, smooth, sc, r_db = ex["ls"], ex["smooth"], ex["sc"], ex["r_db"]
+    true, alike, weighted, jammed_prb = ex["true"], ex["alike"], ex["weighted"], ex["jammed_prb"]
+    numbers = np.arange(a0, a0 + n)
+    num_sc = true.size
+    x_all = a0 - 0.5 + (np.arange(num_sc) + 0.5) / 12
+    x_p = x_all[sc]
+    jammed_p = jammed_prb[sc // 12]
+
+    with paper_style():
+        fig, (fit, res, est) = new_figure(COLUMN_WIDTH, 3.1, nrows=3, sharex=True)
+        for ax in (fit, res, est):
+            ax.axvspan(JAM[0] - 0.5, sum(JAM) - 0.5, color=JAM_COLOR, alpha=0.15, lw=0)
+            ax.grid(False)
+        true_style = {"color": "0.7", "lw": 2.2, "solid_capstyle": "butt"}
+        fit.plot(x_all, np.abs(true), label="True channel", **true_style)
+        fit.plot(x_p, np.abs(smooth), color="black", lw=0.8, label="Smooth fit")
+        fit.plot(
+            x_p[~jammed_p],
+            np.abs(ls[~jammed_p]),
+            "o",
+            ms=2.4,
+            mfc="none",
+            mew=0.5,
+            color=CLEAN_COLOR,
+            label="Clean pilots",
+        )
+        fit.plot(
+            x_p[jammed_p],
+            np.abs(ls[jammed_p]),
+            "s",
+            ms=2.4,
+            mec="none",
+            color=JAM_COLOR,
+            label="Jammed pilots",
+        )
+        fit.set(ylabel="Magnitude", ylim=(0, None))
+        fit.set_title("(a) LS value of every pilot", loc="left")
+        fit.legend(ncols=2, fontsize=6, loc="upper left", handlelength=1.3, columnspacing=0.8)
+
+        res.bar(numbers, r_db, width=0.6, color=np.where(jammed_prb, JAM_COLOR, CLEAN_COLOR))
+        res.axhline(0, color="black", lw=0.6)
+        res.set(ylabel=r"$R_b$ (dB)")
+        res.set_title("(b) Residual of each PRB, 0 dB with noise alone", loc="left")
+
+        est.plot(x_all, np.abs(true), label="True channel", **true_style)
+        est.plot(x_all, np.abs(alike), color=JAM_COLOR, ls="--", lw=0.9, label="Pilots alike")
+        est.plot(x_all, np.abs(weighted), color=CLEAN_COLOR, lw=0.9, label="Pilot weights")
+        est.set(
+            ylabel="Magnitude",
+            xlabel="PRB",
+            xticks=numbers,
+            ylim=(0, None),
+            xlim=(a0 - 0.5, a0 + n - 0.5),
+        )
+        est.set_title("(c) Channel estimate", loc="left")
+        est.legend(ncols=3, fontsize=6, loc="upper left", handlelength=1.3, columnspacing=0.8)
+
+    nmse = ex["nmse"]
+    caption = (
+        f"Pilot weights in one slot with pilot-only jamming of PRBs {JAM[0]}-{sum(JAM) - 1} "
+        f"({jsr_db:+g} dB JSR, TDL-C, {snr_db:g} dB SNR, the UE on PRBs {a0}-{a0 + n - 1}). "
+        "(a) The LS value of every pilot, the smoothest frequency response that a channel with "
+        "delays up to 3 us can have (the projection onto the delay subspace) and the true channel. "
+        "(b) The residual of each PRB, the pilot energy outside the subspace over its value "
+        f"without jamming, {r_db[jammed_prb].min():.1f} to {r_db[jammed_prb].max():.1f} dB on the "
+        f"jammed PRBs and {r_db[~jammed_prb].min():.1f} to {r_db[~jammed_prb].max():.1f} dB on the "
+        "others. (c) The LMMSE channel estimate with every pilot trusted alike and with each "
+        "pilot's noise variance multiplied by the residual of its PRB. On the jammed PRBs, the "
+        f"normalized squared error is {nmse['alike', 'jammed']:.1f} dB with the pilots alike and "
+        f"{nmse['weighted', 'jammed']:.1f} dB with the weights, and on the other PRBs "
+        f"{nmse['alike', 'clean']:.1f} and {nmse['weighted', 'clean']:.1f} dB."
+    )
+    return fig, caption
+
+
 def shrinkage_example(jsr_db: float = 9.0, seed: int = 7):
     """The data cells of one PRB row under a block jammer and under a hopping jammer: each cell's
     own estimate of the jamming power, the row mean, and the value after shrinkage."""
@@ -1438,37 +1593,72 @@ def shrinkage_example(jsr_db: float = 9.0, seed: int = 7):
     rows.append((hop, row, "(b) Hopping jammer"))
 
     with paper_style():
-        fig, axes = new_figure(COLUMN_WIDTH, 1.62, ncols=2, sharey=True)
-        for ax, (est, r, title) in zip(axes, rows, strict=True):
+        fig, axes = new_figure(
+            COLUMN_WIDTH,
+            2.3,
+            nrows=2,
+            ncols=2,
+            sharex="col",
+            sharey="row",
+            gridspec_kw={"height_ratios": (3, 1)},
+        )
+        for k, (est, r, title) in enumerate(rows):
+            ax, wax = axes[0, k], axes[1, k]
             sym = np.flatnonzero(~np.isnan(est["cell"][r]))  # the data symbols
             for s in sym[est["truth"][r, sym]]:
-                ax.axvspan(s - 0.5, s + 0.5, color=JAM_COLOR, alpha=0.15, lw=0)
+                for a in (ax, wax):
+                    a.axvspan(s - 0.5, s + 0.5, color=JAM_COLOR, alpha=0.15, lw=0)
+            own, shrunk = est["cell"][r, sym], est["shrink"][r, sym]
             ax.plot(
-                sym,
-                est["power"][r, sym],
-                "_",
-                ms=7,
-                mew=1.3,
-                color="black",
-                label="True power",
+                sym, est["power"][r, sym], "_", ms=7, mew=1.3, color="black", label="True power"
             )
-            ax.plot(
+            ax.errorbar(
                 sym,
-                est["cell"][r, sym],
-                "o",
+                own,
+                yerr=est["se"][r, sym],
+                fmt="o",
                 ms=3,
                 mfc="none",
                 mew=0.7,
-                color="0.4",
+                color="0.45",
+                elinewidth=0.6,
+                capsize=1.2,
                 label="Cell estimate",
             )
             ax.axhline(est["prb"][r, sym[0]], color="0.2", ls="--", lw=0.8, label="PRB average")
-            ax.plot(sym, est["shrink"][r, sym], "s", ms=2.6, color=CLEAN_COLOR, label="Shrinkage")
-            ax.set(title=f"{title}, PRB {ALLOC[0] + r}", xlabel="OFDM symbol", xticks=[0, 4, 8, 13])
+            # An arrow from each cell estimate to its value after shrinkage, where they differ
+            for s, a, b in zip(sym, own, shrunk, strict=True):
+                if abs(b - a) > 0.12:
+                    ax.annotate(
+                        "",
+                        xy=(s, b),
+                        xytext=(s, a),
+                        arrowprops={
+                            "arrowstyle": "-|>",
+                            "color": CLEAN_COLOR,
+                            "lw": 0.6,
+                            "shrinkA": 2.5,
+                            "shrinkB": 2.0,
+                            "mutation_scale": 5,
+                        },
+                    )
+            ax.plot(sym, shrunk, "s", ms=2.6, color=CLEAN_COLOR, label="Shrinkage")
+            ax.set_title(f"{title}, PRB {ALLOC[0] + r}")
             ax.grid(False)
-        axes[0].set_ylabel("Jamming power")
+            wax.bar(sym, est["weight"][r, sym], width=0.6, color=CLEAN_COLOR)
+            if np.nanmax(est["weight"][r, sym]) < 0.02:
+                wax.text(6.5, 0.5, "every weight is 0", ha="center", va="center", fontsize=6.5)
+            wax.set(xlabel="OFDM symbol", xticks=[0, 4, 8, 13], ylim=(0, 1), yticks=[0, 1])
+            wax.grid(False)
+        axes[0, 0].set_ylabel("Jamming power")
+        axes[1, 0].set_ylabel(r"$\alpha_{b,l}$")
+        handles, labels = axes[0, 1].get_legend_handles_labels()
+        order = [
+            labels.index(x) for x in ("True power", "Cell estimate", "PRB average", "Shrinkage")
+        ]
         fig.legend(
-            *axes[1].get_legend_handles_labels(),
+            [handles[i] for i in order],
+            [labels[i] for i in order],
             loc="outside lower center",
             ncols=4,
             fontsize=6.5,
@@ -1477,13 +1667,18 @@ def shrinkage_example(jsr_db: float = 9.0, seed: int = 7):
             columnspacing=0.8,
         )
 
+    weights = [est["weight"][r][~np.isnan(est["cell"][r])] for est, r, _ in rows]
     caption = (
         "Jamming power of the data cells of one PRB in one slot, (a) under a block jammer that "
         f"hits every data symbol and (b) under a hopping jammer that hits {hits[row]} of them "
         f"({jsr_db:+g} dB JSR, TDL-C, 15 dB SNR). The bars show the power that reached each "
-        "cell, the circles each cell's own estimate, the dashed line the PRB average and the "
-        "squares the shrinkage estimate, all in units of the jammer's power per resource element, "
-        f"with jammed symbols shaded and the DMRS symbol {CFG.dmrs_symbol} left out."
+        "cell, the circles each cell's own estimate with one standard error, the dashed line the "
+        "PRB average and the squares the shrinkage estimate, all in units of the jammer's power "
+        "per resource element, with jammed symbols shaded and the DMRS symbol "
+        f"{CFG.dmrs_symbol} left out. Arrows show how far shrinkage moves each estimate, and the "
+        "bars below give the weight that each cell keeps of its own estimate, at most "
+        f"{weights[0].max():.2f} in (a) and between {weights[1].min():.2f} and "
+        f"{weights[1].max():.2f} in (b)."
     )
     return fig, caption
 
@@ -1817,6 +2012,7 @@ FIGURES = {
     "jamming_estimates": jamming_estimates,
     "attack_maps": attack_maps,
     "shrinkage_example": shrinkage_example,
+    "pilot_weights": pilot_weights,
     "after_decoding": after_decoding,
     "system_views": system_views,
     "data_aided_passes": data_aided_passes,

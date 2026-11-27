@@ -1,0 +1,25 @@
+dmrs,step,steps,what,real_macs,edge_messages,ms,pilots,subspace_dim,prior_dim
+1,pilots,1-3,"LS values, residuals and pilot weights",10368,,0.12395851081237197,72,18,21
+1,lmmse,4,LMMSE channel estimate with pilot weights,3587328,,1.3878955214750022,72,18,21
+1,lmmse_lowrank,4,The same estimate in the delay subspace,425376,,0.23400000645779073,72,18,21
+1,lmmse_fixed,4,LMMSE with a filter fixed per allocation (reference),41472,,0.01300001167692244,72,18,21
+1,shrinkage,5-6,Excess power and shrinkage,18720,,0.3604374942369759,72,18,21
+1,llr,7,Equalization and LLRs,,,1.0371670359745622,72,18,21
+1,decoding,7,LDPC decoding (reference),,606080,18.13285399111919,72,18,21
+1,features,det.,Features of the U-Net,,,0.3892499953508377,72,18,21
+1,unet,det.,U-Net forward pass,5451264,,0.5813330062665045,72,18,21
+1,unet_frozen,det.,"U-Net forward pass, frozen graph",5451264,,0.451520987553522,72,18,21
+1,receiver,1-7,Whole receiver without a map,,,21.3113744975999,72,18,21
+1,baseline,,Baseline receiver (reference),,,19.68512500752695,72,18,21
+2,pilots,1-3,"LS values, residuals and pilot weights",20736,,0.17558300169184804,144,18,21
+2,lmmse,4,LMMSE channel estimate with pilot weights,16174080,,3.204333013854921,144,18,21
+2,lmmse_lowrank,4,The same estimate in the delay subspace,558432,,0.24745799601078033,144,18,21
+2,lmmse_fixed,4,LMMSE with a filter fixed per allocation (reference),82944,,0.025500019546598196,144,18,21
+2,shrinkage,5-6,Excess power and shrinkage,17280,,0.35056250635534525,144,18,21
+2,llr,7,Equalization and LLRs,,,1.0273749940097332,144,18,21
+2,decoding,7,LDPC decoding (reference),,574400,17.1305000258144,144,18,21
+2,features,det.,Features of the U-Net,,,0.45360453077591956,144,18,21
+2,unet,det.,U-Net forward pass,5451264,,0.5807915003970265,144,18,21
+2,unet_frozen,det.,"U-Net forward pass, frozen graph",5451264,,0.450624997029081,144,18,21
+2,receiver,1-7,Whole receiver without a map,,,22.11597899440676,144,18,21
+2,baseline,,Baseline receiver (reference),,,18.573875509900972,144,18,21

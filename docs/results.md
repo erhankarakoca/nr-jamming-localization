@@ -2443,3 +2443,103 @@ Two-DMRS sweeps (BLER in percent, one row per JSR from -9 to +9 dB).
 **For the paper.** `conference-v11.tex` on Overleaf drops Tables II and III, moves their results into
 the text with paired intervals, and shows Fig. 5 in two rows. Table I gives F1 and false alarms with
 one and two DMRS symbols for QPSK, 16-QAM and 64-QAM. The Times build is six pages.
+
+## 31. Pictures of the method and the cost of every step (paper v12)
+
+`plan-v12.md`. The author could follow the equations of the pilot weights and of shrinkage but
+could not picture them, and asked for the cost and the processing time of the method and how it
+fits current 3GPP work. Everything here runs on the Mac. Results are in `results/v12`.
+
+**Pilot weights on one slot** (`figures.pilot_weights`, `results/v12/figures/pilot_weights.pdf`).
+QPSK, TDL-C, 15 dB SNR, pilot-only jamming of PRBs 10 to 13 at +6 dB. The jammed PRBs have
+residuals of 20.3 to 25.6 dB, the others -2.3 to 6.6 dB. The normalized squared error of the
+LMMSE estimate on the jammed PRBs is -1.1 dB with every pilot trusted alike and -8.7 dB with the
+pilot weights. On the other PRBs it is -16.3 and -25.5 dB, because without weights the jammed
+pilots leak into the estimate of their neighbours. At 0 dB JSR the same numbers are -7.1 and
+-13.3 dB on the jammed PRBs and -20.7 and -25.8 dB on the others.
+
+**Shrinkage with its weights** (`figures.shrinkage_example`). The figure now draws the standard
+error of every cell estimate, an arrow from each estimate to its shrunk value and the weight
+`alpha` of every cell, taken from the receiver's own code (`MapAwareReceiver._shrinkage`). In the
+row of the block jammer every weight is 0. In the row of the hopping jammer the weights lie between
+0.60 and 1.00, and the 0.60 belongs to the strongest jammed cell, whose estimate has the largest
+standard error (3.0 is pulled to 2.0 against a true 3.2).
+
+**Cost per slot** (`experiments.complexity`, `results/v12/complexity/complexity.csv`). 12 PRBs,
+QPSK at 8 dB, hopping pilot + data at +9 dB, batch of one, median of 200 runs on one core of the
+M1 Pro. Counts are real multiply-accumulates (a complex one counts four), LDPC decoding is counted in
+messages along the edges (15 152 edges, 20 iterations, both directions).
+
+| Steps | What | MACs, 1 DMRS | ms, 1 DMRS | MACs, 2 DMRS | ms, 2 DMRS |
+| --- | --- | --- | --- | --- | --- |
+| 1-3 | LS values, residuals and pilot weights | 10 368 | 0.124 | 20 736 | 0.176 |
+| 4 | LMMSE channel estimate with pilot weights | 3 587 328 | 1.388 | 16 174 080 | 3.204 |
+| 4 | The same estimate in the delay subspace | 425 376 | 0.234 | 558 432 | 0.247 |
+| 4 | LMMSE with a filter fixed per allocation | 41 472 | 0.013 | 82 944 | 0.026 |
+| 5-6 | Excess power and shrinkage | 18 720 | 0.360 | 17 280 | 0.351 |
+| 7 | Equalization and LLRs | | 1.037 | | 1.027 |
+| 7 | LDPC decoding | 606 080 msg | 18.133 | 574 400 msg | 17.131 |
+| det. | Features of the U-Net | | 0.389 | | 0.454 |
+| det. | U-Net forward pass | 5 451 264 | 0.581 | 5 451 264 | 0.581 |
+| det. | U-Net forward pass, frozen graph | 5 451 264 | 0.452 | 5 451 264 | 0.451 |
+| 1-7 | Whole receiver without a map | | 21.311 | | 22.116 |
+| | Baseline receiver | | 19.685 | | 18.574 |
+
+Readings.
+
+- **The channel estimate is the costly step, and it need not be.** Pilot weights change every slot,
+  so the full LMMSE solve (72 x 72 with one DMRS symbol, 144 x 144 with two, plus 144 right-hand
+  sides for the error variance) runs every slot. The prior correlation has only 21 eigenvalues
+  above 1e-9 of its trace for 12 PRBs. `recovery.lmmse_lowrank` computes the same estimate in that
+  subspace (a 21 x 21 solve) and matches the full solve to a relative squared error of about 1e-16,
+  also with dropped pilots (tested). It needs 8 times fewer MACs with one DMRS symbol and 29 times
+  fewer with two. The BLER runs of the paper use the full solve.
+- **What the receiver adds.** Steps 1 to 6 with the low-rank estimate take 0.45 million MACs per
+  slot (0.60 million with two DMRS symbols). LDPC decoding of the same slot passes 0.61 million
+  edge messages. In this implementation the whole receiver without a map is 8% slower than the
+  baseline receiver (21.3 against 19.7 ms), and LDPC decoding takes 18 ms of either.
+- **The U-Net** takes 5.45 million MACs, 66 553 parameters, and 0.84 ms for its features and frozen
+  forward pass on one core, more than a 0.5 ms slot. A gNB would pipeline it or use an accelerator.
+
+**Detection rate against the JSR** (`experiments.detection_curves`, three seeds of the v11 U-Net,
+threshold from `val_all`. The EVM threshold from `val`, as in the decoding runs). Pd over the jammed
+cells inside the allocation.
+
+| Grid | Cells | -15 dB | -9 dB | -3 dB | +3 dB | +9 dB |
+| --- | --- | --- | --- | --- | --- | --- |
+| U-Net, QPSK block | DMRS (pilot only) | 0.497 | 0.821 | 0.950 | 0.990 | 0.996 |
+| U-Net, QPSK block, 2 DMRS | DMRS | 0.569 | 0.862 | 0.965 | 0.988 | 0.995 |
+| U-Net, QPSK hopping | DMRS | 0.484 | 0.817 | 0.956 | 0.987 | 0.997 |
+| EVM threshold, QPSK block | DMRS | 0 | 0 | 0 | 0 | 0 |
+| U-Net, QPSK block | data (data only) | 0.719 | 0.928 | 0.991 | 0.996 | 0.999 |
+| U-Net, QPSK block, 2 DMRS | data | 0.704 | 0.944 | 0.993 | 0.998 | 1.000 |
+| U-Net, QPSK hopping | data | 0.682 | 0.929 | 0.976 | 0.994 | 0.998 |
+| U-Net, pulsed (unseen) | data | 0.612 | 0.902 | 0.978 | 0.993 | 0.997 |
+| EVM threshold, QPSK block | data | 0.001 | 0.046 | 0.219 | 0.480 | 0.760 |
+
+The EVM numbers agree with section 2 (0, 0.04, 0.21, 0.43 at -15 to +3 dB), and the U-Net's pilot
+Pd at -15 dB agrees with section 30 (0.50 and 0.58).
+
+**3GPP and O-RAN context**, checked against the documents themselves (27 Nov).
+
+- TR 38.913 V19.0.0 says the RAN design "shall ensure resilience against jamming". O-RAN WG11
+  (ETSI TR 104 106 V3.0.0) lists T-RADIO-01, disruption through radio jamming, sniffing and
+  spoofing.
+- TR 38.843 V18.0.0 clause 4.3 calls collaboration level x "implementation-based only AI/ML
+  algorithms without information exchange". Clause 6.1 asks for complexity in real-valued
+  operations (TOPs, FLOPs, MACs) and real-valued parameters. Its model monitoring includes drift
+  and out-of-distribution detection of the input and output data.
+- Draft TR 38.760-1 V0.8.0 (6G radio, RAN1) studies AI-based PUSCH receivers for DMRS overhead
+  reduction and notes that, for a given low-overhead DMRS pattern, the type of receiver (AI or
+  not) at the network is transparent to the UE.
+- O-RAN fronthaul (ETSI TS 103 859 V17.1.0, clause 9.2.2.4) lets the O-RU report interference plus
+  noise for allocated PRBs as one value per PRB, measured on the PUSCH DMRS after subtracting the
+  useful signal, for one symbol or averaged over several. No 3GPP or O-RAN measurement covers the
+  data symbols cell by cell.
+- InterfO-RAN (MobiHoc 2025, DOI 10.1145/3704413.3764454) detects uplink interference from I/Q
+  samples with a CNN on a GPU next to NVIDIA Aerial in under 650 us.
+
+**For the paper.** `conference-v12.tex` adds the pilot-weights figure (Fig. 3), the redrawn
+shrinkage figure (Fig. 4), the cost subsection with Table II and the low-rank estimate (8), the
+detection curves (Fig. 7), the 3GPP and O-RAN sentences and a third contribution. The Times build
+is eight pages.
