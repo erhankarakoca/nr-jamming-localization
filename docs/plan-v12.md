@@ -76,3 +76,23 @@ start of Section III.
 - The excess power is defined as the received power minus the expected power of the user's
   signal and the noise. The old phrase about what the signal and the noise do not explain is
   gone from v12 and the README.
+
+## Style pass (conference-v13.tex)
+
+After reading v12, the author asked for prose that reads naturally and for results that interpret
+rather than list numbers. `conference-v13.tex` (Overleaf 68461be) keeps every figure, table,
+equation and the algorithm of v12 and rewrites the prose by the rules under "Flow and results" in
+[writing-guide.md](writing-guide.md). Codex critiqued v12 first and then checked v13 against
+section 30 of [results.md](results.md) and the receiver code. The check also corrected three
+statements that v12 still has.
+
+- The baseline fails on about 0.8% of the blocks without a jammer only on random allocations. On
+  the fixed allocation of PRBs 6 to 17 it fails on 0.56% to 0.59%, so v13 says "fewer than 1%".
+- A point pooled over three seeds does not always rest on 210 errors or 30 720 slots, because the
+  seeds stop at different times (188 errors in 29 632 slots for two-DMRS hopping at -3 dB). v13
+  gives only the stopping rule of each seed.
+- The PRB-resolution true map marks every data cell of a PRB in which any data cell is jammed and
+  keeps the DMRS flags. It does not mark every cell of the PRB.
+
+The Times build of v13 has nine pages, the ninth holding only references. The abstract has about
+250 words (212 in v12).
