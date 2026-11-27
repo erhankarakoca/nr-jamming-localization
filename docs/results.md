@@ -2541,5 +2541,5 @@ Pd at -15 dB agrees with section 30 (0.50 and 0.58).
 
 **For the paper.** `conference-v12.tex` adds the pilot-weights figure (Fig. 3), the redrawn
 shrinkage figure (Fig. 4), the cost subsection with Table II and the low-rank estimate (8), the
-detection curves (Fig. 7), the 3GPP and O-RAN sentences and a third contribution. The Times build
-is eight pages.
+detection curves (Fig. 7), the 3GPP and O-RAN sentences, a third contribution and Algorithm 1, the
+receiver for one slot with the equation of every step. The Times build is eight pages.

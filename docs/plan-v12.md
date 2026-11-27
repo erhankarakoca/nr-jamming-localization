@@ -23,8 +23,10 @@ The ResNet stays out. `conference-v12.tex` starts as a copy of v11, so v11 stays
 | Related work set side by side (new table) | paper | left out, four works readable only as abstracts |
 | One plain sentence before each equation block, subsection renamed "Shrinkage Along the PRB" | paper | done |
 
-An algorithm box would repeat the numbered steps of Fig. 1 and the cost table, so the cost table
-lists the steps by the same numbers instead.
+An algorithm box was first left out because Fig. 1 and the cost table already number the steps.
+After reading v12 the author asked for one. Algorithm 1 lists the steps for one slot with the
+equation of each and the two lines a map changes, and it replaces the overview paragraph at the
+start of Section III.
 
 ## Decisions
 
@@ -70,4 +72,7 @@ lists the steps by the same numbers instead.
 - The cost table showed that the full LMMSE solve with pilot weights is the costliest step of the
   receiver. `recovery.lmmse_lowrank` gives the same estimate in the delay subspace with 8 to 29
   times fewer operations. The BLER runs still use the full solve.
-- The Times build of `conference-v12.tex` has eight pages.
+- The Times build of `conference-v12.tex` has eight pages, also with Algorithm 1.
+- The excess power is defined as the received power minus the expected power of the user's
+  signal and the noise. The old phrase about what the signal and the noise do not explain is
+  gone from v12 and the README.
